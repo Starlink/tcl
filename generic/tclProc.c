@@ -6,11 +6,12 @@
  *
  * Copyright (c) 1987-1993 The Regents of the University of California.
  * Copyright (c) 1994-1998 Sun Microsystems, Inc.
+ * Copyright (c) 2007 Daniel A. Steffen <das@users.sourceforge.net>
  *
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclProc.c,v 1.44.2.2 2004/05/02 21:07:16 msofer Exp $
+ * RCS: @(#) $Id: tclProc.c,v 1.44.2.7 2007/09/13 15:28:17 das Exp $
  */
 
 #include "tclInt.h"
@@ -25,6 +26,10 @@ static void	ProcBodyFree _ANSI_ARGS_((Tcl_Obj *objPtr));
 static int	ProcBodySetFromAny _ANSI_ARGS_((Tcl_Interp *interp,
 		Tcl_Obj *objPtr));
 static void	ProcBodyUpdateString _ANSI_ARGS_((Tcl_Obj *objPtr));
+static int	ProcCompileProc _ANSI_ARGS_((Tcl_Interp *interp,
+		    Proc *procPtr, Tcl_Obj *bodyPtr, Namespace *nsPtr,
+		    CONST char *description, CONST char *procName,
+		    Proc **procPtrPtr));
 static  int	ProcessProcResultCode _ANSI_ARGS_((Tcl_Interp *interp,
 		    char *procName, int nameLen, int returnCode));
 static int	TclCompileNoOp _ANSI_ARGS_((Tcl_Interp *interp,
@@ -148,6 +153,65 @@ Tcl_ProcObjCmd(dummy, interp, objc, objv)
     
     procPtr->cmdPtr = (Command *) cmd;
 
+#ifdef TCL_TIP280
+    /* TIP #280 Remember the line the procedure body is starting on. In a
+     * Byte code context we ask the engine to provide us with the necessary
+     * information. This is for the initialization of the byte code compiler
+     * when the body is used for the first time.
+     */
+
+    if (iPtr->cmdFramePtr) {
+        CmdFrame context = *iPtr->cmdFramePtr;
+
+	if (context.type == TCL_LOCATION_BC) {
+	    TclGetSrcInfoForPc (&context);
+	    /* May get path in context */
+	} else if (context.type == TCL_LOCATION_SOURCE) {
+	    /* context now holds another reference */
+	    Tcl_IncrRefCount (context.data.eval.path);
+	}
+
+	/* type == TCL_LOCATION_PREBC implies that 'line' is NULL here!  We
+	 * cannot assume that 'line' is valid here, we have to check. If the
+	 * outer context is an eval (bc, prebc, eval) we do not save any
+	 * information. Counting relative to the beginning of the proc body is
+	 * more sensible than counting relative to the outer eval block.
+	 */
+
+	if ((context.type == TCL_LOCATION_SOURCE) &&
+	    context.line &&
+	    (context.nline >= 4) &&
+	    (context.line [3] >= 0)) {
+	    int       new;
+	    CmdFrame* cfPtr = (CmdFrame*) ckalloc (sizeof (CmdFrame));
+
+	    cfPtr->level    = -1;
+	    cfPtr->type     = context.type;
+	    cfPtr->line     = (int*) ckalloc (sizeof (int));
+	    cfPtr->line [0] = context.line [3];
+	    cfPtr->nline    = 1;
+	    cfPtr->framePtr = NULL;
+	    cfPtr->nextPtr  = NULL;
+
+	    if (context.type == TCL_LOCATION_SOURCE) {
+	        cfPtr->data.eval.path = context.data.eval.path;
+		/* Transfer of reference. The reference going away (release of
+		 * the context) is replaced by the reference in the
+		 * constructed cmdframe */
+	    } else {
+	        cfPtr->type = TCL_LOCATION_EVAL;
+		cfPtr->data.eval.path = NULL;
+	    }
+
+	    cfPtr->cmd.str.cmd = NULL;
+	    cfPtr->cmd.str.len = 0;
+
+	    Tcl_SetHashValue (Tcl_CreateHashEntry (iPtr->linePBodyPtr,
+						   (char*) procPtr, &new),
+			      cfPtr);
+	}
+    }
+#endif
 
     /*
      * Optimize for noop procs: if the body is not precompiled (like a TclPro
@@ -902,7 +966,7 @@ TclObjInterpProc(clientData, interp, objc, objv)
     Tcl_Obj *CONST objv[];	 /* Argument value objects. */
 {
     Interp *iPtr = (Interp *) interp;
-    register Proc *procPtr = (Proc *) clientData;
+    Proc *procPtr = (Proc *) clientData;
     Namespace *nsPtr = procPtr->cmdPtr->nsPtr;
     CallFrame frame;
     register CallFrame *framePtr = &frame;
@@ -935,8 +999,8 @@ TclObjInterpProc(clientData, interp, objc, objv)
      * while compiling.
      */
 
-    result = TclProcCompileProc(interp, procPtr, procPtr->bodyPtr, nsPtr,
-	    "body of proc", procName);
+    result = ProcCompileProc(interp, procPtr, procPtr->bodyPtr, nsPtr,
+	    "body of proc", procName, &procPtr);
     
     if (result != TCL_OK) {
         return result;
@@ -1095,9 +1159,35 @@ TclObjInterpProc(clientData, interp, objc, objv)
     }
 #endif /*TCL_COMPILE_DEBUG*/
 
+    if (TCL_DTRACE_PROC_ARGS_ENABLED()) {
+	char *a[10];
+	int i = 0;
+
+	while (i < 10) {
+	    a[i] = i < objc ? TclGetString(objv[i]) : NULL; i++;
+	}
+	TCL_DTRACE_PROC_ARGS(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7],
+		a[8], a[9]);
+    }
+
     iPtr->returnCode = TCL_OK;
     procPtr->refCount++;
+    if (TCL_DTRACE_PROC_ENTRY_ENABLED()) {
+	TCL_DTRACE_PROC_ENTRY(TclGetString(objv[0]), objc - 1,
+		(Tcl_Obj **)(objv + 1));
+    }
+#ifndef TCL_TIP280
     result = TclCompEvalObj(interp, procPtr->bodyPtr);
+#else
+    /* TIP #280: No need to set the invoking context here. The body has
+     * already been compiled, so the part of CompEvalObj using it is bypassed.
+     */
+
+    result = TclCompEvalObj(interp, procPtr->bodyPtr, NULL, 0);
+#endif
+    if (TCL_DTRACE_PROC_RETURN_ENABLED()) {
+	TCL_DTRACE_PROC_RETURN(TclGetString(objv[0]), result);
+    }
     procPtr->refCount--;
     if (procPtr->refCount <= 0) {
 	TclProcCleanupProc(procPtr);
@@ -1107,6 +1197,14 @@ TclObjInterpProc(clientData, interp, objc, objv)
 	result = ProcessProcResultCode(interp, procName, nameLen, result);
     }
     
+    if (TCL_DTRACE_PROC_RESULT_ENABLED()) {
+	Tcl_Obj *r;
+
+	r = Tcl_GetObjResult(interp);
+	TCL_DTRACE_PROC_RESULT(TclGetString(objv[0]), result,
+		TclGetString(r), r);
+    }
+
     /*
      * Pop and free the call frame for this procedure invocation, then
      * free the compiledLocals array if malloc'ed storage was used.
@@ -1153,11 +1251,31 @@ TclProcCompileProc(interp, procPtr, bodyPtr, nsPtr, description, procName)
     CONST char *description;	/* string describing this body of code. */
     CONST char *procName;	/* Name of this procedure. */
 {
+    return ProcCompileProc(interp, procPtr, bodyPtr, nsPtr,
+	    description, procName, NULL);
+}
+
+static int
+ProcCompileProc(interp, procPtr, bodyPtr, nsPtr, description,
+		procName, procPtrPtr)
+    Tcl_Interp *interp;		/* Interpreter containing procedure. */
+    Proc *procPtr;		/* Data associated with procedure. */
+    Tcl_Obj *bodyPtr;		/* Body of proc. (Usually procPtr->bodyPtr,
+ 				 * but could be any code fragment compiled
+ 				 * in the context of this procedure.) */
+    Namespace *nsPtr;		/* Namespace containing procedure. */
+    CONST char *description;	/* string describing this body of code. */
+    CONST char *procName;	/* Name of this procedure. */
+    Proc **procPtrPtr;		/* points to storage where a replacement
+				 * (Proc *) value may be written, when
+				 * appropriate */
+{
     Interp *iPtr = (Interp*)interp;
-    int result;
+    int i, result;
     Tcl_CallFrame frame;
     Proc *saveProcPtr;
     ByteCode *codePtr = (ByteCode *) bodyPtr->internalRep.otherValuePtr;
+    CompiledLocal *localPtr;
  
     /*
      * If necessary, compile the procedure's body. The compiler will
@@ -1223,15 +1341,90 @@ TclProcCompileProc(interp, procPtr, bodyPtr, nsPtr, description, procName)
  	 *   proper namespace context, so that the byte codes are
  	 *   compiled in the appropriate class context.
  	 */
- 
+
  	saveProcPtr = iPtr->compiledProcPtr;
+
+	if (procPtrPtr != NULL && procPtr->refCount > 1) {
+	    Tcl_Command token;
+	    Tcl_CmdInfo info;
+	    Proc *new = (Proc *) ckalloc(sizeof(Proc));
+
+	    new->iPtr = procPtr->iPtr;
+	    new->refCount = 1;
+	    new->cmdPtr = procPtr->cmdPtr;
+	    token = (Tcl_Command) new->cmdPtr;
+	    new->bodyPtr = Tcl_DuplicateObj(bodyPtr);
+	    bodyPtr = new->bodyPtr;
+	    Tcl_IncrRefCount(bodyPtr);
+	    new->numArgs = procPtr->numArgs;
+
+	    new->numCompiledLocals = new->numArgs;
+	    new->firstLocalPtr = NULL;
+	    new->lastLocalPtr = NULL;
+	    localPtr = procPtr->firstLocalPtr;
+	    for (i = 0; i < new->numArgs; i++, localPtr = localPtr->nextPtr) {
+		CompiledLocal *copy = (CompiledLocal *) ckalloc((unsigned)
+			(sizeof(CompiledLocal) -sizeof(localPtr->name)
+			 + localPtr->nameLength + 1));
+		if (new->firstLocalPtr == NULL) {
+		    new->firstLocalPtr = new->lastLocalPtr = copy;
+		} else {
+		    new->lastLocalPtr->nextPtr = copy;
+		    new->lastLocalPtr = copy;
+		}
+		copy->nextPtr = NULL;
+		copy->nameLength = localPtr->nameLength;
+		copy->frameIndex = localPtr->frameIndex;
+		copy->flags = localPtr->flags;
+		copy->defValuePtr = localPtr->defValuePtr;
+		if (copy->defValuePtr) {
+		    Tcl_IncrRefCount(copy->defValuePtr);
+		}
+		copy->resolveInfo = localPtr->resolveInfo;
+		strcpy(copy->name, localPtr->name);
+	    }
+
+
+	    /* Reset the ClientData */
+	    Tcl_GetCommandInfoFromToken(token, &info);
+	    if (info.objClientData == (ClientData) procPtr) {
+	        info.objClientData = (ClientData) new;
+	    }
+	    if (info.clientData == (ClientData) procPtr) {
+	        info.clientData = (ClientData) new;
+	    }
+	    if (info.deleteData == (ClientData) procPtr) {
+	        info.deleteData = (ClientData) new;
+	    }
+	    Tcl_SetCommandInfoFromToken(token, &info);
+
+	    procPtr->refCount--;
+	    *procPtrPtr = procPtr = new;
+	}
  	iPtr->compiledProcPtr = procPtr;
  
  	result = Tcl_PushCallFrame(interp, &frame,
 		(Tcl_Namespace*)nsPtr, /* isProcCallFrame */ 0);
  
  	if (result == TCL_OK) {
+#ifdef TCL_TIP280
+	    /* TIP #280. We get the invoking context from the cmdFrame
+	     * which was saved by 'Tcl_ProcObjCmd' (using linePBodyPtr).
+	     */
+
+	    Tcl_HashEntry* hePtr = Tcl_FindHashEntry (iPtr->linePBodyPtr, (char *) procPtr);
+
+	    /* Constructed saved frame has body as word 0. See Tcl_ProcObjCmd.
+	     */
+	    iPtr->invokeWord        = 0;
+	    iPtr->invokeCmdFramePtr = (hePtr
+				       ? (CmdFrame*) Tcl_GetHashValue (hePtr)
+				       : NULL);
+#endif
 	    result = tclByteCodeType.setFromAnyProc(interp, bodyPtr);
+#ifdef TCL_TIP280
+	    iPtr->invokeCmdFramePtr = NULL;
+#endif
 	    Tcl_PopCallFrame(interp);
 	}
  
@@ -1263,7 +1456,6 @@ TclProcCompileProc(interp, procPtr, bodyPtr, nsPtr, description, procName)
  	    return result;
  	}
     } else if (codePtr->nsEpoch != nsPtr->resolverEpoch) {
-	register CompiledLocal *localPtr;
  	
 	/*
 	 * The resolver epoch has changed, but we only need to invalidate
@@ -1411,6 +1603,11 @@ TclProcCleanupProc(procPtr)
     Tcl_Obj *bodyPtr = procPtr->bodyPtr;
     Tcl_Obj *defPtr;
     Tcl_ResolvedVarInfo *resVarInfo;
+#ifdef TCL_TIP280
+    Tcl_HashEntry* hePtr = NULL;
+    CmdFrame*      cfPtr = NULL;
+    Interp*        iPtr  = procPtr->iPtr;
+#endif
 
     if (bodyPtr != NULL) {
 	Tcl_DecrRefCount(bodyPtr);
@@ -1435,6 +1632,28 @@ TclProcCleanupProc(procPtr)
 	localPtr = nextPtr;
     }
     ckfree((char *) procPtr);
+
+#ifdef TCL_TIP280
+    /* TIP #280. Release the location data associated with this Proc
+     * structure, if any. The interpreter may not exist (For example for
+     * procbody structurues created by tbcload.
+     */
+
+    if (!iPtr) return;
+
+    hePtr = Tcl_FindHashEntry (iPtr->linePBodyPtr, (char *) procPtr);
+    if (!hePtr) return;
+
+    cfPtr = (CmdFrame*) Tcl_GetHashValue (hePtr);
+
+    if (cfPtr->type == TCL_LOCATION_SOURCE) {
+        Tcl_DecrRefCount (cfPtr->data.eval.path);
+	cfPtr->data.eval.path = NULL;
+    }
+    ckfree ((char*) cfPtr->line); cfPtr->line = NULL;
+    ckfree ((char*) cfPtr);
+    Tcl_DeleteHashEntry (hePtr);
+#endif
 }
 
 /*
@@ -1464,19 +1683,24 @@ TclUpdateReturnInfo(iPtr)
 {
     int code;
     char *errorCode;
+    Tcl_Obj *objPtr;
 
     code = iPtr->returnCode;
     iPtr->returnCode = TCL_OK;
     if (code == TCL_ERROR) {
 	errorCode = ((iPtr->errorCode != NULL) ? iPtr->errorCode : "NONE");
+	objPtr = Tcl_NewStringObj(errorCode, -1);
+	Tcl_IncrRefCount(objPtr);
 	Tcl_ObjSetVar2((Tcl_Interp *) iPtr, iPtr->execEnvPtr->errorCode,
-	        NULL, Tcl_NewStringObj(errorCode, -1),
-		TCL_GLOBAL_ONLY);
+	        NULL, objPtr, TCL_GLOBAL_ONLY);
+	Tcl_DecrRefCount(objPtr);
 	iPtr->flags |= ERROR_CODE_SET;
 	if (iPtr->errorInfo != NULL) {
+	    objPtr = Tcl_NewStringObj(iPtr->errorInfo, -1);
+	    Tcl_IncrRefCount(objPtr);
 	    Tcl_ObjSetVar2((Tcl_Interp *) iPtr, iPtr->execEnvPtr->errorInfo,
-	            NULL, Tcl_NewStringObj(iPtr->errorInfo, -1),
-		    TCL_GLOBAL_ONLY);
+		    NULL, objPtr, TCL_GLOBAL_ONLY);
+	    Tcl_DecrRefCount(objPtr);
 	    iPtr->flags |= ERR_IN_PROGRESS;
 	}
     }
@@ -1735,6 +1959,12 @@ TclCompileNoOp(interp, parsePtr, envPtr)
     TclEmitPush(TclRegisterLiteral(envPtr, "", 0, /*onHeap*/ 0), envPtr);
     return TCL_OK;
 }
-
-
+
+/*
+ * Local Variables:
+ * mode: c
+ * c-basic-offset: 4
+ * fill-column: 78
+ * End:
+ */
 

@@ -14,7 +14,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclTest.c,v 1.62.2.9 2004/08/16 14:18:25 msofer Exp $
+ * RCS: @(#) $Id: tclTest.c,v 1.62.2.15 2008/03/07 20:26:22 dgp Exp $
  */
 
 #define TCL_TEST
@@ -208,8 +208,6 @@ static int		TestcmdtokenCmd _ANSI_ARGS_((ClientData dummy,
 			    Tcl_Interp *interp, int argc, CONST char **argv));
 static int		TestcmdtraceCmd _ANSI_ARGS_((ClientData dummy,
 			    Tcl_Interp *interp, int argc, CONST char **argv));
-static int		TestchmodCmd _ANSI_ARGS_((ClientData dummy,
-			    Tcl_Interp *interp, int argc, CONST char **argv));
 static int		TestcreatecommandCmd _ANSI_ARGS_((ClientData dummy,
 			    Tcl_Interp *interp, int argc, CONST char **argv));
 static int		TestdcallCmd _ANSI_ARGS_((ClientData dummy,
@@ -242,6 +240,9 @@ static int		TestexithandlerCmd _ANSI_ARGS_((ClientData dummy,
 			    Tcl_Interp *interp, int argc, CONST char **argv));
 static int		TestexprlongCmd _ANSI_ARGS_((ClientData dummy,
 			    Tcl_Interp *interp, int argc, CONST char **argv));
+static int		TestexprlongobjCmd _ANSI_ARGS_((ClientData dummy,
+			    Tcl_Interp *interp, int objc,
+			    Tcl_Obj *CONST objv[]));
 static int		TestexprparserObjCmd _ANSI_ARGS_((ClientData dummy,
 			    Tcl_Interp *interp, int objc,
 			    Tcl_Obj *CONST objv[]));
@@ -550,7 +551,12 @@ Tcltest_Init(interp)
 	"-appinitprocclosestderr", "-appinitprocsetrcfile", (char *) NULL
     };
 
+#ifndef TCL_TIP268
     if (Tcl_PkgProvide(interp, "Tcltest", TCL_VERSION) == TCL_ERROR) {
+#else
+    /* TIP #268: Full patchlevel instead of just major.minor */
+    if (Tcl_PkgProvide(interp, "Tcltest", TCL_PATCH_LEVEL) == TCL_ERROR) {
+#endif
         return TCL_ERROR;
     }
 
@@ -581,8 +587,6 @@ Tcltest_Init(interp)
             (ClientData) 0, (Tcl_CmdDeleteProc *) NULL);
     Tcl_CreateCommand(interp, "testchannelevent", TestChannelEventCmd,
             (ClientData) 0, (Tcl_CmdDeleteProc *) NULL);
-    Tcl_CreateCommand(interp, "testchmod", TestchmodCmd,
-            (ClientData) 0, (Tcl_CmdDeleteProc *) NULL);
     Tcl_CreateCommand(interp, "testcmdtoken", TestcmdtokenCmd, (ClientData) 0,
 	    (Tcl_CmdDeleteProc *) NULL);
     Tcl_CreateCommand(interp, "testcmdinfo", TestcmdinfoCmd, (ClientData) 0,
@@ -611,6 +615,8 @@ Tcltest_Init(interp)
     Tcl_CreateCommand(interp, "testexithandler", TestexithandlerCmd,
             (ClientData) 0, (Tcl_CmdDeleteProc *) NULL);
     Tcl_CreateCommand(interp, "testexprlong", TestexprlongCmd,
+            (ClientData) 0, (Tcl_CmdDeleteProc *) NULL);
+    Tcl_CreateObjCommand(interp, "testexprlongobj", TestexprlongobjCmd,
             (ClientData) 0, (Tcl_CmdDeleteProc *) NULL);
     Tcl_CreateObjCommand(interp, "testexprparser", TestexprparserObjCmd,
 	    (ClientData) 0, (Tcl_CmdDeleteProc *) NULL);
@@ -1164,10 +1170,25 @@ TestcmdtraceCmd(dummy, interp, argc, argv)
 	} else {
 	    return result;
 	}
-	
+    } else if ( strcmp(argv[1], "doubletest" ) == 0 ) {
+	Tcl_Trace t1, t2;
+
+	Tcl_DStringInit(&buffer);
+	t1 = Tcl_CreateTrace(interp, 1,
+		(Tcl_CmdTraceProc *) CmdTraceProc, (ClientData) &buffer);
+	t2 = Tcl_CreateTrace(interp, 50000,
+		(Tcl_CmdTraceProc *) CmdTraceProc, (ClientData) &buffer);
+	result = Tcl_Eval(interp, argv[2]);
+	if (result == TCL_OK) {
+	    Tcl_ResetResult(interp);
+	    Tcl_AppendResult(interp, Tcl_DStringValue(&buffer), NULL);
+	}
+	Tcl_DeleteTrace(interp, t2);
+	Tcl_DeleteTrace(interp, t1);
+	Tcl_DStringFree(&buffer);
     } else {
 	Tcl_AppendResult(interp, "bad option \"", argv[1],
-			 "\": must be tracetest, deletetest or resulttest",
+			 "\": must be tracetest, deletetest, doubletest or resulttest",
 			 (char *) NULL);
 	return TCL_ERROR;
     }
@@ -2235,6 +2256,48 @@ TestexprlongCmd(clientData, interp, argc, argv)
     
     Tcl_SetResult(interp, "This is a result", TCL_STATIC);
     result = Tcl_ExprLong(interp, "4+1", &exprResult);
+    if (result != TCL_OK) {
+        return result;
+    }
+    sprintf(buf, ": %ld", exprResult);
+    Tcl_AppendResult(interp, buf, NULL);
+    return TCL_OK;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * TestexprlongobjCmd --
+ *
+ *	This procedure verifies that Tcl_ExprLongObj does not modify the
+ *	interpreter result if there is no error.
+ *
+ * Results:
+ *	A standard Tcl result.
+ *
+ * Side effects:
+ *	None.
+ *
+ *----------------------------------------------------------------------
+ */
+
+static int
+TestexprlongobjCmd(clientData, interp, objc, objv)
+    ClientData clientData;		/* Not used. */
+    Tcl_Interp *interp;			/* Current interpreter. */
+    int objc;				/* Number of arguments. */
+    Tcl_Obj *CONST *objv;		/* Argument objects. */
+{
+    long exprResult;
+    char buf[4 + TCL_INTEGER_SPACE];
+    int result;
+
+    if (objc != 2) {
+	Tcl_WrongNumArgs(interp, 1, objv, "expression");
+	return TCL_ERROR;
+    }
+    Tcl_SetResult(interp, "This is a result", TCL_STATIC);
+    result = Tcl_ExprLongObj(interp, objv[1], &exprResult);
     if (result != TCL_OK) {
         return result;
     }
@@ -3437,9 +3500,10 @@ TestregexpObjCmd(dummy, interp, objc, objv)
 			info.matches[ii].end - 1);
 	    }
 	}
+	Tcl_IncrRefCount(newPtr);
 	valuePtr = Tcl_ObjSetVar2(interp, varPtr, NULL, newPtr, 0);
+	Tcl_DecrRefCount(newPtr);
 	if (valuePtr == NULL) {
-	    Tcl_DecrRefCount(newPtr);
 	    Tcl_AppendResult(interp, "couldn't set variable \"",
 		    Tcl_GetString(varPtr), "\"", (char *) NULL);
 	    return TCL_ERROR;
@@ -3998,65 +4062,6 @@ TestpanicCmd(dummy, interp, argc, argv)
     return TCL_OK;
 }
 
-/*
- *---------------------------------------------------------------------------
- *
- * TestchmodCmd --
- *
- *	Implements the "testchmod" cmd.  Used when testing "file"
- *	command.  The only attribute used by the Mac and Windows platforms
- *	is the user write flag; if this is not set, the file is
- *	made read-only.  Otehrwise, the file is made read-write.
- *
- * Results:
- *	A standard Tcl result.
- *
- * Side effects:
- *	Changes permissions of specified files.
- *
- *---------------------------------------------------------------------------
- */
- 
-static int
-TestchmodCmd(dummy, interp, argc, argv)
-    ClientData dummy;			/* Not used. */
-    Tcl_Interp *interp;			/* Current interpreter. */
-    int argc;				/* Number of arguments. */
-    CONST char **argv;			/* Argument strings. */
-{
-    int i, mode;
-    char *rest;
-
-    if (argc < 2) {
-	usage:
-	Tcl_AppendResult(interp, "wrong # args: should be \"", argv[0],
-		" mode file ?file ...?", (char *) NULL);
-	return TCL_ERROR;
-    }
-
-    mode = (int) strtol(argv[1], &rest, 8);
-    if ((rest == argv[1]) || (*rest != '\0')) {
-	goto usage;
-    }
-
-    for (i = 2; i < argc; i++) {
-        Tcl_DString buffer;
-	CONST char *translated;
-        
-        translated = Tcl_TranslateFileName(interp, argv[i], &buffer);
-        if (translated == NULL) {
-            return TCL_ERROR;
-        }
-	if (chmod(translated, (unsigned) mode) != 0) {
-	    Tcl_AppendResult(interp, translated, ": ", Tcl_PosixError(interp),
-		    (char *) NULL);
-	    return TCL_ERROR;
-	}
-        Tcl_DStringFree(&buffer);
-    }
-    return TCL_OK;
-}
-
 static int
 TestfileCmd(dummy, interp, argc, argv)
     ClientData dummy;			/* Not used. */
@@ -4714,8 +4719,19 @@ static int PretendTclpStat(path, buf)
 #   define OUT_OF_RANGE(x) \
 	(((Tcl_WideInt)(x)) < Tcl_LongAsWide(LONG_MIN) || \
 	 ((Tcl_WideInt)(x)) > Tcl_LongAsWide(LONG_MAX))
+#if defined(__GNUC__) && __GNUC__ >= 2
+/*
+ * Workaround gcc warning of "comparison is always false due to limited range of
+ * data type" in this macro by checking max type size, and when necessary ANDing
+ * with the complement of ULONG_MAX instead of the comparison:
+ */
+#   define OUT_OF_URANGE(x) \
+	((((Tcl_WideUInt)(~ (__typeof__(x)) 0)) > (Tcl_WideUInt)ULONG_MAX) && \
+	 (((Tcl_WideUInt)(x)) & ~(Tcl_WideUInt)ULONG_MAX))
+#else
 #   define OUT_OF_URANGE(x) \
 	(((Tcl_WideUInt)(x)) > (Tcl_WideUInt)ULONG_MAX)
+#endif
 
 	/*
 	 * Perform the result-buffer overflow check manually.

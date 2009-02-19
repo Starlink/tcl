@@ -11,7 +11,7 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
-# RCS: @(#) $Id: exec.test,v 1.16.2.4 2004/10/28 00:01:06 dgp Exp $
+# RCS: @(#) $Id: exec.test,v 1.16.2.7 2006/01/16 19:31:19 rmax Exp $
 
 package require tcltest 2
 namespace import -force ::tcltest::*
@@ -402,7 +402,11 @@ test exec-10.20 {errors in exec invocation} {exec} {
 test exec-10.21 {errors in exec invocation} {exec} {
     list [catch {exec [interpreter] true | ~xyzzy_bad_user/x | false} msg] $msg
 } {1 {user "xyzzy_bad_user" doesn't exist}}
-
+test exec-10.22 {errors in exec invocation} \
+-constraints exec \
+-returnCodes 1 \
+-body {exec echo test > ~non_existent_user/foo/bar} \
+-result {user "non_existent_user" doesn't exist}
 # Commands in background.
 
 test exec-11.1 {commands in background} {exec} {
@@ -484,6 +488,51 @@ test exec-13.3 {setting errorCode variable} {exec} {
     list $x [string tolower $msg] [lindex $errorCode 0] \
 	    [string tolower [lrange $errorCode 2 end]]
 } {1 {couldn't execute "_weird_cmd_": no such file or directory} POSIX {{no such file or directory}}}
+
+test exec-13.4 {extended exit result codes} {
+    -constraints {win}
+    -setup {
+        set tmp [makeFile {exit 0x00000101} tmpfile.exec-13.4]
+    }
+    -body {
+        list [catch {exec [interpreter] $tmp} err]\
+            [lreplace $::errorCode 1 1 {}]
+    }
+    -cleanup {
+        removeFile $tmp
+    }
+    -result {1 {CHILDSTATUS {} 257}}
+}
+
+test exec-13.5 {extended exit result codes: max value} {
+    -constraints {win}
+    -setup {
+        set tmp [makeFile {exit 0x3fffffff} tmpfile.exec-13.5]
+    }
+    -body {
+        list [catch {exec [interpreter] $tmp} err]\
+            [lreplace $::errorCode 1 1 {}]
+    }
+    -cleanup {
+        removeFile $tmp
+    }
+    -result {1 {CHILDSTATUS {} 1073741823}}
+}
+
+test exec-13.6 {extended exit result codes: signalled} {   
+    -constraints {win}
+    -setup {
+        set tmp [makeFile {exit 0xffffffff} tmpfile.exec-13.6]
+    }
+    -body {
+        list [catch {exec [interpreter] $tmp} err]\
+            [lreplace $::errorCode 1 1 {}]
+    }
+    -cleanup {
+        removeFile $tmp
+    }
+    -result {1 {CHILDKILLED {} SIGABRT SIGABRT}}
+}
 
 # Switches before the first argument
 
@@ -599,6 +648,34 @@ test exec-18.1 { exec cat deals with weird file names} {exec tempNotWin} {
     removeFile $f
     set res
 } {0 contents}
+
+# Note that this test cannot be adapted to work on Windows; that platform has
+# no kernel support for an analog of O_APPEND.
+test exec-19.1 {exec >> uses O_APPEND} {
+    -constraints {exec unix}
+    -setup {
+	set tmpfile [makeFile {0} tmpfile.exec-19.1]
+    }
+    -body {
+	# Note that we have to allow for the current contents of the
+	# temporary file, which is why the result is 14 and not 12
+	exec /bin/sh -c \
+	    {for a in 1 2 3; do sleep 1; echo $a; done} >>$tmpfile &
+	exec /bin/sh -c \
+	    {for a in a b c; do sleep 1; echo $a; done} >>$tmpfile &
+	# The above two shell invokations take about 3 seconds to
+	# finish, so allow 5s (in case the machine is busy)
+	after 5000
+	# Check that no bytes have got lost through mixups with
+	# overlapping appends, which is only guaranteed to work when
+	# we set O_APPEND on the file descriptor in the [exec >>...]
+	file size $tmpfile
+    }
+    -cleanup {
+	removeFile $tmpfile
+    }
+    -result 14
+}
 
 # cleanup
 

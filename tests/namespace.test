@@ -11,7 +11,7 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
-# RCS: @(#) $Id: namespace.test,v 1.21.2.5 2004/10/28 00:01:11 dgp Exp $
+# RCS: @(#) $Id: namespace.test,v 1.21.2.10 2006/10/04 17:59:06 dgp Exp $
 
 if {[lsearch [namespace children] ::tcltest] == -1} {
     package require tcltest 2
@@ -133,6 +133,38 @@ test namespace-7.2 {Tcl_DeleteNamespace, no active call frames in ns} {
     }
     list [test_ns_2::p] [namespace delete test_ns_2]
 } {::test_ns_2 {}}
+test namespace-7.3 {recursive Tcl_DeleteNamespace, active call frames in ns} {
+    # [Bug 1355942]
+    namespace eval test_ns_2 {
+        set x 1
+	trace add variable x unset "namespace delete [namespace current];#"
+	namespace delete [namespace current]
+    }
+} {}
+test namespace-7.4 {recursive Tcl_DeleteNamespace, active call frames in ns} {
+    # [Bug 1355942]
+    namespace eval test_ns_2 {
+        proc x {} {}
+	trace add command x delete "namespace delete [namespace current];#"
+	namespace delete [namespace current]
+    }
+} {}
+test namespace-7.5 {recursive Tcl_DeleteNamespace, no active call frames in ns} {
+    # [Bug 1355942]
+    namespace eval test_ns_2 {
+        set x 1
+	trace add variable x unset "namespace delete [namespace current];#"
+    }
+    namespace delete test_ns_2
+} {}
+test namespace-7.6 {recursive Tcl_DeleteNamespace, no active call frames in ns} {
+    # [Bug 1355942]
+    namespace eval test_ns_2 {
+        proc x {} {}
+	trace add command x delete "namespace delete [namespace current];#"
+    }
+    namespace delete test_ns_2
+} {}
 
 test namespace-8.1 {TclTeardownNamespace, delete global namespace} {
     catch {interp delete test_interp}
@@ -244,7 +276,7 @@ test namespace-9.4 {Tcl_Import, simple import} {
 } {cmd1: 123}
 test namespace-9.5 {Tcl_Import, can't redefine cmd unless allowOverwrite!=0} {
     list [catch {namespace eval test_ns_import {namespace import ::test_ns_export::*}} msg] $msg
-} {1 {can't import command "cmd1": already exists}}
+} {0 {}}
 test namespace-9.6 {Tcl_Import, cmd redefinition ok if allowOverwrite!=0} {
     namespace eval test_ns_import {
         namespace import -force ::test_ns_export::*
@@ -961,7 +993,22 @@ test namespace-25.6 {NamespaceEvalCmd, error in eval'd script} {
     (in namespace eval "::test_ns_1" script line 1)
     invoked from within
 "namespace eval test_ns_1 {xxxx}"}}
+test namespace-25.7 {NamespaceEvalCmd, error in eval'd script} {
+    list [catch {namespace eval test_ns_1 {error foo bar baz}} msg] $msg $errorInfo
+} {1 foo {bar
+    (in namespace eval "::test_ns_1" script line 1)
+    invoked from within
+"namespace eval test_ns_1 {error foo bar baz}"}}
+test namespace-25.8 {NamespaceEvalCmd, error in eval'd script} knownBug {
+    list [catch {namespace eval test_ns_1 error foo bar baz} msg] $msg $errorInfo
+} {1 foo {bar
+    (in namespace eval "::test_ns_1" script line 1)
+    invoked from within
+"namespace eval test_ns_1 error foo bar baz"}}
 catch {unset v}
+test namespace-25.9 {NamespaceEvalCmd, 545325} {
+    namespace eval test_ns_1 info level 0
+} {namespace eval test_ns_1 info level 0}
 
 test namespace-26.1 {NamespaceExportCmd, no args and new ns} {
     catch {eval namespace delete [namespace children :: test_ns_*]}
@@ -1076,6 +1123,10 @@ test namespace-29.5 {NamespaceInscopeCmd, has lappend semantics} {
     list [namespace inscope test_ns_1 cmd x y z] \
          [namespace eval test_ns_1 [concat cmd [list x y z]]]
 } {{::test_ns_1::cmd: v=747, args=x y z} {::test_ns_1::cmd: v=747, args=x y z}}
+test namespace-29.6 {NamespaceInscopeCmd, 1400572} knownBug {
+    namespace inscope test_ns_1 {info level 0}
+} {namespace inscope test_ns_1 {info level 0}}
+
 
 test namespace-30.1 {NamespaceOriginCmd, bad args} {
     catch {eval namespace delete [namespace children :: test_ns_*]}

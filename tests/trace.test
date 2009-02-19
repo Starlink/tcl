@@ -11,11 +11,21 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
-# RCS: @(#) $Id: trace.test,v 1.26.2.6 2005/06/21 17:19:43 dgp Exp $
+# RCS: @(#) $Id: trace.test,v 1.26.2.18 2007/08/14 15:15:39 dgp Exp $
 
 if {[lsearch [namespace children] ::tcltest] == -1} {
     package require tcltest
     namespace import -force ::tcltest::*
+}
+
+# Used for constraining memory leak tests
+testConstraint memory [llength [info commands memory]]
+
+testConstraint testevalobjv [llength [info commands testevalobjv]]
+
+proc getbytes {} {
+    set lines [split [memory info] "\n"]
+    lindex [lindex $lines 3] 3
 }
 
 proc traceScalar {name1 name2 op} {
@@ -220,6 +230,32 @@ test trace-2.5 {trace variable writes} {
     unset x
     set info
 } {}
+test trace-2.6 {trace variable writes on compiled local} {
+    #
+    # Check correct function of whole array traces on compiled local
+    # arrays [Bug 1770591]. The corresponding function for read traces is
+    # already indirectly tested in trace-1.7
+    #
+    catch {unset x}
+    set info {}
+    proc p {} {
+        trace add variable x write traceArray
+        set x(X) willy
+    }
+    p
+    set info
+} {x X write 0 willy}
+test trace-2.7 {trace variable writes on errorInfo} -body {
+   #
+   # Check correct behaviour of write traces on errorInfo.
+   # [Bug 1773040]
+   trace add variable ::errorInfo write traceScalar
+   catch {set dne}
+   lrange [set info] 0 2
+} -cleanup {
+   # always remove trace on errorInfo otherwise further tests will fail
+   unset ::errorInfo
+} -result {::errorInfo {} write}
 
 # append no longer triggers read traces when fetching the old values of
 # variables before doing the append operation. However, lappend _does_
@@ -713,7 +749,7 @@ test trace-12.8 {errors when setting variable traces} {
     list [catch {trace add variable x(0) write traceProc} msg] $msg
 } {1 {can't trace "x(0)": variable isn't array}}
 
-# Check deleting one trace from another.
+# Check trace deletion
 
 test trace-13.1 {delete one trace from another} {
     proc delTraces {args} {
@@ -734,6 +770,52 @@ test trace-13.1 {delete one trace from another} {
     set x
     set info
 } {5 1}
+test trace-13.2 {leak when unsetting traced variable} \
+    -constraints memory -body {
+	set end [getbytes]
+	proc f args {}
+	for {set i 0} {$i < 5} {incr i} {
+	    trace add variable bepa write f
+	    set bepa a
+	    unset bepa
+	    set tmp $end
+	    set end [getbytes]
+	}
+	expr {$end - $tmp}
+    } -cleanup {
+	unset -nocomplain end i tmp
+    } -result 0
+test trace-13.3 {leak when removing traces} \
+    -constraints memory -body {
+	set end [getbytes]
+	proc f args {}
+	for {set i 0} {$i < 5} {incr i} {
+	    trace add variable bepa write f
+	    set bepa a
+	    trace remove variable bepa write f
+	    set tmp $end
+	    set end [getbytes]
+	}
+	expr {$end - $tmp}
+    } -cleanup {
+	unset -nocomplain end i tmp
+    } -result 0
+test trace-13.4 {leaks in error returns from traces} \
+    -constraints memory -body {
+	set end [getbytes]
+	for {set i 0} {$i < 5} {incr i} {
+	    set apa {a 1 b 2}
+	    set bepa [lrange $apa 0 end]
+	    trace add variable bepa write {error hej}
+	    catch {set bepa a}
+	    unset bepa
+	    set tmp $end
+	    set end [getbytes]
+	}
+	expr {$end - $tmp}
+    } -cleanup {
+	unset -nocomplain end i tmp
+    } -result 0
 
 # Check operation and syntax of "trace" command.
 
@@ -1158,6 +1240,26 @@ test trace-18.2 {namespace delete / trace vdelete combo} {
     namespace delete ::foo
     info exists ::foo::x
 } 0
+test trace-18.3 {namespace delete / trace vdelete combo, Bug \#1337229} {
+    namespace eval ::ns {}
+    trace add variable ::ns::var unset {unset ::ns::var ;#}
+    namespace delete ::ns
+} {}
+test trace-18.4 {namespace delete / trace vdelete combo, Bug \#1338280} {
+    namespace eval ::ref {}
+    set ::ref::var1 AAA
+    trace add variable ::ref::var1 unset doTrace
+    set ::ref::var2 BBB
+    trace add variable ::ref::var2 {unset} doTrace
+    proc doTrace {vtraced vidx op} {
+	global info
+	append info [catch {set ::$vtraced}][llength [info vars ::ref::*]]
+    }
+    set info {}
+    namespace delete ::ref
+    rename doTrace {}
+    set info
+} 1110
 
 # Delete arrays when done, so they can be re-used as scalars
 # elsewhere.
@@ -1165,12 +1267,12 @@ test trace-18.2 {namespace delete / trace vdelete combo} {
 catch {unset x}
 catch {unset y}
 
-test trace-18.3 {trace add command (command existence)} {
+test trace-19.0.1 {trace add command (command existence)} {
     # Just in case!
     catch {rename nosuchname ""}
     list [catch {trace add command nosuchname rename traceCommand} msg] $msg
 } {1 {unknown command "nosuchname"}}
-test trace-18.4 {trace add command (command existence in ns)} {
+test trace-19.0.2 {trace add command (command existence in ns)} {
     list [catch {trace add command nosuchns::nosuchname rename traceCommand} msg] $msg
 } {1 {unknown command "nosuchns::nosuchname"}}
 
@@ -1407,6 +1509,27 @@ test trace-20.12 {delete trace renames command} {
     list [info commands foo] [info commands bar] [info commands someothername]
 } {{} {} {}}
 
+test trace-20.13 {rename trace discards result [Bug 1355342]} {
+    proc foo {} {}
+    trace add command foo rename {set w Aha!;#}
+    list [rename foo bar] [rename bar {}]
+} {{} {}}
+test trace-20.14 {rename trace discards error result [Bug 1355342]} {
+    proc foo {} {}
+    trace add command foo rename {error}
+    list [rename foo bar] [rename bar {}]
+} {{} {}}
+test trace-20.15 {delete trace discards result [Bug 1355342]} {
+    proc foo {} {}
+    trace add command foo delete {set w Aha!;#}
+    rename foo {}
+} {}
+test trace-20.16 {delete trace discards error result [Bug 1355342]} {
+    proc foo {} {}
+    trace add command foo delete {error}
+    rename foo {}
+} {}
+
 proc foo {b} { set a $b }
 
 
@@ -1494,6 +1617,56 @@ test trace-21.8 {trace execution: leavestep} {
     trace remove execution foo {leavestep} [list traceExecute foo]
     set info
 } {{foo {set b 3} 0 3 leavestep}}
+
+test trace-21.9 {trace execution: TCL_EVAL_GLOBAL} testevalobjv {
+    trace add execution foo enter soom
+    proc ::soom args {lappend ::info SUCCESS [info level]}
+    set ::info {}
+    namespace eval test_ns_1 {
+        proc soom args {lappend ::info FAIL [info level]}
+        # [testevalobjv 1 ...] ought to produce the same
+	# results as [uplevel #0 ...].
+        testevalobjv 1 foo x
+	uplevel #0 foo x
+    }
+    namespace delete test_ns_1
+    trace remove execution foo enter soom
+    set ::info
+} {SUCCESS 1 SUCCESS 1}
+    
+test trace-21.10 {trace execution: TCL_EVAL_GLOBAL} testevalobjv {
+    trace add execution foo leave soom
+    proc ::soom args {lappend ::info SUCCESS [info level]}
+    set ::info {}
+    namespace eval test_ns_1 {
+        proc soom args {lappend ::info FAIL [info level]}
+        # [testevalobjv 1 ...] ought to produce the same
+	# results as [uplevel #0 ...].
+        testevalobjv 1 foo x
+	uplevel #0 foo x
+    }
+    namespace delete test_ns_1
+    trace remove execution foo leave soom
+    set ::info
+} {SUCCESS 1 SUCCESS 1}
+
+test trace-21.11 {trace execution and alias} -setup {
+    set res {}
+    proc ::x {} {return ::}
+    namespace eval a {}
+    proc ::a::x {} {return ::a}
+    interp alias {} y {} x
+} -body {
+    lappend res [namespace eval ::a y]
+    trace add execution ::x enter {
+      rename ::x {}
+	proc ::x {} {return ::}
+    #}
+    lappend res [namespace eval ::a y]
+} -cleanup {
+    namespace delete a
+    rename ::x {}
+} -result {:: ::}
 
 proc factorial {n} {
     if {$n != 1} { return [expr {$n * [factorial [expr {$n -1 }]]}] }
@@ -2171,6 +2344,67 @@ test trace-34.3 {Bug 1224585} {
     trace add execution foo enterstep bar
     foo
 } {}
+
+# We test here for the half-documented and currently valid interplay between
+# delete traces and namespace deletion.
+test trace-34.4 {Bug 1047286} {
+    variable x notrace
+    proc callback {old - -} {
+        variable x "$old exists: [namespace which -command $old]"
+    }
+    namespace eval ::foo {proc bar {} {}}
+    trace add command ::foo::bar delete [namespace code callback]
+    namespace delete ::foo
+    set x
+} {::foo::bar exists: ::foo::bar}
+
+test trace-34.5 {Bug 1047286} {
+    variable x notrace
+    proc callback {old - -} {
+        variable x "$old exists: [namespace which -command $old]"
+    }
+    namespace eval ::foo {proc bar {} {}}
+    trace add command ::foo::bar delete [namespace code callback]
+    namespace eval ::foo namespace delete ::foo
+    set x
+} {::foo::bar exists: }
+
+test trace-34.6 {Bug 1458266} -setup {
+    proc dummy {} {}
+    proc stepTraceHandler {cmdString args} {
+	variable log 
+	append log "[expr {[info level] - 1}]: [lindex [split $cmdString] 0]\n"
+	dummy
+	isTracedInside_2
+    }
+    proc cmdTraceHandler {cmdString args} {
+	# silent
+    }
+    proc isTracedInside_1 {} {
+	isTracedInside_2
+    }
+    proc isTracedInside_2 {} {
+	set x 2
+    }
+} -body {
+    variable log {}
+    trace add execution isTracedInside_1 enterstep stepTraceHandler
+    trace add execution isTracedInside_2 enterstep stepTraceHandler
+    isTracedInside_1
+    variable first $log
+    set log {}
+    trace add execution dummy enter cmdTraceHandler
+    isTracedInside_1
+    variable second $log
+    expr {($first eq $second) ? "ok" : "\n$first\nand\n\n$second\ndiffer"}
+} -cleanup {
+    unset -nocomplain log first second
+    rename dummy {}
+    rename stepTraceHandler {}
+    rename cmdTraceHandler {}
+    rename isTracedInside_1 {}
+    rename isTracedInside_2 {}
+} -result ok
 
 # Delete procedures when done, so we don't clash with other tests
 # (e.g. foobar will clash with 'unknown' tests).

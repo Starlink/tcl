@@ -8,7 +8,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclIOCmd.c,v 1.15.2.2 2004/07/16 22:38:37 andreas_kupries Exp $
+ * RCS: @(#) $Id: tclIOCmd.c,v 1.15.2.5 2008/04/10 20:53:48 andreas_kupries Exp $
  */
 
 #include "tclInt.h"
@@ -228,7 +228,7 @@ Tcl_GetsObjCmd(dummy, interp, objc, objv)
     int lineLen;			/* Length of line just read. */
     int mode;				/* Mode in which channel is opened. */
     char *name;
-    Tcl_Obj *resultPtr, *linePtr;
+    Tcl_Obj *linePtr;
 
     if ((objc != 2) && (objc != 3)) {
 	Tcl_WrongNumArgs(interp, 1, objv, "channelId ?varName?");
@@ -264,8 +264,7 @@ Tcl_GetsObjCmd(dummy, interp, objc, objv)
 	    Tcl_DecrRefCount(linePtr);
             return TCL_ERROR;
         }
-	resultPtr = Tcl_GetObjResult(interp);
-	Tcl_SetIntObj(resultPtr, lineLen);
+	Tcl_SetObjResult(interp, Tcl_NewIntObj(lineLen));
         return TCL_OK;
     } else {
 	Tcl_SetObjResult(interp, linePtr);
@@ -1542,6 +1541,15 @@ Tcl_FcopyObjCmd(dummy, interp, objc, objv)
 	    case FcopySize:
 		if (Tcl_GetIntFromObj(interp, objv[i+1], &toRead) != TCL_OK) {
 		    return TCL_ERROR;
+		}
+		if (toRead<0) {
+		    /*
+		     * Handle all negative sizes like -1, meaning 'copy all'.
+		     * By resetting toRead we avoid changes in the
+		     * core copying functions (which explicitly check
+		     * for -1 and crash on any other negative value).
+		     */
+		    toRead = -1;
 		}
 		break;
 	    case FcopyCommand:

@@ -14,7 +14,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclCmdMZ.c,v 1.82.2.20 2005/06/21 17:19:42 dgp Exp $
+ * RCS: @(#) $Id: tclCmdMZ.c,v 1.82.2.29 2007/06/27 17:29:22 dgp Exp $
  */
 
 #include "tclInt.h"
@@ -23,7 +23,7 @@
 #include "tclCompile.h"
 
 /*
- * Structure used to hold information about variable traces:
+ * Structures used to hold information about variable traces:
  */
 
 typedef struct {
@@ -36,6 +36,11 @@ typedef struct {
 				 * last in the structure, so that it can
 				 * be larger than 4 bytes. */
 } TraceVarInfo;
+
+typedef struct {
+    VarTrace trace;
+    TraceVarInfo tvar;
+} CompoundVarTrace;
 
 /*
  * Structure used to hold information about command traces:
@@ -133,6 +138,10 @@ static void		TraceCommandProc _ANSI_ARGS_((ClientData clientData,
                             CONST char *newName, int flags));
 static Tcl_CmdObjTraceProc TraceExecutionProc;
 
+#ifdef TCL_TIP280
+static void             ListLines _ANSI_ARGS_((CONST char* listStr, int line,
+					       int n, int* lines));
+#endif
 /*
  *----------------------------------------------------------------------
  *
@@ -461,9 +470,10 @@ Tcl_RegexpObjCmd(dummy, interp, objc, objv)
 		}
 	    } else {
 		Tcl_Obj *valuePtr;
+		Tcl_IncrRefCount(newPtr);
 		valuePtr = Tcl_ObjSetVar2(interp, objv[i], NULL, newPtr, 0);
+		Tcl_DecrRefCount(newPtr);
 		if (valuePtr == NULL) {
-		    Tcl_DecrRefCount(newPtr);
 		    Tcl_AppendResult(interp, "couldn't set variable \"",
 			    Tcl_GetString(objv[i]), "\"", (char *) NULL);
 		    return TCL_ERROR;
@@ -1758,10 +1768,16 @@ Tcl_StringObjCmd(dummy, interp, objc, objv)
 	     * Only set the failVarObj when we will return 0
 	     * and we have indicated a valid fail index (>= 0)
 	     */
-	    if ((result == 0) && (failVarObj != NULL) &&
-		Tcl_ObjSetVar2(interp, failVarObj, NULL, Tcl_NewIntObj(failat),
-			       TCL_LEAVE_ERR_MSG) == NULL) {
-		return TCL_ERROR;
+	    if ((result == 0) && (failVarObj != NULL)) {
+		Tcl_Obj *resPtr, *tmpPtr = Tcl_NewIntObj(failat);
+
+		Tcl_IncrRefCount(tmpPtr);
+		resPtr = Tcl_ObjSetVar2(interp, failVarObj, NULL, tmpPtr,
+			TCL_LEAVE_ERR_MSG);
+		Tcl_DecrRefCount(tmpPtr);
+		if (resPtr == NULL) {
+		    return TCL_ERROR;
+		}
 	    }
 	    Tcl_SetBooleanObj(resultPtr, result);
 	    break;
@@ -2717,6 +2733,15 @@ Tcl_SwitchObjCmd(dummy, interp, objc, objv)
     char *string, *pattern;
     Tcl_Obj *stringObj;
     Tcl_Obj *CONST *savedObjv = objv;
+#ifdef TCL_TIP280
+    Interp*  iPtr  = (Interp*) interp;
+    int      pc    = 0;
+    int      bidx  = 0;    /* Index of body argument */
+    Tcl_Obj* blist = NULL; /* List obj which is the body */
+    CmdFrame ctx;          /* Copy of the topmost cmdframe,
+			    * to allow us to mess with the
+			    * line information */
+#endif
     static CONST char *options[] = {
 	"-exact",	"-glob",	"-regexp",	"--", 
 	NULL
@@ -2751,16 +2776,25 @@ Tcl_SwitchObjCmd(dummy, interp, objc, objv)
     stringObj = objv[i];
     objc -= i + 1;
     objv += i + 1;
+#ifdef TCL_TIP280
+    bidx = i+1; /* First after the match string */
+#endif
 
     /*
      * If all of the pattern/command pairs are lumped into a single
      * argument, split them out again.
+     *
+     * TIP #280: Determine the lines the words in the list start at, based on
+     * the same data for the list word itself. The cmdFramePtr line information
+     * is manipulated directly.
      */
 
     splitObjs = 0;
     if (objc == 1) {
 	Tcl_Obj **listv;
-
+#ifdef TCL_TIP280
+	blist = objv[0];
+#endif
 	if (Tcl_ListObjGetElements(interp, objv[0], &objc, &listv) != TCL_OK) {
 	    return TCL_ERROR;
 	}
@@ -2859,7 +2893,57 @@ Tcl_SwitchObjCmd(dummy, interp, objc, objv)
 	/*
 	 * We've got a match. Find a body to execute, skipping bodies
 	 * that are "-".
+	 *
+	 * TIP#280: Now is also the time to determine a line number for the
+	 * single-word case.
 	 */
+
+#ifdef TCL_TIP280
+	ctx = *iPtr->cmdFramePtr;
+
+	if (splitObjs) {
+	    /* We have to perform the GetSrc and other type dependent handling
+	     * of the frame here because we are munging with the line numbers,
+	     * something the other commands like if, etc. are not doing. Them
+	     * are fine with simply passing the CmdFrame through and having
+	     * the special handling done in 'info frame', or the bc compiler
+	     */
+
+	    if (ctx.type == TCL_LOCATION_BC) {
+		/* Note: Type BC => ctx.data.eval.path    is not used.
+		 *                  ctx.data.tebc.codePtr is used instead.
+		 */
+		TclGetSrcInfoForPc (&ctx);
+		pc = 1;
+		/* The line information in the cmdFrame is now a copy we do
+		 * not own */
+	    }
+
+	    if (ctx.type == TCL_LOCATION_SOURCE) {
+		int bline = ctx.line [bidx];
+		if (bline >= 0) {
+		    ctx.line  = (int*) ckalloc (objc * sizeof(int));
+		    ctx.nline = objc;
+
+		    ListLines (Tcl_GetString (blist), bline, objc, ctx.line);
+		} else {
+		    int k;
+		    /* Dynamic code word ... All elements are relative to themselves */
+
+		    ctx.line  = (int*) ckalloc (objc * sizeof(int));
+		    ctx.nline = objc;
+		    for (k=0; k < objc; k++) {ctx.line[k] = -1;}
+		}
+	    } else {
+		int k;
+		/* Anything else ... No information, or dynamic ... */
+
+		ctx.line  = (int*) ckalloc (objc * sizeof(int));
+		ctx.nline = objc;
+		for (k=0; k < objc; k++) {ctx.line[k] = -1;}
+	    }
+	}
+#endif
 
 	for (j = i + 1; ; j += 2) {
 	    if (j >= objc) {
@@ -2873,7 +2957,19 @@ Tcl_SwitchObjCmd(dummy, interp, objc, objv)
 		break;
 	    }
 	}
+#ifndef TCL_TIP280
 	result = Tcl_EvalObjEx(interp, objv[j], 0);
+#else
+	/* TIP #280. Make invoking context available to switch branch */
+	result = TclEvalObjEx(interp, objv[j], 0, &ctx, j);
+	if (splitObjs) {
+	    ckfree ((char*) ctx.line);
+	    if (pc && (ctx.type == TCL_LOCATION_SOURCE)) {
+		/* Death of SrcInfo reference */
+		Tcl_DecrRefCount (ctx.data.eval.path);
+	    }
+	}
+#endif
 	if (result == TCL_ERROR) {
 	    char msg[100 + TCL_INTEGER_SPACE];
 
@@ -3671,10 +3767,24 @@ TclTraceVariableObjCmd(interp, optionIndex, objc, objv)
 	    command = Tcl_GetStringFromObj(objv[5], &commandLength);
 	    length = (size_t) commandLength;
 	    if ((enum traceOptions) optionIndex == TRACE_ADD) {
+		/*
+		 * This code essentially mallocs together the VarTrace and the
+		 * TraceVarInfo, then inlines the Tcl_TraceVar(). This is
+		 * necessary in order to have the TraceVarInfo to be freed 
+		 * automatically when the VarTrace is freed [Bug 1348775]
+		 */
+
+		CompoundVarTrace *compTracePtr;
 		TraceVarInfo *tvarPtr;
-		tvarPtr = (TraceVarInfo *) ckalloc((unsigned)
-			(sizeof(TraceVarInfo) - sizeof(tvarPtr->command)
+		Var *varPtr, *arrayPtr;
+		VarTrace *tracePtr;
+		int flagMask;
+
+		compTracePtr = (CompoundVarTrace *) ckalloc((unsigned)
+			(sizeof(CompoundVarTrace) - sizeof(tvarPtr->command)
 				+ length + 1));
+		tracePtr = &(compTracePtr->trace);
+		tvarPtr = &(compTracePtr->tvar);
 		tvarPtr->flags = flags;
 		if (objv[0] == NULL) {
 		    tvarPtr->flags |= TCL_TRACE_OLD_STYLE;
@@ -3683,11 +3793,25 @@ TclTraceVariableObjCmd(interp, optionIndex, objc, objv)
 		flags |= TCL_TRACE_UNSETS | TCL_TRACE_RESULT_OBJECT;
 		strcpy(tvarPtr->command, command);
 		name = Tcl_GetString(objv[3]);
-		if (Tcl_TraceVar(interp, name, flags, TraceVarProc,
-			(ClientData) tvarPtr) != TCL_OK) {
-		    ckfree((char *) tvarPtr);
+		flagMask = TCL_GLOBAL_ONLY | TCL_NAMESPACE_ONLY;
+		varPtr = TclLookupVar(interp, name, NULL,
+			(flags & flagMask) | TCL_LEAVE_ERR_MSG, "trace",
+			/*createPart1*/ 1, /*createPart2*/ 1, &arrayPtr);
+		if (varPtr == NULL) {
+		    ckfree((char *) tracePtr);
 		    return TCL_ERROR;
 		}
+		flagMask = TCL_TRACE_READS | TCL_TRACE_WRITES
+			| TCL_TRACE_UNSETS | TCL_TRACE_ARRAY
+			| TCL_TRACE_RESULT_DYNAMIC | TCL_TRACE_RESULT_OBJECT;
+#ifndef TCL_REMOVE_OBSOLETE_TRACES
+		flagMask |= TCL_TRACE_OLD_STYLE;
+#endif
+		tracePtr->traceProc = TraceVarProc;
+		tracePtr->clientData = (ClientData) tvarPtr;
+		tracePtr->flags = flags & flagMask;
+		tracePtr->nextPtr = varPtr->tracePtr;
+		varPtr->tracePtr = tracePtr;
 	    } else {
 		/*
 		 * Search through all of our traces on this variable to
@@ -3708,7 +3832,6 @@ TclTraceVariableObjCmd(interp, optionIndex, objc, objv)
 			Tcl_UntraceVar2(interp, name, NULL, 
 			  flags | TCL_TRACE_UNSETS | TCL_TRACE_RESULT_OBJECT,
 				TraceVarProc, clientData);
-			Tcl_EventuallyFree((ClientData) tvarPtr, TCL_DYNAMIC);
 			break;
 		    }
 		}
@@ -4044,7 +4167,7 @@ TraceCommandProc(clientData, interp, oldName, newName, flags)
     
     tcmdPtr->refCount++;
     
-    if ((tcmdPtr->flags & flags) && !(flags & TCL_INTERP_DESTROYED)) {
+    if ((tcmdPtr->flags & flags) && !Tcl_InterpDeleted(interp)) {
 	/*
 	 * Generate a command to execute by appending list elements
 	 * for the old and new command name and the operation.
@@ -4128,9 +4251,18 @@ TraceCommandProc(clientData, interp, oldName, newName, flags)
 	 * Remove the trace since TCL_TRACE_DESTROYED tells us to, or the
 	 * command we're tracing has just gone away.  Then decrement the
 	 * clientData refCount that was set up by trace creation.
+	 *
+	 * Note that we save the (return) state of the interpreter to prevent
+	 * bizarre error messages.
 	 */
+
+	Tcl_SaveResult(interp, &state);
+	stateCode = iPtr->returnCode;
 	Tcl_UntraceCommand(interp, oldName, untraceFlags,
 		TraceCommandProc, clientData);
+	Tcl_RestoreResult(interp, &state);
+	iPtr->returnCode = stateCode;
+
 	tcmdPtr->refCount--;
     }
     tcmdPtr->refCount--;
@@ -4216,19 +4348,21 @@ TclCheckExecutionTraces(interp, command, numChars, cmdPtr, code,
 	    active.reverseScan = 0;
 	    active.nextTracePtr = tracePtr->nextPtr;
         }
-	tcmdPtr = (TraceCommandInfo*)tracePtr->clientData;
-	if (tcmdPtr->flags != 0) {
-            tcmdPtr->curFlags = traceFlags | TCL_TRACE_EXEC_DIRECT;
-            tcmdPtr->curCode  = code;
-	    tcmdPtr->refCount++;
-	    traceCode = TraceExecutionProc((ClientData)tcmdPtr, interp, 
-	          curLevel, command, (Tcl_Command)cmdPtr, objc, objv);
-	    tcmdPtr->refCount--;
-	    if (tcmdPtr->refCount < 0) {
-		Tcl_Panic("TclCheckExecutionTraces: negative TraceCommandInfo refCount");
-	    }
-	    if (tcmdPtr->refCount == 0) {
-	        ckfree((char*)tcmdPtr);
+	if (tracePtr->traceProc == TraceCommandProc) {
+	    tcmdPtr = (TraceCommandInfo*)tracePtr->clientData;
+	    if (tcmdPtr->flags != 0) {
+        	tcmdPtr->curFlags = traceFlags | TCL_TRACE_EXEC_DIRECT;
+        	tcmdPtr->curCode  = code;
+		tcmdPtr->refCount++;
+		traceCode = TraceExecutionProc((ClientData)tcmdPtr, interp, 
+			curLevel, command, (Tcl_Command)cmdPtr, objc, objv);
+		tcmdPtr->refCount--;
+		if (tcmdPtr->refCount < 0) {
+		    Tcl_Panic("TclCheckExecutionTraces: negative TraceCommandInfo refCount");
+		}
+		if (tcmdPtr->refCount == 0) {
+		    ckfree((char*)tcmdPtr);
+		}
 	    }
 	}
 	if (active.nextTracePtr) {
@@ -4311,6 +4445,9 @@ TclCheckInterpTraces(interp, command, numChars, cmdPtr, code,
 	        active.nextTracePtr = tracePtr;
 	        tracePtr = tracePtr->nextPtr;
             }
+	    if (active.nextTracePtr) {
+		lastTracePtr = active.nextTracePtr->nextPtr;
+	    }
         } else {
 	    active.reverseScan = 0;
 	    active.nextTracePtr = tracePtr->nextPtr;
@@ -4356,9 +4493,6 @@ TclCheckInterpTraces(interp, command, numChars, cmdPtr, code,
 	    }
 	    tracePtr->flags &= ~TCL_TRACE_EXEC_IN_PROGRESS;
 	    Tcl_Release((ClientData) tracePtr);
-	}
-	if (active.nextTracePtr) {
-	    lastTracePtr = active.nextTracePtr->nextPtr;
 	}
     }
     iPtr->activeInterpTracePtr = active.nextPtr;
@@ -4493,7 +4627,7 @@ TraceExecutionProc(ClientData clientData, Tcl_Interp *interp,
 	return traceCode;
     }
     
-    if (!(flags & TCL_INTERP_DESTROYED)) {
+    if (!Tcl_InterpDeleted(interp)) {
 	/*
 	 * Check whether the current call is going to eval arbitrary
 	 * Tcl code with a generated trace, or whether we are only
@@ -4529,10 +4663,9 @@ TraceExecutionProc(ClientData clientData, Tcl_Interp *interp,
 	 */
 	if (call) {
 	    Tcl_SavedResult state;
-	    int stateCode;
+	    int stateCode, i, saveInterpFlags;
 	    Tcl_DString cmd;
 	    Tcl_DString sub;
-	    int i;
 
 	    Tcl_DStringInit(&cmd);
 	    Tcl_DStringAppend(&cmd, tcmdPtr->command, (int)tcmdPtr->length);
@@ -4586,8 +4719,9 @@ TraceExecutionProc(ClientData clientData, Tcl_Interp *interp,
 	    Tcl_SaveResult(interp, &state);
 	    stateCode = iPtr->returnCode;
 
-	    tcmdPtr->flags |= TCL_TRACE_EXEC_IN_PROGRESS;
+	    saveInterpFlags = iPtr->flags;
 	    iPtr->flags    |= INTERP_TRACE_IN_PROGRESS;
+	    tcmdPtr->flags |= TCL_TRACE_EXEC_IN_PROGRESS;
 	    tcmdPtr->refCount++;
 	    /* 
 	     * This line can have quite arbitrary side-effects,
@@ -4596,7 +4730,12 @@ TraceExecutionProc(ClientData clientData, Tcl_Interp *interp,
 	     */
 	    traceCode = Tcl_Eval(interp, Tcl_DStringValue(&cmd));
 	    tcmdPtr->flags &= ~TCL_TRACE_EXEC_IN_PROGRESS;
-	    iPtr->flags    &= ~INTERP_TRACE_IN_PROGRESS;
+
+	    /*
+	     * Restore the interp tracing flag to prevent cmd traces
+	     * from affecting interp traces
+	     */
+	    iPtr->flags = saveInterpFlags;;
 	    if (tcmdPtr->flags == 0) {
 		flags |= TCL_TRACE_DESTROYED;
 	    }
@@ -4687,21 +4826,18 @@ TraceVarProc(clientData, interp, name1, name2, flags)
     Tcl_SavedResult state;
     TraceVarInfo *tvarPtr = (TraceVarInfo *) clientData;
     char *result;
-    int code;
+    int code, destroy = 0;
     Tcl_DString cmd;
 
     /* 
-     * We might call Tcl_Eval() below, and that might evaluate
-     * [trace vdelete] which might try to free tvarPtr.  We want
-     * to use tvarPtr until the end of this function, so we use
-     * Tcl_Preserve() and Tcl_Release() to be sure it is not 
-     * freed while we still need it.
+     * We might call Tcl_Eval() below, and that might evaluate [trace
+     * vdelete] which might try to free tvarPtr. However we do not
+     * need to protect anything here; it's done by our caller because
+     * the TraceVarInfo is really part of a CompoundVarTrace. [Bug 1348775]
      */
 
-    Tcl_Preserve((ClientData) tvarPtr);
-
     result = NULL;
-    if ((tvarPtr->flags & flags) && !(flags & TCL_INTERP_DESTROYED)) {
+    if ((tvarPtr->flags & flags) && !Tcl_InterpDeleted(interp)) {
 	if (tvarPtr->length != (size_t) 0) {
 	    /*
 	     * Generate a command to execute by appending list elements
@@ -4748,7 +4884,9 @@ TraceVarProc(clientData, interp, name1, name2, flags)
 	     */
 
 	    Tcl_SaveResult(interp, &state);
-	    if (flags & TCL_TRACE_DESTROYED) {
+	    if ((flags & TCL_TRACE_DESTROYED)
+		    && !(tvarPtr->flags & TCL_TRACE_DESTROYED)) {
+		destroy = 1;
 		tvarPtr->flags |= TCL_TRACE_DESTROYED;
 	    }
 
@@ -4765,16 +4903,14 @@ TraceVarProc(clientData, interp, name1, name2, flags)
 	    Tcl_DStringFree(&cmd);
 	}
     }
-    if (flags & TCL_TRACE_DESTROYED) {
+    if (destroy) {
 	if (result != NULL) {
 	    register Tcl_Obj *errMsgObj = (Tcl_Obj *) result;
 
 	    Tcl_DecrRefCount(errMsgObj);
 	    result = NULL;
 	}
-	Tcl_EventuallyFree((ClientData) tvarPtr, TCL_DYNAMIC);
     }
-    Tcl_Release((ClientData) tvarPtr);
     return result;
 }
 
@@ -4808,6 +4944,9 @@ Tcl_WhileObjCmd(dummy, interp, objc, objv)
     Tcl_Obj *CONST objv[];       	/* Argument objects. */
 {
     int result, value;
+#ifdef TCL_TIP280
+    Interp* iPtr = (Interp*) interp;
+#endif
 
     if (objc != 3) {
 	Tcl_WrongNumArgs(interp, 1, objv, "test command");
@@ -4822,7 +4961,12 @@ Tcl_WhileObjCmd(dummy, interp, objc, objv)
         if (!value) {
             break;
         }
+#ifndef TCL_TIP280
         result = Tcl_EvalObjEx(interp, objv[2], 0);
+#else
+	/* TIP #280. */
+        result = TclEvalObjEx(interp, objv[2], 0, iPtr->cmdFramePtr,2);
+#endif
         if ((result != TCL_OK) && (result != TCL_CONTINUE)) {
             if (result == TCL_ERROR) {
                 char msg[32 + TCL_INTEGER_SPACE];
@@ -4842,4 +4986,45 @@ Tcl_WhileObjCmd(dummy, interp, objc, objv)
     }
     return result;
 }
+
+#ifdef TCL_TIP280
+static void
+ListLines(listStr, line, n, lines)
+     CONST char* listStr; /* Pointer to string with list structure.
+			   * Assumed to be valid. Assumed to contain
+			   * n elements.
+			   */
+     int  line;           /* line the list as a whole starts on */
+     int  n;              /* #elements in lines */
+     int* lines;          /* Array of line numbers, to fill */
+{
+    int         i;
+    int         length  = strlen( listStr);
+    CONST char *element = NULL;
+    CONST char* next    = NULL;
+
+    for (i = 0; i < n; i++) {
+	TclFindElement(NULL, listStr, length, &element, &next, NULL, NULL);
+
+	TclAdvanceLines (&line, listStr, element); /* Leading whitespace */
+	lines [i] = line;
+	length   -= (next - listStr);
+	TclAdvanceLines (&line, element, next); /* Element */
+	listStr   = next;
+
+	if (*element == 0) {
+	    /* ASSERT i == n */
+	    break;
+	}
+    }
+}
+#endif
+
+/*
+ * Local Variables:
+ * mode: c
+ * c-basic-offset: 4
+ * fill-column: 78
+ * End:
+ */
 

@@ -10,7 +10,7 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
-# RCS: @(#) $Id: expr.test,v 1.17.2.4 2004/11/02 15:46:35 dkf Exp $
+# RCS: @(#) $Id: expr.test,v 1.17.2.12 2006/03/23 16:40:32 dgp Exp $
 
 if {[lsearch [namespace children] ::tcltest] == -1} {
     package require tcltest
@@ -21,6 +21,7 @@ testConstraint registeredMathFuncs [expr {
     ([catch {expr T1()} msg] != 1) || ($msg ne {unknown math function "T1"})
 }]
 
+testConstraint wideIs64bit [expr {(0x80000000 > 0) && (0x8000000000000000 < 0)}]
 # procedures used below
 
 proc put_hello_char {c} {
@@ -806,7 +807,7 @@ test expr-22.8 {non-numeric floats} nonPortable {
     list [catch {expr {1 / Inf}} msg] $msg
 } {1 {can't use infinite floating-point value as operand of "/"}}
 # Make sure [Bug 761471] stays fixed.
-test expr-22.9 {non-numeric floats: shared object equality and NaN} {
+test expr-22.9 {non-numeric floats: shared object equality and NaN} nonPortable {
     set x NaN
     expr {$x == $x}
 } 0
@@ -821,6 +822,105 @@ test expr-24.6 {expr edge cases; shifting} nonPortable {expr int(5)<<63} 0
 test expr-24.7 {expr edge cases; shifting} {expr wide(5)<<31} 10737418240
 test expr-24.8 {expr edge cases; shifting} nonPortable {expr wide(5)<<63} -9223372036854775808
 test expr-24.9 {expr edge cases; shifting} {expr 5>>32} 0
+
+test expr-38.1 {abs of smallest 32-bit integer [Bug 1241572]} {wideIs64bit} {
+    expr {abs(int(-2147483648))}
+} 2147483648
+
+test expr-46.1 {round() rounds to +-infinity} {
+    expr round(0.5)
+} 1
+test expr-46.2 {round() rounds to +-infinity} {
+    expr round(1.5)
+} 2
+test expr-46.3 {round() rounds to +-infinity} {
+    expr round(-0.5)
+} -1
+test expr-46.4 {round() rounds to +-infinity} {
+    expr round(-1.5)
+} -2
+test expr-46.5 {round() overflow} {
+    list [catch {expr round(9.2233720368547758e+018)} result] $result
+} {1 {integer value too large to represent}}
+test expr-46.6 {round() overflow} {
+    list [catch {expr round(-9.2233720368547758e+018)} result] $result
+} {1 {integer value too large to represent}}
+test expr-46.7 {round() bad value} {
+    set x trash
+    list [catch {expr {round($x)}} result] $result
+} {1 {argument to math function didn't have numeric value}}
+test expr-46.8 {round() already an integer} {
+    set x 123456789012
+    incr x
+    expr round($x)
+} 123456789013
+test expr-46.9 {round() boundary case - 1/2 - 1 ulp} {
+    set x 0.25
+    set bit 0.125
+    while 1 {
+	set newx [expr {$x + $bit}]
+	if { $newx == $x || $newx == 0.5 } break
+	set x $newx
+	set bit [expr { $bit / 2.0 }]
+    }
+    expr {round($x)}
+} 0
+test expr-46.10 {round() boundary case - 1/2 + 1 ulp} {
+    set x 0.75
+    set bit 0.125
+    while 1 {
+	set newx [expr { $x - $bit }]
+	if { $newx == $x || $newx == 0.5 } break
+	set x $newx
+	set bit [expr { $bit / 2.0 }]
+    }
+    expr {round($x)}
+} 1
+test expr-46.11 {round() boundary case - -1/2 - 1 ulp} {
+    set x -0.75
+    set bit 0.125
+    while 1 {
+	set newx [expr { $x + $bit }]
+	if { $newx == $x || $newx == -0.5 } break
+	set x $newx
+	set bit [expr { $bit / 2.0 }]
+    }
+    expr {round($x)}
+} -1
+test expr-46.12 {round() boundary case - -1/2 + 1 ulp} {
+    set x -0.25
+    set bit 0.125
+    while 1 {
+	set newx [expr { $x - $bit }]
+	if { $newx == $x || $newx == -0.5 } break
+	set x $newx
+	set bit [expr { $bit / 2.0 }]
+    }
+    expr {round($x)}
+} 0
+
+test expr-46.13 {round() boundary case - round down} {
+    expr {round(2147483647 - 0.51)}
+} 2147483646
+
+test expr-46.14 {round() boundary case - round up} {
+    expr {round(2147483647 - 0.50)}
+} 2147483647
+
+test expr-46.15 {round() boundary case - round up to wide} {
+    expr {round(2147483647 + 0.50)}
+} [expr {wide(2147483647) + 1}]
+
+test expr-46.16 {round() boundary case - round up} {
+    expr {round(-2147483648 + 0.51)}
+} -2147483647
+
+test expr-46.17 {round() boundary case - round down} {
+    expr {round(-2147483648 + 0.50)}
+} -2147483648
+test expr-46.18 {round() boundary case - round down to wide} {
+    expr {round(-2147483648 - 0.50)}
+} [expr {wide(-2147483648) - 1}]
 
 # cleanup
 if {[info exists a]} {

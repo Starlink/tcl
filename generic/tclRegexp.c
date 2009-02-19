@@ -10,7 +10,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclRegexp.c,v 1.14 2002/01/17 03:03:12 dgp Exp $
+ * RCS: @(#) $Id: tclRegexp.c,v 1.14.4.2 2006/04/07 01:14:28 hobbs Exp $
  */
 
 #include "tclInt.h"
@@ -105,7 +105,7 @@ static int		SetRegexpFromAny _ANSI_ARGS_((Tcl_Interp *interp,
  * of the compiled form of the regular expression.
  */
 
-Tcl_ObjType tclRegexpType = {
+static Tcl_ObjType tclRegexpType = {
     "regexp",				/* name */
     FreeRegexpInternalRep,		/* freeIntRepProc */
     DupRegexpInternalRep,		/* dupIntRepProc */
@@ -1024,5 +1024,11 @@ FinalizeRegexp(clientData)
 	    FreeRegexp(regexpPtr);
 	}
 	ckfree(tsdPtr->patterns[i]);
+	tsdPtr->patterns[i] = NULL;
     }
+    /*
+     * We may find ourselves reinitialized if another finalization routine
+     * invokes regexps.
+     */
+    tsdPtr->initialized = 0;
 }

@@ -8,7 +8,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclUnixSock.c,v 1.6 2002/02/27 01:16:43 hobbs Exp $
+ * RCS: @(#) $Id: tclUnixSock.c,v 1.6.2.4 2006/09/07 09:01:07 vasiljevic Exp $
  */
 
 #include "tcl.h"
@@ -83,7 +83,7 @@ Tcl_GetHostName()
 #ifndef NO_UNAME
     (VOID *) memset((VOID *) &u, (int) 0, sizeof(struct utsname));
     if (uname(&u) > -1) {				/* INTL: Native. */
-        hp = gethostbyname(u.nodename);			/* INTL: Native. */
+        hp = TclpGetHostByName(u.nodename);			/* INTL: Native. */
 	if (hp == NULL) {
 	    /*
 	     * Sometimes the nodename is fully qualified, but gets truncated
@@ -95,7 +95,7 @@ Tcl_GetHostName()
 		char *node = ckalloc((unsigned) (dot - u.nodename + 1));
 		memcpy(node, u.nodename, (size_t) (dot - u.nodename));
 		node[dot - u.nodename] = '\0';
-		hp = gethostbyname(node);
+		hp = TclpGetHostByName(node);
 		ckfree(node);
 	    }
 	}
@@ -147,4 +147,26 @@ TclpHasSockets(interp)
     Tcl_Interp *interp;		/* Not used. */
 {
     return TCL_OK;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * TclpFinalizeSockets --
+ *
+ *	Performs per-thread socket subsystem finalization.
+ *
+ * Results:
+ *	None.
+ *
+ * Side effects:
+ *	None.
+ *
+ *----------------------------------------------------------------------
+ */
+
+void
+TclpFinalizeSockets()
+{
+    return;
 }

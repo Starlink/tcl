@@ -9,7 +9,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclCompExpr.c,v 1.13 2003/02/16 01:36:32 msofer Exp $
+ * RCS: @(#) $Id: tclCompExpr.c,v 1.13.2.5 2008/04/17 19:47:34 dgp Exp $
  */
 
 #include "tclInt.h"
@@ -258,6 +258,11 @@ TclCompileExpr(interp, script, numBytes, envPtr)
 	goto done;
     }
 
+#ifdef TCL_TIP280
+    /* TIP #280 : Track Lines within the expression */
+    TclAdvanceLines (&envPtr->line, script, parse.tokenPtr->start);
+#endif
+
     code = CompileSubExpr(parse.tokenPtr, &info, envPtr);
     if (code != TCL_OK) {
 	Tcl_FreeParse(&parse);
@@ -286,9 +291,7 @@ TclCompileExpr(interp, script, numBytes, envPtr)
  * TclFinalizeCompilation --
  *
  *	Clean up the compilation environment so it can later be
- *	properly reinitialized. This procedure is called by
- *	TclFinalizeCompExecEnv() in tclObj.c, which in turn is called
- *	by Tcl_Finalize().
+ *	properly reinitialized. This procedure is called by Tcl_Finalize().
  *
  * Results:
  *	None.
@@ -340,7 +343,8 @@ CompileSubExpr(exprTokenPtr, infoPtr, envPtr)
     CompileEnv *envPtr;		/* Holds resulting instructions. */
 {
     Tcl_Interp *interp = infoPtr->interp;
-    Tcl_Token *tokenPtr, *endPtr, *afterSubexprPtr;
+    Tcl_Token *tokenPtr, *endPtr = NULL; /* silence gcc 4 warning */
+    Tcl_Token *afterSubexprPtr;
     OperatorDesc *opDescPtr;
     Tcl_HashEntry *hPtr;
     CONST char *operator;
@@ -848,6 +852,7 @@ CompileMathFuncCall(exprTokenPtr, funcName, infoPtr, envPtr, endPtrPtr)
     code = TCL_OK;
     hPtr = Tcl_FindHashEntry(&iPtr->mathFuncTable, funcName);
     if (hPtr == NULL) {
+	Tcl_ResetResult(interp);
 	Tcl_AppendStringsToObj(Tcl_GetObjResult(interp),
 		"unknown math function \"", funcName, "\"", (char *) NULL);
 	code = TCL_ERROR;

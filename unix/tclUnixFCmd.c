@@ -10,7 +10,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclUnixFCmd.c,v 1.28.2.4 2005/01/10 11:21:51 dkf Exp $
+ * RCS: @(#) $Id: tclUnixFCmd.c,v 1.28.2.15 2007/04/29 02:19:51 das Exp $
  *
  * Portions of this code were derived from NetBSD source code which has
  * the following copyright notice:
@@ -55,6 +55,9 @@
 #ifndef NO_FSTATFS
 #include <sys/statfs.h>
 #endif
+#endif
+#ifdef HAVE_FTS
+#include <fts.h>
 #endif
 
 /*
@@ -124,6 +127,21 @@ CONST TclFileAttrProcs tclpFileAttrProcs[] = {
 };
 
 /*
+ * This is the maximum number of consecutive readdir/unlink calls that can be
+ * made (with no intervening rewinddir or closedir/opendir) before triggering
+ * a bug that makes readdir return NULL even though some directory entries
+ * have not been processed.  The bug afflicts SunOS's readdir when applied to
+ * ufs file systems and Darwin 6.5's (and OSX v.10.3.8's) HFS+.  JH found the
+ * Darwin readdir to reset at 147, so 130 is chosen to be conservative.  We
+ * can't do a general rewind on failure as NFS can create special files that
+ * recreate themselves when you try and delete them.  8.4.8 added a solution
+ * that was affected by a single such NFS file, this solution should not be
+ * affected by less than THRESHOLD such files. [Bug 1034337]
+ */
+
+#define MAX_READDIR_UNLINK_THRESHOLD 130
+
+/*
  * Declarations for local procedures defined in this file:
  */
 
@@ -132,7 +150,7 @@ static int		CopyFile _ANSI_ARGS_((CONST char *src,
 static int		CopyFileAtts _ANSI_ARGS_((CONST char *src,
 			    CONST char *dst, CONST Tcl_StatBuf *statBufPtr));
 static int		DoCopyFile _ANSI_ARGS_((CONST char *srcPtr,
-			    CONST char *dstPtr));
+			    CONST char *dstPtr, CONST Tcl_StatBuf *statBufPtr));
 static int		DoCreateDirectory _ANSI_ARGS_((CONST char *pathPtr));
 static int		DoRemoveDirectory _ANSI_ARGS_((Tcl_DString *pathPtr,
 			    int recursive, Tcl_DString *errorPtr));
@@ -170,6 +188,41 @@ Realpath(path, resolved)
 #else
 #define Realpath realpath
 #endif
+
+#ifndef NO_REALPATH
+#if defined(__APPLE__) && defined(TCL_THREADS) && \
+	defined(MAC_OS_X_VERSION_MIN_REQUIRED) && \
+	MAC_OS_X_VERSION_MIN_REQUIRED < 1030
+/*
+ * prior to Darwin 7, realpath is not threadsafe, c.f. bug 711232;
+ * if we might potentially be running on pre-10.3 OSX,
+ * check Darwin release at runtime before using realpath.
+ */
+extern long tclMacOSXDarwinRelease;
+#define haveRealpath (tclMacOSXDarwinRelease >= 7)
+#else
+#define haveRealpath 1
+#endif
+#endif /* NO_REALPATH */
+
+#ifdef HAVE_FTS
+#ifdef HAVE_STRUCT_STAT64
+/* fts doesn't do stat64 */
+#define noFtsStat 1
+#elif defined(__APPLE__) && defined(__LP64__) && \
+	defined(MAC_OS_X_VERSION_MIN_REQUIRED) && \
+	MAC_OS_X_VERSION_MIN_REQUIRED < 1050
+/*
+ * prior to Darwin 9, 64bit fts_open() without FTS_NOSTAT may crash (due to a
+ * 64bit-unsafe ALIGN macro); if we could be running on pre-10.5 OSX, check
+ * Darwin release at runtime and do a separate stat() if necessary.
+ */
+extern long tclMacOSXDarwinRelease;
+#define noFtsStat (tclMacOSXDarwinRelease < 9)
+#else
+#define noFtsStat 0
+#endif
+#endif /* HAVE_FTS */
 
 
 /*
@@ -248,7 +301,7 @@ DoRenameFile(src, dst)
      * conditionally compiled because realpath() not defined on all systems.
      */
 
-    if (errno == EINVAL) {
+    if (errno == EINVAL && haveRealpath) {
 	char srcPath[MAXPATHLEN], dstPath[MAXPATHLEN];
 	DIR *dirPtr;
 	Tcl_DirEntry *dirEntPtr;
@@ -328,25 +381,26 @@ TclpObjCopyFile(srcPathPtr, destPathPtr)
     Tcl_Obj *srcPathPtr;
     Tcl_Obj *destPathPtr;
 {
-    return DoCopyFile(Tcl_FSGetNativePath(srcPathPtr), 
-		      Tcl_FSGetNativePath(destPathPtr));
-}
+    CONST char *src = Tcl_FSGetNativePath(srcPathPtr);
+    Tcl_StatBuf srcStatBuf;
 
-static int
-DoCopyFile(src, dst)
-    CONST char *src;	/* Pathname of file to be copied (native). */
-    CONST char *dst;	/* Pathname of file to copy to (native). */
-{
-    Tcl_StatBuf srcStatBuf, dstStatBuf;
-
-    /*
-     * Have to do a stat() to determine the filetype.
-     */
-    
     if (TclOSlstat(src, &srcStatBuf) != 0) {		/* INTL: Native. */
 	return TCL_ERROR;
     }
-    if (S_ISDIR(srcStatBuf.st_mode)) {
+
+    return DoCopyFile(src, Tcl_FSGetNativePath(destPathPtr), &srcStatBuf);
+}
+
+static int
+DoCopyFile(src, dst, statBufPtr)
+    CONST char *src;	/* Pathname of file to be copied (native). */
+    CONST char *dst;	/* Pathname of file to copy to (native). */
+    CONST Tcl_StatBuf *statBufPtr;
+			/* Used to determine filetype. */
+{
+    Tcl_StatBuf dstStatBuf;
+
+    if (S_ISDIR(statBufPtr->st_mode)) {
 	errno = EISDIR;
 	return TCL_ERROR;
     }
@@ -368,7 +422,7 @@ DoCopyFile(src, dst)
 	} 
     }
 
-    switch ((int) (srcStatBuf.st_mode & S_IFMT)) {
+    switch ((int) (statBufPtr->st_mode & S_IFMT)) {
 #ifndef DJGPP
         case S_IFLNK: {
 	    char link[MAXPATHLEN];
@@ -382,25 +436,31 @@ DoCopyFile(src, dst)
 	    if (symlink(link, dst) < 0) {		/* INTL: Native. */
 		return TCL_ERROR;
 	    }
+#ifdef HAVE_COPYFILE
+#ifdef WEAK_IMPORT_COPYFILE
+	    if (copyfile != NULL)
+#endif
+	    copyfile(src, dst, NULL, COPYFILE_XATTR|COPYFILE_NOFOLLOW_SRC);
+#endif
 	    break;
 	}
 #endif
         case S_IFBLK:
         case S_IFCHR: {
-	    if (mknod(dst, srcStatBuf.st_mode,		/* INTL: Native. */
-		    srcStatBuf.st_rdev) < 0) {
+	    if (mknod(dst, statBufPtr->st_mode,		/* INTL: Native. */
+		    statBufPtr->st_rdev) < 0) {
 		return TCL_ERROR;
 	    }
-	    return CopyFileAtts(src, dst, &srcStatBuf);
+	    return CopyFileAtts(src, dst, statBufPtr);
 	}
         case S_IFIFO: {
-	    if (mkfifo(dst, srcStatBuf.st_mode) < 0) {	/* INTL: Native. */
+	    if (mkfifo(dst, statBufPtr->st_mode) < 0) {	/* INTL: Native. */
 		return TCL_ERROR;
 	    }
-	    return CopyFileAtts(src, dst, &srcStatBuf);
+	    return CopyFileAtts(src, dst, statBufPtr);
 	}
         default: {
-	    return CopyFile(src, dst, &srcStatBuf);
+	    return CopyFile(src, dst, statBufPtr);
 	}
     }
     return TCL_OK;
@@ -465,6 +525,16 @@ CopyFile(src, dst, statBufPtr)
 #endif
 #endif
 
+    /* [SF Tcl Bug 1586470] Even if we HAVE_ST_BLKSIZE, there are
+     * filesystems which report a bogus value for the blocksize.  An
+     * example is the Andrew Filesystem (afs), reporting a blocksize
+     * of 0. When detecting such a situation we now simply fall back
+     * to a hardwired default size.
+     */
+
+    if (blockSize <= 0) {
+        blockSize = 4096;
+    }
     buffer = ckalloc(blockSize);
     while (1) {
 	nread = read(srcFd, buffer, blockSize);
@@ -476,7 +546,7 @@ CopyFile(src, dst, statBufPtr)
 	    break;
 	}
     }
-	
+
     ckfree(buffer);
     close(srcFd);
     if ((close(dstFd) != 0) || (nread == -1)) {
@@ -769,7 +839,7 @@ DoRemoveDirectory(pathPtr, recursive, errorPtr)
     }
     return result;
 }
-	
+
 /*
  *---------------------------------------------------------------------------
  *
@@ -808,15 +878,21 @@ TraverseUnixTree(traverseProc, sourcePtr, targetPtr, errorPtr, doRewind)
     				 * loop should be rewound whenever
     				 * traverseProc has returned TCL_OK; this is
     				 * required when traverseProc modifies the
-    				 * source hierarchy, e.g. by deleting files. */ 
+    				 * source hierarchy, e.g. by deleting files. */
 {
     Tcl_StatBuf statBuf;
     CONST char *source, *errfile;
     int result, sourceLen;
     int targetLen;
-    int needRewind;
+#ifndef HAVE_FTS
+    int numProcessed = 0;
     Tcl_DirEntry *dirEntPtr;
     DIR *dirPtr;
+#else
+    CONST char *paths[2] = {NULL, NULL};
+    FTS *fts = NULL;
+    FTSENT *ent;
+#endif
 
     errfile = NULL;
     result = TCL_OK;
@@ -835,6 +911,7 @@ TraverseUnixTree(traverseProc, sourcePtr, targetPtr, errorPtr, doRewind)
 	return (*traverseProc)(sourcePtr, targetPtr, &statBuf, DOTREE_F,
 		errorPtr);
     }
+#ifndef HAVE_FTS
     dirPtr = opendir(source);				/* INTL: Native. */
     if (dirPtr == NULL) {
 	/* 
@@ -850,56 +927,58 @@ TraverseUnixTree(traverseProc, sourcePtr, targetPtr, errorPtr, doRewind)
 	closedir(dirPtr);
 	return result;
     }
-    
+
     Tcl_DStringAppend(sourcePtr, "/", 1);
-    sourceLen = Tcl_DStringLength(sourcePtr);	
+    sourceLen = Tcl_DStringLength(sourcePtr);
 
     if (targetPtr != NULL) {
 	Tcl_DStringAppend(targetPtr, "/", 1);
 	targetLen = Tcl_DStringLength(targetPtr);
     }
 
-    do {
-	needRewind = 0;
-	while ((dirEntPtr = TclOSreaddir(dirPtr)) != NULL) { /* INTL: Native. */
-	    if ((dirEntPtr->d_name[0] == '.')
-		    && ((dirEntPtr->d_name[1] == '\0')
-			    || (strcmp(dirEntPtr->d_name, "..") == 0))) {
-		continue;
-	    }
-	    
-	    /* 
-	     * Append name after slash, and recurse on the file.
-	     */
-	    
-	    Tcl_DStringAppend(sourcePtr, dirEntPtr->d_name, -1);
-	    if (targetPtr != NULL) {
-		Tcl_DStringAppend(targetPtr, dirEntPtr->d_name, -1);
-	    }
-	    result = TraverseUnixTree(traverseProc, sourcePtr, targetPtr,
-		    errorPtr, doRewind);
-	    if (result != TCL_OK) {
-	    	needRewind = 0;
-		break;
-	    } else {
-		needRewind = doRewind;
-	    }
-	    
+    while ((dirEntPtr = TclOSreaddir(dirPtr)) != NULL) { /* INTL: Native. */
+	if ((dirEntPtr->d_name[0] == '.')
+		&& ((dirEntPtr->d_name[1] == '\0')
+			|| (strcmp(dirEntPtr->d_name, "..") == 0))) {
+	    continue;
+	}
+
+	/*
+	 * Append name after slash, and recurse on the file.
+	 */
+
+	Tcl_DStringAppend(sourcePtr, dirEntPtr->d_name, -1);
+	if (targetPtr != NULL) {
+	    Tcl_DStringAppend(targetPtr, dirEntPtr->d_name, -1);
+	}
+	result = TraverseUnixTree(traverseProc, sourcePtr, targetPtr,
+		errorPtr, doRewind);
+	if (result != TCL_OK) {
+	    break;
+	} else {
+	    numProcessed++;
+	}
+
+	/*
+	 * Remove name after slash.
+	 */
+
+	Tcl_DStringSetLength(sourcePtr, sourceLen);
+	if (targetPtr != NULL) {
+	    Tcl_DStringSetLength(targetPtr, targetLen);
+	}
+	if (doRewind && (numProcessed > MAX_READDIR_UNLINK_THRESHOLD)) {
 	    /*
-	     * Remove name after slash.
+	     * Call rewinddir if we've called unlink or rmdir so many times
+	     * (since the opendir or the previous rewinddir), to avoid
+	     * a NULL-return that may a symptom of a buggy readdir.
 	     */
-	    
-	    Tcl_DStringSetLength(sourcePtr, sourceLen);
-	    if (targetPtr != NULL) {
-		Tcl_DStringSetLength(targetPtr, targetLen);
-	    }
-	}
-	if (needRewind) {
 	    rewinddir(dirPtr);
+	    numProcessed = 0;
 	}
-    } while (needRewind);
+    }
     closedir(dirPtr);
-    
+
     /*
      * Strip off the trailing slash we added
      */
@@ -918,6 +997,69 @@ TraverseUnixTree(traverseProc, sourcePtr, targetPtr, errorPtr, doRewind)
 	result = (*traverseProc)(sourcePtr, targetPtr, &statBuf, DOTREE_POSTD,
 		errorPtr);
     }
+#else /* HAVE_FTS */
+    paths[0] = source;
+    fts = fts_open((char**)paths, FTS_PHYSICAL | FTS_NOCHDIR |
+	    (noFtsStat || doRewind ? FTS_NOSTAT : 0),  NULL);
+    if (fts == NULL) {
+	errfile = source;
+	goto end;
+    }
+
+    sourceLen = Tcl_DStringLength(sourcePtr);
+    if (targetPtr != NULL) {
+	targetLen = Tcl_DStringLength(targetPtr);
+    }
+
+    while ((ent = fts_read(fts)) != NULL) {
+	unsigned short info = ent->fts_info;
+	char * path = ent->fts_path + sourceLen;
+	unsigned short pathlen = ent->fts_pathlen - sourceLen;
+	int type;
+	Tcl_StatBuf *statBufPtr = NULL;
+	
+	if (info == FTS_DNR || info == FTS_ERR || info == FTS_NS) {
+	    errfile = ent->fts_path;
+	    break;
+	}
+	Tcl_DStringAppend(sourcePtr, path, pathlen);
+	if (targetPtr != NULL) {
+	    Tcl_DStringAppend(targetPtr, path, pathlen);
+	}
+	switch (info) {
+	    case FTS_D:
+		type = DOTREE_PRED;
+		break;
+	    case FTS_DP:
+		type = DOTREE_POSTD;
+		break;
+	    default:
+		type = DOTREE_F;
+		break;
+	}
+	if (!doRewind) { /* no need to stat for delete */
+	    if (noFtsStat) {
+		statBufPtr = &statBuf;
+		if (TclOSlstat(ent->fts_path, statBufPtr) != 0) {
+		    errfile = ent->fts_path;
+		    break;
+		}
+	    } else {
+		statBufPtr = ent->fts_statp;
+	    }
+	}
+	result = (*traverseProc)(sourcePtr, targetPtr, statBufPtr, type,
+		errorPtr);
+	if (result != TCL_OK) {
+	    break;
+	}
+	Tcl_DStringSetLength(sourcePtr, sourceLen);
+	if (targetPtr != NULL) {
+	    Tcl_DStringSetLength(targetPtr, targetLen);
+	}
+    }
+#endif /* HAVE_FTS */
+
     end:
     if (errfile != NULL) {
 	if (errorPtr != NULL) {
@@ -925,7 +1067,12 @@ TraverseUnixTree(traverseProc, sourcePtr, targetPtr, errorPtr, doRewind)
 	}
 	result = TCL_ERROR;
     }
-	    
+#ifdef HAVE_FTS
+    if (fts != NULL) {
+	fts_close(fts);
+    }
+#endif /* HAVE_FTS */
+
     return result;
 }
 
@@ -960,8 +1107,8 @@ TraversalCopy(srcPtr, dstPtr, statBufPtr, type, errorPtr)
 {
     switch (type) {
 	case DOTREE_F:
-	    if (DoCopyFile(Tcl_DStringValue(srcPtr), 
-		    Tcl_DStringValue(dstPtr)) == TCL_OK) {
+	    if (DoCopyFile(Tcl_DStringValue(srcPtr), Tcl_DStringValue(dstPtr),
+		    statBufPtr) == TCL_OK) {
 		return TCL_OK;
 	    }
 	    break;
@@ -1101,6 +1248,12 @@ CopyFileAtts(src, dst, statBufPtr)
     if (utime(dst, &tval)) {				/* INTL: Native. */
 	return TCL_ERROR;
     }
+#ifdef HAVE_COPYFILE
+#ifdef WEAK_IMPORT_COPYFILE
+    if (copyfile != NULL)
+#endif
+    copyfile(src, dst, NULL, COPYFILE_XATTR|COPYFILE_ACL);
+#endif
     return TCL_OK;
 }
 
@@ -1142,8 +1295,9 @@ GetGroupAttribute(interp, objIndex, fileName, attributePtrPtr)
 	return TCL_ERROR;
     }
 
-    groupPtr = getgrgid(statBuf.st_gid);		/* INTL: Native. */
-    if (groupPtr == NULL) {
+    groupPtr = TclpGetGrGid(statBuf.st_gid);
+
+    if (result == -1 || groupPtr == NULL) {
 	*attributePtrPtr = Tcl_NewIntObj((int) statBuf.st_gid);
     } else {
 	Tcl_DString ds;
@@ -1194,8 +1348,9 @@ GetOwnerAttribute(interp, objIndex, fileName, attributePtrPtr)
 	return TCL_ERROR;
     }
 
-    pwPtr = getpwuid(statBuf.st_uid);			/* INTL: Native. */
-    if (pwPtr == NULL) {
+    pwPtr = TclpGetPwUid(statBuf.st_uid);
+
+    if (result == -1 || pwPtr == NULL) {
 	*attributePtrPtr = Tcl_NewIntObj((int) statBuf.st_uid);
     } else {
 	Tcl_DString ds;
@@ -1287,9 +1442,8 @@ SetGroupAttribute(interp, objIndex, fileName, attributePtr)
 	int length;
 
 	string = Tcl_GetStringFromObj(attributePtr, &length);
-
 	native = Tcl_UtfToExternalDString(NULL, string, length, &ds);
-	groupPtr = getgrnam(native);			/* INTL: Native. */
+	groupPtr = TclpGetGrNam(native); /* INTL: Native. */
 	Tcl_DStringFree(&ds);
 
 	if (groupPtr == NULL) {
@@ -1350,12 +1504,12 @@ SetOwnerAttribute(interp, objIndex, fileName, attributePtr)
 	int length;
 
 	string = Tcl_GetStringFromObj(attributePtr, &length);
-
 	native = Tcl_UtfToExternalDString(NULL, string, length, &ds);
-	pwPtr = getpwnam(native);			/* INTL: Native. */
+	pwPtr = TclpGetPwNam(native); /* INTL: Native. */
 	Tcl_DStringFree(&ds);
 
 	if (pwPtr == NULL) {
+	    endpwent();
 	    Tcl_AppendResult(interp, "could not set owner for file \"",
 			     Tcl_GetString(fileName), "\": user \"", 
 			     string, "\" does not exist",
@@ -1367,7 +1521,8 @@ SetOwnerAttribute(interp, objIndex, fileName, attributePtr)
 
     native = Tcl_FSGetNativePath(fileName);
     result = chown(native, (uid_t) uid, (gid_t) -1);   /* INTL: Native. */
-
+    
+    endpwent();
     if (result != 0) {
 	Tcl_AppendResult(interp, "could not set owner for file \"", 
 			 Tcl_GetString(fileName), "\": ", 
@@ -1708,15 +1863,23 @@ TclpObjNormalizePath(interp, pathPtr, nextCheckpoint)
 
 #ifndef NO_REALPATH
     /* For speed, try to get the entire path in one go */
-    if (nextCheckpoint == 0) {
+    if (nextCheckpoint == 0 && haveRealpath) {
         char *lastDir = strrchr(currentPathEndPosition, '/');
 	if (lastDir != NULL) {
 	    nativePath = Tcl_UtfToExternalDString(NULL, path, 
 						  lastDir - path, &ds);
 	    if (Realpath(nativePath, normPath) != NULL) {
-		nextCheckpoint = lastDir - path;
-		goto wholeStringOk;
+		if (*nativePath != '/' && *normPath == '/') {
+		    /*
+		     * realpath has transformed a relative path into an
+		     * absolute path, we do not know how to handle this.
+		     */
+		} else {
+		    nextCheckpoint = lastDir - path;
+		    goto wholeStringOk;
+		}
 	    }
+	    Tcl_DStringFree(&ds);
 	}
     }
     /* Else do it the slow way */
@@ -1754,61 +1917,60 @@ TclpObjNormalizePath(interp, pathPtr, nextCheckpoint)
      * have 'realpath'.
      */
 #ifndef NO_REALPATH
-    /* 
-     * If we only had '/foo' or '/' then we never increment nextCheckpoint
-     * and we don't need or want to go through 'Realpath'.  Also, on some
-     * platforms, passing an empty string to 'Realpath' will give us the
-     * normalized pwd, which is not what we want at all!
-     */
-    if (nextCheckpoint == 0) return 0;
-    
-    nativePath = Tcl_UtfToExternalDString(NULL, path, nextCheckpoint, &ds);
-    if (Realpath(nativePath, normPath) != NULL) {
-	int newNormLen;
-	wholeStringOk:
-	newNormLen = strlen(normPath);
-	if ((newNormLen == Tcl_DStringLength(&ds))
-		&& (strcmp(normPath, nativePath) == 0)) {
-	    /* String is unchanged */
-	    Tcl_DStringFree(&ds);
-	    if (path[nextCheckpoint] != '\0') {
-		nextCheckpoint++;
-	    }
-	    return nextCheckpoint;
-	}
+    if (haveRealpath) {
+	/* 
+	 * If we only had '/foo' or '/' then we never increment nextCheckpoint
+	 * and we don't need or want to go through 'Realpath'.  Also, on some
+	 * platforms, passing an empty string to 'Realpath' will give us the
+	 * normalized pwd, which is not what we want at all!
+	 */
+	if (nextCheckpoint == 0) return 0;
 	
-	/* 
-	 * Free up the native path and put in its place the
-	 * converted, normalized path.
-	 */
-	Tcl_DStringFree(&ds);
-	Tcl_ExternalToUtfDString(NULL, normPath, (int) newNormLen, &ds);
-
-	if (path[nextCheckpoint] != '\0') {
-	    /* not at end, append remaining path */
-	    int normLen = Tcl_DStringLength(&ds);
-	    Tcl_DStringAppend(&ds, path + nextCheckpoint,
-		    pathLen - nextCheckpoint);
+	nativePath = Tcl_UtfToExternalDString(NULL, path, nextCheckpoint, &ds);
+	if (Realpath(nativePath, normPath) != NULL) {
+	    int newNormLen;
+	    wholeStringOk:
+	    newNormLen = strlen(normPath);
+	    if ((newNormLen == Tcl_DStringLength(&ds))
+		    && (strcmp(normPath, nativePath) == 0)) {
+		/* String is unchanged */
+		Tcl_DStringFree(&ds);
+		if (path[nextCheckpoint] != '\0') {
+		    nextCheckpoint++;
+		}
+		return nextCheckpoint;
+	    }
+	    
 	    /* 
-	     * We recognise up to and including the directory
-	     * separator.
-	     */	
-	    nextCheckpoint = normLen + 1;
-	} else {
-	    /* We recognise the whole string */ 
-	    nextCheckpoint = Tcl_DStringLength(&ds);
+	     * Free up the native path and put in its place the
+	     * converted, normalized path.
+	     */
+	    Tcl_DStringFree(&ds);
+	    Tcl_ExternalToUtfDString(NULL, normPath, (int) newNormLen, &ds);
+    
+	    if (path[nextCheckpoint] != '\0') {
+		/* not at end, append remaining path */
+		int normLen = Tcl_DStringLength(&ds);
+		Tcl_DStringAppend(&ds, path + nextCheckpoint,
+			pathLen - nextCheckpoint);
+		/* 
+		 * We recognise up to and including the directory
+		 * separator.
+		 */	
+		nextCheckpoint = normLen + 1;
+	    } else {
+		/* We recognise the whole string */ 
+		nextCheckpoint = Tcl_DStringLength(&ds);
+	    }
+	    /* 
+	     * Overwrite with the normalized path.
+	     */
+	    Tcl_SetStringObj(pathPtr, Tcl_DStringValue(&ds),
+		    Tcl_DStringLength(&ds));
 	}
-	/* 
-	 * Overwrite with the normalized path.
-	 */
-	Tcl_SetStringObj(pathPtr, Tcl_DStringValue(&ds),
-		Tcl_DStringLength(&ds));
+	Tcl_DStringFree(&ds);
     }
-    Tcl_DStringFree(&ds);
 #endif	/* !NO_REALPATH */
 
     return nextCheckpoint;
 }
-
-
-

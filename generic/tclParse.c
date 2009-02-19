@@ -13,7 +13,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclParse.c,v 1.25 2003/02/16 01:36:32 msofer Exp $
+ * RCS: @(#) $Id: tclParse.c,v 1.25.2.3 2007/10/15 13:29:19 msofer Exp $
  */
 
 #include "tclInt.h"
@@ -238,7 +238,7 @@ Tcl_ParseCommand(interp, string, numBytes, nested, parsePtr)
 				 * point to char after terminating one. */
     int scanned;
     
-    if ((string == NULL) && (numBytes>0)) {
+    if ((string == NULL) && (numBytes!=0)) {
 	if (interp != NULL) {
 	    Tcl_SetResult(interp, "can't parse a NULL pointer", TCL_STATIC);
 	}
@@ -1153,9 +1153,9 @@ Tcl_ParseVarName(interp, string, numBytes, parsePtr, append)
 	    numBytes--; src++;
 	}
 	if (numBytes == 0) {
-	    if (interp != NULL) {
-		Tcl_SetResult(interp, "missing close-brace for variable name",
-			TCL_STATIC);
+	    if (parsePtr->interp != NULL) {
+		Tcl_SetResult(parsePtr->interp,
+			"missing close-brace for variable name", TCL_STATIC);
 	    }
 	    parsePtr->errorType = TCL_PARSE_MISSING_VAR_BRACE;
 	    parsePtr->term = tokenPtr->start-1;
@@ -1423,7 +1423,7 @@ Tcl_ParseBraces(interp, string, numBytes, parsePtr, append, termPtr)
 	    parsePtr->errorType = TCL_PARSE_MISSING_BRACE;
 	    parsePtr->term = string;
 	    parsePtr->incomplete = 1;
-	    if (interp == NULL) {
+	    if (parsePtr->interp == NULL) {
 		/*
 		 * Skip straight to the exit code since we have no
 		 * interpreter to put error message in.
@@ -1431,7 +1431,7 @@ Tcl_ParseBraces(interp, string, numBytes, parsePtr, append, termPtr)
 		goto error;
 	    }
 
-	    Tcl_SetResult(interp, "missing close-brace", TCL_STATIC);
+	    Tcl_SetResult(parsePtr->interp, "missing close-brace", TCL_STATIC);
 
 	    /*
 	     *  Guess if the problem is due to comments by searching
@@ -1441,7 +1441,7 @@ Tcl_ParseBraces(interp, string, numBytes, parsePtr, append, termPtr)
 	     *  by a '<whitespace>#' on the same line.
 	     */
 
-	    for (; src > string; src--) {
+	    while (--src > string) {
 		switch (*src) {
 		    case '{':
 			openBrace = 1;
@@ -1451,7 +1451,7 @@ Tcl_ParseBraces(interp, string, numBytes, parsePtr, append, termPtr)
 			break;
 		    case '#' :
 			if (openBrace && (isspace(UCHAR(src[-1])))) {
-			    Tcl_AppendResult(interp,
+			    Tcl_AppendResult(parsePtr->interp,
 				    ": possible unbalanced brace in comment",
 				    (char *) NULL);
 			    goto error;
@@ -1610,7 +1610,7 @@ Tcl_ParseQuotedString(interp, string, numBytes, parsePtr, append, termPtr)
 	goto error;
     }
     if (*parsePtr->term != '"') {
-	if (interp != NULL) {
+	if (parsePtr->interp != NULL) {
 	    Tcl_SetResult(parsePtr->interp, "missing \"", TCL_STATIC);
 	}
 	parsePtr->errorType = TCL_PARSE_MISSING_QUOTE;

@@ -11,7 +11,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclWinFile.c,v 1.44.2.12 2005/06/22 21:23:33 dgp Exp $
+ * RCS: @(#) $Id: tclWinFile.c,v 1.44.2.18 2006/10/17 04:36:45 dgp Exp $
  */
 
 //#define _WIN32_WINNT  0x0500
@@ -21,6 +21,13 @@
 #include <sys/stat.h>
 #include <shlobj.h>
 #include <lmaccess.h>		/* For TclpGetUserHome(). */
+
+/*
+ * The number of 100-ns intervals between the Windows system epoch (1601-01-01
+ * on the proleptic Gregorian calendar) and the Posix epoch (1970-01-01).
+ */
+
+#define POSIX_EPOCH_AS_FILETIME		116444736000000000
 
 /*
  * Declarations for 'link' related information.  This information
@@ -74,6 +81,9 @@
 #  define FSCTL_SET_REPARSE_POINT    CTL_CODE(FILE_DEVICE_FILE_SYSTEM, 41, METHOD_BUFFERED, FILE_SPECIAL_ACCESS)
 #  define FSCTL_GET_REPARSE_POINT    CTL_CODE(FILE_DEVICE_FILE_SYSTEM, 42, METHOD_BUFFERED, FILE_ANY_ACCESS) 
 #  define FSCTL_DELETE_REPARSE_POINT CTL_CODE(FILE_DEVICE_FILE_SYSTEM, 43, METHOD_BUFFERED, FILE_SPECIAL_ACCESS) 
+#endif
+#ifndef INVALID_FILE_ATTRIBUTES
+#define INVALID_FILE_ATTRIBUTES ((DWORD)-1)
 #endif
 
 /* 
@@ -151,6 +161,7 @@ typedef enum _FINDEX_SEARCH_OPS {
 /* Other typedefs required by this code */
 
 static time_t		ToCTime(FILETIME fileTime);
+static void		FromCTime(time_t posixTime, FILETIME *fileTime);
 
 typedef NET_API_STATUS NET_API_FUNCTION NETUSERGETINFOPROC
 	(LPWSTR servername, LPWSTR username, DWORD level, LPBYTE *bufptr);
@@ -160,8 +171,6 @@ typedef NET_API_STATUS NET_API_FUNCTION NETAPIBUFFERFREEPROC
 
 typedef NET_API_STATUS NET_API_FUNCTION NETGETDCNAMEPROC
 	(LPWSTR servername, LPWSTR domainname, LPBYTE *bufptr);
-
-extern Tcl_FSDupInternalRepProc NativeDupInternalRep;
 
 /*
  * Declarations for local procedures defined in this file:
@@ -1326,16 +1335,21 @@ NativeAccess(
 
     if (attr == 0xffffffff) {
 	/*
-	 * File doesn't exist. 
+	 * File doesn't exist.
 	 */
 
 	TclWinConvertError(GetLastError());
 	return -1;
     }
 
-    if ((mode & W_OK) && (attr & FILE_ATTRIBUTE_READONLY)) {
+    if ((mode & W_OK) 
+      && (tclWinProcs->getFileSecurityProc == NULL)
+      && (attr & FILE_ATTRIBUTE_READONLY)) {
 	/*
-	 * File is not writable.
+	 * We don't have the advanced 'getFileSecurityProc', and
+	 * our attributes say the file is not writable.  If we
+	 * do have 'getFileSecurityProc', we'll do a more
+	 * robust XP-related check below.
 	 */
 
 	Tcl_SetErrno(EACCES);
@@ -1343,20 +1357,175 @@ NativeAccess(
     }
 
     if (mode & X_OK) {
-	if (attr & FILE_ATTRIBUTE_DIRECTORY) {
+	if (!(attr & FILE_ATTRIBUTE_DIRECTORY) && !NativeIsExec(nativePath)) {
 	    /*
-	     * Directories are always executable. 
+	     * It's not a directory and doesn't have the correct extension.
+	     * Therefore it can't be executable
 	     */
-	    
-	    return 0;
+
+	    Tcl_SetErrno(EACCES);
+	    return -1;
 	}
-	if (NativeIsExec(nativePath)) {
-	    return 0;
-	}
-	Tcl_SetErrno(EACCES);
-	return -1;
     }
 
+    /*
+     * It looks as if the permissions are ok, but if we are on NT, 2000 or XP,
+     * we have a more complex permissions structure so we try to check that.
+     * The code below is remarkably complex for such a simple thing as finding
+     * what permissions the OS has set for a file.
+     *
+     * If we are simply checking for file existence, then we don't need all
+     * these complications (which are really quite slow: with this code 'file
+     * readable' is 5-6 times slower than 'file exists').
+     */
+
+    if ((mode != F_OK) && (tclWinProcs->getFileSecurityProc != NULL)) {
+	SECURITY_DESCRIPTOR *sdPtr = NULL;
+	unsigned long size;
+	GENERIC_MAPPING genMap;
+	HANDLE hToken = NULL;
+	DWORD desiredAccess = 0;
+	DWORD grantedAccess = 0;
+	BOOL accessYesNo = FALSE;
+	PRIVILEGE_SET privSet;
+	DWORD privSetSize = sizeof(PRIVILEGE_SET);
+	int error;
+
+	/*
+	 * First find out how big the buffer needs to be
+	 */
+
+	size = 0;
+	(*tclWinProcs->getFileSecurityProc)(nativePath,
+		OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION
+		| DACL_SECURITY_INFORMATION, 0, 0, &size);
+
+	/*
+	 * Should have failed with ERROR_INSUFFICIENT_BUFFER
+	 */
+
+	error = GetLastError();
+	if (error != ERROR_INSUFFICIENT_BUFFER) {
+	    /*
+	     * Most likely case is ERROR_ACCESS_DENIED, which we will convert
+	     * to EACCES - just what we want!
+	     */
+
+	    TclWinConvertError((DWORD)error);
+	    return -1;
+	}
+
+	/*
+	 * Now size contains the size of buffer needed
+	 */
+
+	sdPtr = (SECURITY_DESCRIPTOR *) HeapAlloc(GetProcessHeap(), 0, size);
+
+	if (sdPtr == NULL) {
+	    goto accessError;
+	}
+
+	/*
+	 * Call GetFileSecurity() for real
+	 */
+
+	if (!(*tclWinProcs->getFileSecurityProc)(nativePath,
+		OWNER_SECURITY_INFORMATION | GROUP_SECURITY_INFORMATION
+		| DACL_SECURITY_INFORMATION, sdPtr, size, &size)) {
+	    /*
+	     * Error getting owner SD
+	     */
+
+	    goto accessError;
+	}
+
+	/*
+	 * Perform security impersonation of the user and open the
+	 * resulting thread token.
+	 */
+
+	if (!(*tclWinProcs->impersonateSelfProc)(SecurityImpersonation)) {
+	    /*
+	     * Unable to perform security impersonation.
+	     */
+	    
+	    goto accessError;
+	}
+	if (!(*tclWinProcs->openThreadTokenProc)(GetCurrentThread (),
+		TOKEN_DUPLICATE | TOKEN_QUERY, FALSE, &hToken)) {
+	    /*
+	     * Unable to get current thread's token.
+	     */
+	    
+	    goto accessError;
+	}
+	
+	(*tclWinProcs->revertToSelfProc)();
+	
+	/*
+	 * Setup desiredAccess according to the access priveleges we are
+	 * checking.
+	 */
+
+	if (mode & R_OK) {
+	    desiredAccess |= FILE_GENERIC_READ;
+	}
+	if (mode & W_OK) {
+	    desiredAccess |= FILE_GENERIC_WRITE;
+	}
+	if (mode & X_OK) {
+	    desiredAccess |= FILE_GENERIC_EXECUTE;
+	}
+
+	memset (&genMap, 0x0, sizeof (GENERIC_MAPPING));
+	genMap.GenericRead = FILE_GENERIC_READ;
+	genMap.GenericWrite = FILE_GENERIC_WRITE;
+	genMap.GenericExecute = FILE_GENERIC_EXECUTE;
+	genMap.GenericAll = FILE_ALL_ACCESS;
+	
+	/*
+	 * Perform access check using the token.
+	 */
+
+	if (!(*tclWinProcs->accessCheckProc)(sdPtr, hToken, desiredAccess,
+		&genMap, &privSet, &privSetSize, &grantedAccess,
+		&accessYesNo)) {
+	    /*
+	     * Unable to perform access check.
+	     */
+
+	accessError:
+	    TclWinConvertError(GetLastError());
+	    if (sdPtr != NULL) {
+		HeapFree(GetProcessHeap(), 0, sdPtr);
+	    }
+	    if (hToken != NULL) {
+		CloseHandle(hToken);
+	    }
+	    return -1;
+	}
+
+	/*
+	 * Clean up.
+	 */
+
+	HeapFree(GetProcessHeap (), 0, sdPtr);
+	CloseHandle(hToken);
+	if (!accessYesNo) {
+	    Tcl_SetErrno(EACCES);
+	    return -1;
+	}
+	/*
+	 * For directories the above checks are ok.  For files, though,
+	 * we must still check the 'attr' value.
+	 */
+	if ((mode & W_OK)
+	  && !(attr & FILE_ATTRIBUTE_DIRECTORY)
+	  && (attr & FILE_ATTRIBUTE_READONLY)) {
+	    Tcl_SetErrno(EACCES);
+	    return -1;
+	}
+    }
     return 0;
 }
 
@@ -1683,7 +1852,7 @@ NativeStat(nativePath, statPtr, checkLinks)
 	     */
 
 	    attr = (*tclWinProcs->getFileAttributesProc)(nativePath);
-	    if (attr == 0xffffffff) {
+	    if (attr == INVALID_FILE_ATTRIBUTES) {
 		Tcl_SetErrno(ENOENT);
 		return -1;
 	    }
@@ -1860,57 +2029,57 @@ NativeStatMode(DWORD attr, int checkLinks, int isExec)
     return (unsigned short)mode;
 }
 
+/*
+ *------------------------------------------------------------------------
+ *
+ * ToCTime --
+ *
+ *	Converts a Windows FILETIME to a time_t in UTC.
+ *
+ * Results:
+ *	Returns the count of seconds from the Posix epoch.
+ *
+ *------------------------------------------------------------------------
+ */
+
 static time_t
 ToCTime(
-    FILETIME fileTime)		/* UTC Time to convert to local time_t. */
+    FILETIME fileTime)		/* UTC time */
 {
-    FILETIME localFileTime;
-    SYSTEMTIME systemTime;
-    struct tm tm;
+    LARGE_INTEGER convertedTime;
 
-    if (FileTimeToLocalFileTime(&fileTime, &localFileTime) == 0) {
-	return 0;
-    }
-    if (FileTimeToSystemTime(&localFileTime, &systemTime) == 0) {
-	return 0;
-    }
-    tm.tm_sec = systemTime.wSecond;
-    tm.tm_min = systemTime.wMinute;
-    tm.tm_hour = systemTime.wHour;
-    tm.tm_mday = systemTime.wDay;
-    tm.tm_mon = systemTime.wMonth - 1;
-    tm.tm_year = systemTime.wYear - 1900;
-    tm.tm_wday = 0;
-    tm.tm_yday = 0;
-    tm.tm_isdst = -1;
+    convertedTime.LowPart = fileTime.dwLowDateTime;
+    convertedTime.HighPart = (LONG) fileTime.dwHighDateTime;
 
-    return mktime(&tm);
+    return (time_t) ((convertedTime.QuadPart
+	    - (Tcl_WideInt) POSIX_EPOCH_AS_FILETIME) / (Tcl_WideInt) 10000000);
 }
+
+/*
+ *------------------------------------------------------------------------
+ *
+ * FromCTime --
+ *
+ *	Converts a time_t to a Windows FILETIME
+ *
+ * Results:
+ *	Returns the count of 100-ns ticks seconds from the Windows epoch.
+ *
+ *------------------------------------------------------------------------
+ */
 
-#if 0
-
-    /*
-     * Borland's stat doesn't take into account localtime.
-     */
-
-    if ((result == 0) && (buf->st_mtime != 0)) {
-	TIME_ZONE_INFORMATION tz;
-	int time, bias;
-
-	time = GetTimeZoneInformation(&tz);
-	bias = tz.Bias;
-	if (time == TIME_ZONE_ID_DAYLIGHT) {
-	    bias += tz.DaylightBias;
-	}
-	bias *= 60;
-	buf->st_atime -= bias;
-	buf->st_ctime -= bias;
-	buf->st_mtime -= bias;
-    }
-
-#endif
-
-
+static void
+FromCTime(
+    time_t posixTime,
+    FILETIME* fileTime)		/* UTC Time */
+{
+    LARGE_INTEGER convertedTime;
+    convertedTime.QuadPart = ((LONGLONG) posixTime) * 10000000
+	+ POSIX_EPOCH_AS_FILETIME;
+    fileTime->dwLowDateTime = convertedTime.LowPart;
+    fileTime->dwHighDateTime = convertedTime.HighPart;
+}
+
 #if 0
 /*
  *-------------------------------------------------------------------------
@@ -2187,7 +2356,7 @@ TclpObjNormalizePath(interp, pathPtr, nextCheckpoint)
 		 * the current normalized path, if the file exists.
 		 */
 		if (isDrive) {
-		    if (GetFileAttributesA(nativePath) == 0xffffffff) {
+		    if (GetFileAttributesA(nativePath) == INVALID_FILE_ATTRIBUTES) {
 			/* File doesn't exist */
 			if (isDrive) {
 			    int len = WinIsReserved(path);
@@ -2217,7 +2386,7 @@ TclpObjNormalizePath(interp, pathPtr, nextCheckpoint)
 		    handle = FindFirstFileA(nativePath, &fData);
 		    if (handle == INVALID_HANDLE_VALUE) {
 			if (GetFileAttributesA(nativePath) 
-			    == 0xffffffff) {
+			    == INVALID_FILE_ATTRIBUTES) {
 			    /* File doesn't exist */
 			    Tcl_DStringFree(&ds);
 			    break;
@@ -2454,25 +2623,51 @@ TclpObjNormalizePath(interp, pathPtr, nextCheckpoint)
  *	0 on success, -1 on error.
  *
  * Side effects:
- *	None.
+ *	Sets errno to a representation of any Windows problem that's observed
+ *	in the process.
  *
  *---------------------------------------------------------------------------
  */
+
 int
-TclpUtime(pathPtr, tval)
-    Tcl_Obj *pathPtr;      /* File to modify */
-    struct utimbuf *tval;  /* New modification date structure */
+TclpUtime(
+    Tcl_Obj *pathPtr,		/* File to modify */
+    struct utimbuf *tval)	/* New modification date structure */
 {
-    int res;
-    /* 
-     * Windows uses a slightly different structure name and, possibly,
-     * contents, so we have to copy the information over
+    int res = 0;
+    HANDLE fileHandle;
+    CONST TCHAR *native;
+    DWORD attr = 0;
+    DWORD flags = FILE_ATTRIBUTE_NORMAL;
+    FILETIME lastAccessTime, lastModTime;
+
+    FromCTime(tval->actime, &lastAccessTime);
+    FromCTime(tval->modtime, &lastModTime);
+
+    native = (CONST TCHAR *)Tcl_FSGetNativePath(pathPtr);
+
+    attr = (*tclWinProcs->getFileAttributesProc)(native);
+
+    if (attr != INVALID_FILE_ATTRIBUTES && attr & FILE_ATTRIBUTE_DIRECTORY) {
+	flags = FILE_FLAG_BACKUP_SEMANTICS;
+    }
+
+    /*
+     * We use the native APIs (not 'utime') because there are some daylight
+     * savings complications that utime gets wrong.
      */
-    struct _utimbuf buf;
-    
-    buf.actime = tval->actime;
-    buf.modtime = tval->modtime;
-    
-    res = (*tclWinProcs->utimeProc)(Tcl_FSGetNativePath(pathPtr),&buf);
+
+    fileHandle = (tclWinProcs->createFileProc) (
+	    native, FILE_WRITE_ATTRIBUTES, 0, NULL,
+	    OPEN_EXISTING, flags, NULL);
+
+    if (fileHandle == INVALID_HANDLE_VALUE ||
+	    !SetFileTime(fileHandle, NULL, &lastAccessTime, &lastModTime)) {
+	TclWinConvertError(GetLastError());
+	res = -1;
+    }
+    if (fileHandle != INVALID_HANDLE_VALUE) {
+	CloseHandle(fileHandle);
+    }
     return res;
 }

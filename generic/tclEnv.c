@@ -12,7 +12,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclEnv.c,v 1.20.2.1 2003/05/14 17:17:46 hobbs Exp $
+ * RCS: @(#) $Id: tclEnv.c,v 1.20.2.4 2007/08/07 05:04:48 das Exp $
  */
 
 #include "tclInt.h"
@@ -26,19 +26,16 @@ static char **environCache = NULL;
 				 * strings that Tcl has allocated. */
 
 #ifndef USE_PUTENV
+static char **ourEnviron = NULL;/* Cache of the array that we allocate.
+				 * We need to track this in case another
+				 * subsystem swaps around the environ array
+				 * like we do.
+				 */
 static int environSize = 0;	/* Non-zero means that the environ array was
 				 * malloced and has this many total entries
 				 * allocated to it (not all may be in use at
 				 * once).  Zero means that the environment
 				 * array is in its original static state. */
-#endif
-
-/*
- * For MacOS X
- */
-#if defined(__APPLE__) && defined(__DYNAMIC__)
-#include <crt_externs.h>
-char **environ = NULL;
 #endif
 
 /*
@@ -89,13 +86,6 @@ TclSetupEnv(interp)
     Tcl_DString envString;
     char *p1, *p2;
     int i;
-
-    /*
-     * For MacOS X
-     */
-#if defined(__APPLE__) && defined(__DYNAMIC__)
-    environ = *_NSGetEnviron();
-#endif
 
     /*
      * Synchronize the values in the environ array with the contents
@@ -191,24 +181,23 @@ TclSetEnv(name, value)
 
     if (index == -1) {
 #ifndef USE_PUTENV
-	if ((length + 2) > environSize) {
+	/*
+	 * We need to handle the case where the environment may be changed
+	 * outside our control.  environSize is only valid if the current
+	 * environment is the one we allocated. [Bug 979640]
+	 */
+	if ((ourEnviron != environ) || ((length + 2) > environSize)) {
 	    char **newEnviron;
 
 	    newEnviron = (char **) ckalloc((unsigned)
 		    ((length + 5) * sizeof(char *)));
 	    memcpy((VOID *) newEnviron, (VOID *) environ,
 		    length*sizeof(char *));
-	    if (environSize != 0) {
-		ckfree((char *) environ);
+	    if ((environSize != 0) && (ourEnviron != NULL)) {
+		ckfree((char *) ourEnviron);
 	    }
-	    environ = newEnviron;
+	    environ = ourEnviron = newEnviron;
 	    environSize = length + 5;
-#if defined(__APPLE__) && defined(__DYNAMIC__)
-	    {
-	    char ***e = _NSGetEnviron();
-	    *e = environ;
-	    }
-#endif
 	}
 	index = length;
 	environ[index + 1] = NULL;
@@ -237,7 +226,6 @@ TclSetEnv(name, value)
 	oldValue = environ[index];
 	nameLength = length;
     }
-	
 
     /*
      * Create a new entry.  Build a complete UTF string that contains
@@ -378,7 +366,7 @@ TclUnsetEnv(name)
     char *oldValue;
     int length;
     int index;
-#ifdef USE_PUTENV
+#ifdef USE_PUTENV_FOR_UNSET
     Tcl_DString envString;
     char *string;
 #else
@@ -392,7 +380,7 @@ TclUnsetEnv(name)
      * First make sure that the environment variable exists to avoid
      * doing needless work and to avoid recursion on the unset.
      */
-    
+
     if (index == -1) {
 	Tcl_MutexUnlock(&envMutex);
 	return;
@@ -408,12 +396,22 @@ TclUnsetEnv(name)
      * update the interpreters or we will recurse.
      */
 
-#ifdef USE_PUTENV
+#ifdef USE_PUTENV_FOR_UNSET
+    /*
+     * For those platforms that support putenv to unset, Linux indicates
+     * that no = should be included, and Windows requires it.
+     */
+#ifdef WIN32
     string = ckalloc((unsigned int) length+2);
     memcpy((VOID *) string, (VOID *) name, (size_t) length);
     string[length] = '=';
     string[length+1] = '\0';
-    
+#else
+    string = ckalloc((unsigned int) length+1);
+    memcpy((VOID *) string, (VOID *) name, (size_t) length);
+    string[length] = '\0';
+#endif
+
     Tcl_UtfToExternalDString(NULL, string, -1, &envString);
     string = ckrealloc(string, (unsigned) (Tcl_DStringLength(&envString)+1));
     strcpy(string, Tcl_DStringValue(&envString));
@@ -633,7 +631,7 @@ ReplaceString(oldStr, newStr)
 	if (environCache[i]) {
 	    ckfree(environCache[i]);
 	}
-	    
+
 	if (newStr) {
 	    environCache[i] = newStr;
 	} else {
@@ -642,7 +640,7 @@ ReplaceString(oldStr, newStr)
 	    }
 	    environCache[cacheSize-1] = NULL;
 	}
-    } else {	
+    } else {
         int allocatedSize = (cacheSize + 5) * sizeof(char *);
 
 	/*
@@ -651,7 +649,7 @@ ReplaceString(oldStr, newStr)
 
 	newCache = (char **) ckalloc((unsigned) allocatedSize);
         (VOID *) memset(newCache, (int) 0, (size_t) allocatedSize);
-        
+
 	if (environCache) {
 	    memcpy((VOID *) newCache, (VOID *) environCache,
 		    (size_t) (cacheSize * sizeof(char*)));

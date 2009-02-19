@@ -3,7 +3,7 @@
 # utility procs formerly in init.tcl which can be loaded on demand
 # for package management.
 #
-# RCS: @(#) $Id: package.tcl,v 1.23.2.2 2003/07/24 08:23:17 rmax Exp $
+# RCS: @(#) $Id: package.tcl,v 1.23.2.4 2006/09/22 01:26:24 andreas_kupries Exp $
 #
 # Copyright (c) 1991-1993 The Regents of the University of California.
 # Copyright (c) 1994-1998 Sun Microsystems, Inc.
@@ -33,8 +33,8 @@ namespace eval ::pkg {
 
 proc pkg_compareExtension { fileName {ext {}} } {
     global tcl_platform
-    if {![string length $ext]} {set ext [info sharedlibextension]}
-    if {[string equal $tcl_platform(platform) "windows"]} {
+    if {$ext eq ""} {set ext [info sharedlibextension]}
+    if {$tcl_platform(platform) eq "windows"} {
         return [string equal -nocase [file extension $fileName] $ext]
     } else {
         # Some unices add trailing numbers after the .so, so
@@ -42,7 +42,7 @@ proc pkg_compareExtension { fileName {ext {}} } {
         set root $fileName
         while {1} {
             set currExt [file extension $root]
-            if {[string equal $currExt $ext]} {
+            if {$currExt eq $ext} {
                 return 1
             } 
 
@@ -140,7 +140,7 @@ proc pkg_mkIndex {args} {
     set oldDir [pwd]
     cd $dir
 
-    if {[catch {eval glob $patternList} fileList]} {
+    if {[catch {eval [linsert $patternList 0 glob --]} fileList]} {
 	global errorCode errorInfo
 	cd $oldDir
 	return -code error -errorcode $errorCode -errorinfo $errorInfo $fileList
@@ -151,7 +151,7 @@ proc pkg_mkIndex {args} {
 	# interpreter, and get a list of the new commands and packages
 	# that are defined.
 
-	if {[string equal $file "pkgIndex.tcl"]} {
+	if {$file eq "pkgIndex.tcl"} {
 	    continue
 	}
 
@@ -165,7 +165,7 @@ proc pkg_mkIndex {args} {
 	# Load into the child any packages currently loaded in the parent
 	# interpreter that match the -load pattern.
 
-	if {[string length $loadPat]} {
+	if {$loadPat ne ""} {
 	    if {$doVerbose} {
 		tclLog "currently loaded packages: '[info loaded]'"
 		tclLog "trying to load all packages matching $loadPat"
@@ -191,7 +191,7 @@ proc pkg_mkIndex {args} {
 	    } elseif {$doVerbose} {
 		tclLog "loaded [lindex $pkg 0] [lindex $pkg 1]"
 	    }
-	    if {[string equal [lindex $pkg 1] "Tk"]} {
+	    if {[lindex $pkg 1] eq "Tk"} {
 		# Withdraw . if Tk was loaded, to avoid showing a window.
 		$c eval [list wm withdraw .]
 	    }
@@ -206,7 +206,7 @@ proc pkg_mkIndex {args} {
 	    proc package {what args} {
 		switch -- $what {
 		    require { return ; # ignore transitive requires }
-		    default { eval __package_orig {$what} $args }
+		    default { uplevel 1 [linsert $args 0 __package_orig $what] }
 		}
 	    }
 	    proc tclPkgUnknown args {}
@@ -261,7 +261,8 @@ proc pkg_mkIndex {args} {
 		proc ::tcl::GetAllNamespaces {{root ::}} {
 		    set list $root
 		    foreach ns [namespace children $root] {
-			eval lappend list [::tcl::GetAllNamespaces $ns]
+			eval [linsert [::tcl::GetAllNamespaces $ns] 0 \
+				lappend list]
 		    }
 		    return $list
 		}
@@ -272,7 +273,7 @@ proc pkg_mkIndex {args} {
 		    set ::tcl::namespaces($::tcl::x) 1
 		}
 		foreach ::tcl::x [package names] {
-		    if {[string compare [package provide $::tcl::x] ""]} {
+		    if {[package provide $::tcl::x] ne ""} {
 			set ::tcl::packages($::tcl::x) 1
 		    }
 		}
@@ -320,7 +321,7 @@ proc pkg_mkIndex {args} {
 			    set ::tcl::newCmds($::tcl::x) 1
 			}
 			foreach ::tcl::x $::tcl::origCmds {
-			    catch {unset ::tcl::newCmds($::tcl::x)}
+			    unset -nocomplain ::tcl::newCmds($::tcl::x)
 			}
 			foreach ::tcl::x [array names ::tcl::newCmds] {
 			    # determine which namespace a command comes from
@@ -333,7 +334,7 @@ proc pkg_mkIndex {args} {
 			    set ::tcl::abs \
 				    [lindex [auto_qualify $::tcl::abs ::] 0]
 			    
-			    if {[string compare $::tcl::x $::tcl::abs]} {
+			    if {$::tcl::x ne $::tcl::abs} {
 				# Name changed during qualification
 				
 				set ::tcl::newCmds($::tcl::abs) 1
@@ -347,7 +348,7 @@ proc pkg_mkIndex {args} {
 		# a version provided, then record it
 
 		foreach ::tcl::x [package names] {
-		    if {[string compare [package provide $::tcl::x] ""] \
+		    if {[package provide $::tcl::x] ne ""
 			    && ![info exists ::tcl::packages($::tcl::x)]} {
 			lappend ::tcl::newPkgs \
 			    [list $::tcl::x [package provide $::tcl::x]]
@@ -447,7 +448,7 @@ proc tclPkgSetup {dir pkg version files} {
 	set f [lindex $fileInfo 0]
 	set type [lindex $fileInfo 1]
 	foreach cmd [lindex $fileInfo 2] {
-	    if {[string equal $type "load"]} {
+	    if {$type eq "load"} {
 		set auto_index($cmd) [list load [file join $dir $f] $pkg]
 	    } else {
 		set auto_index($cmd) [list source [file join $dir $f]]
@@ -470,7 +471,12 @@ proc tclPkgSetup {dir pkg version files} {
 # version -		Version of desired package.  Not used.
 # exact -		Either "-exact" or omitted.  Not used.
 
-proc tclPkgUnknown {name version {exact {}}} {
+
+proc tclPkgUnknown [expr {
+			  [info exists tcl_platform(tip,268)]
+			  ? "name args"
+			  : "name version {exact {}}"
+		      }] {
     global auto_path env
 
     if {![info exists auto_path]} {
@@ -563,43 +569,86 @@ proc tclPkgUnknown {name version {exact {}}} {
 # Arguments:
 # original -		original [package unknown] procedure
 # name -		Name of desired package.  Not used.
+#ifndef TCL_TIP268
 # version -		Version of desired package.  Not used.
 # exact -		Either "-exact" or omitted.  Not used.
+#else
+# args -		List of requirements. Not used.
+#endif
 
-proc tcl::MacOSXPkgUnknown {original name version {exact {}}} {
+if {[info exists tcl_platform(tip,268)]} {
+    proc tcl::MacOSXPkgUnknown {original name args} {
+	#  First do the cross-platform default search
+	uplevel 1 $original [linsert $args 0 $name]
 
-    #  First do the cross-platform default search
-    uplevel 1 $original [list $name $version $exact]
+	# Now do MacOSX specific searching
+	global auto_path
 
-    # Now do MacOSX specific searching
-    global auto_path
-
-    if {![info exists auto_path]} {
-	return
-    }
-    # Cache the auto_path, because it may change while we run through
-    # the first set of pkgIndex.tcl files
-    set old_path [set use_path $auto_path]
-    while {[llength $use_path]} {
-	set dir [lindex $use_path end]
-	# get the pkgIndex files out of the subdirectories
-	foreach file [glob -directory $dir -join -nocomplain \
-		* Resources Scripts pkgIndex.tcl] {
-	    set dir [file dirname $file]
-	    if {[file readable $file] && ![info exists procdDirs($dir)]} {
-		if {[catch {source $file} msg]} {
-		    tclLog "error reading package index file $file: $msg"
-		} else {
-		    set procdDirs($dir) 1
+	if {![info exists auto_path]} {
+	    return
+	}
+	# Cache the auto_path, because it may change while we run through
+	# the first set of pkgIndex.tcl files
+	set old_path [set use_path $auto_path]
+	while {[llength $use_path]} {
+	    set dir [lindex $use_path end]
+	    # get the pkgIndex files out of the subdirectories
+	    foreach file [glob -directory $dir -join -nocomplain \
+			      * Resources Scripts pkgIndex.tcl] {
+		set dir [file dirname $file]
+		if {[file readable $file] && ![info exists procdDirs($dir)]} {
+		    if {[catch {source $file} msg]} {
+			tclLog "error reading package index file $file: $msg"
+		    } else {
+			set procdDirs($dir) 1
+		    }
 		}
 	    }
-	}
-	set use_path [lrange $use_path 0 end-1]
-	if {[string compare $old_path $auto_path]} {
-	    foreach dir $auto_path {
-		lappend use_path $dir
+	    set use_path [lrange $use_path 0 end-1]
+	    if {$old_path ne $auto_path} {
+		foreach dir $auto_path {
+		    lappend use_path $dir
+		}
+		set old_path $auto_path
 	    }
-	    set old_path $auto_path
+	}
+    }
+} else {
+    proc tcl::MacOSXPkgUnknown {original name version {exact {}}} {
+
+	#  First do the cross-platform default search
+	uplevel 1 $original [list $name $version $exact]
+
+	# Now do MacOSX specific searching
+	global auto_path
+
+	if {![info exists auto_path]} {
+	    return
+	}
+	# Cache the auto_path, because it may change while we run through
+	# the first set of pkgIndex.tcl files
+	set old_path [set use_path $auto_path]
+	while {[llength $use_path]} {
+	    set dir [lindex $use_path end]
+	    # get the pkgIndex files out of the subdirectories
+	    foreach file [glob -directory $dir -join -nocomplain \
+			      * Resources Scripts pkgIndex.tcl] {
+		set dir [file dirname $file]
+		if {[file readable $file] && ![info exists procdDirs($dir)]} {
+		    if {[catch {source $file} msg]} {
+			tclLog "error reading package index file $file: $msg"
+		    } else {
+			set procdDirs($dir) 1
+		    }
+		}
+	    }
+	    set use_path [lrange $use_path 0 end-1]
+	    if {$old_path ne $auto_path} {
+		foreach dir $auto_path {
+		    lappend use_path $dir
+		}
+		set old_path $auto_path
+	    }
 	}
     }
 }
@@ -640,7 +689,7 @@ proc tcl::MacPkgUnknown {original name version {exact {}}} {
 		    if {[file isfile $x]} {
 			set res [resource open $x]
 			foreach y [resource list TEXT $res] {
-			    if {[string equal $y "pkgIndex"]} {source -rsrc pkgIndex}
+			    if {$y eq "pkgIndex"} {source -rsrc pkgIndex}
 			}
 			catch {resource close $res}
 		    }
@@ -649,7 +698,7 @@ proc tcl::MacPkgUnknown {original name version {exact {}}} {
 	    }
 	}
 	set use_path [lrange $use_path 0 end-1]
-	if {[string compare $old_path $auto_path]} {
+	if {$old_path ne $auto_path} {
 	    foreach dir $auto_path {
 		lappend use_path $dir
 	    }

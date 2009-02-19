@@ -19,7 +19,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclNamesp.c,v 1.31.2.6 2004/10/05 16:22:34 dgp Exp $
+ * RCS: @(#) $Id: tclNamesp.c,v 1.31.2.14 2007/05/15 18:32:18 dgp Exp $
  */
 
 #include "tclInt.h"
@@ -612,13 +612,17 @@ Tcl_DeleteNamespace(namespacePtr)
             }
         }
         nsPtr->parentPtr = NULL;
-    } else {
+    } else if (!(nsPtr->flags & NS_KILLED)) {
 	/*
 	 * Delete the namespace and everything in it. If this is the global
 	 * namespace, then clear it but don't free its storage unless the
-	 * interpreter is being torn down.
+	 * interpreter is being torn down. Set the NS_KILLED flag to avoid
+	 * recursive calls here - if the namespace is really in the process of
+	 * being deleted, ignore any second call.
 	 */
 
+	nsPtr->flags |= (NS_DYING|NS_KILLED);
+	
         TclTeardownNamespace(nsPtr);
 
         if ((nsPtr != globalNsPtr) || (iPtr->flags & DELETED)) {
@@ -629,7 +633,7 @@ Tcl_DeleteNamespace(namespacePtr)
              * variable list one last time.
 	     */
 
-            TclDeleteVars((Interp *) nsPtr->interp, &nsPtr->varTable);
+            TclDeleteNamespaceVars(nsPtr);
 	    
             Tcl_DeleteHashTable(&nsPtr->childTable);
             Tcl_DeleteHashTable(&nsPtr->cmdTable);
@@ -644,7 +648,13 @@ Tcl_DeleteNamespace(namespacePtr)
             } else {
                 nsPtr->flags |= NS_DEAD;
             }
-        }
+        } else {
+	    /*
+	     * We didn't really kill it, so remove the KILLED marks, so
+	     * it can get killed later, avoiding mem leaks
+	     */
+	     nsPtr->flags &= ~(NS_DYING|NS_KILLED);
+	}
     }
 }
 
@@ -713,7 +723,7 @@ TclTeardownNamespace(nsPtr)
 	    Tcl_IncrRefCount(errorCode);
 	}
 
-        TclDeleteVars(iPtr, &nsPtr->varTable);
+        TclDeleteNamespaceVars(nsPtr);
         Tcl_InitHashTable(&nsPtr->varTable, TCL_STRING_KEYS);
 
 	if (errorInfo) {
@@ -732,9 +742,24 @@ TclTeardownNamespace(nsPtr)
 	 * frees it, so we reinitialize it afterwards.
 	 */
     
-        TclDeleteVars(iPtr, &nsPtr->varTable);
+        TclDeleteNamespaceVars(nsPtr);
         Tcl_InitHashTable(&nsPtr->varTable, TCL_STRING_KEYS);
     }
+
+    /*
+     * Delete all commands in this namespace. Be careful when traversing the
+     * hash table: when each command is deleted, it removes itself from the
+     * command table.
+     */
+
+    for (entryPtr = Tcl_FirstHashEntry(&nsPtr->cmdTable, &search);
+            entryPtr != NULL;
+            entryPtr = Tcl_FirstHashEntry(&nsPtr->cmdTable, &search)) {
+        cmd = (Tcl_Command) Tcl_GetHashValue(entryPtr);
+        Tcl_DeleteCommandFromToken((Tcl_Interp *) iPtr, cmd);
+    }
+    Tcl_DeleteHashTable(&nsPtr->cmdTable);
+    Tcl_InitHashTable(&nsPtr->cmdTable, TCL_STRING_KEYS);
 
     /*
      * Remove the namespace from its parent's child hashtable.
@@ -764,21 +789,6 @@ TclTeardownNamespace(nsPtr)
         childNsPtr = (Tcl_Namespace *) Tcl_GetHashValue(entryPtr);
         Tcl_DeleteNamespace(childNsPtr);
     }
-
-    /*
-     * Delete all commands in this namespace. Be careful when traversing the
-     * hash table: when each command is deleted, it removes itself from the
-     * command table.
-     */
-
-    for (entryPtr = Tcl_FirstHashEntry(&nsPtr->cmdTable, &search);
-            entryPtr != NULL;
-            entryPtr = Tcl_FirstHashEntry(&nsPtr->cmdTable, &search)) {
-        cmd = (Tcl_Command) Tcl_GetHashValue(entryPtr);
-        Tcl_DeleteCommandFromToken((Tcl_Interp *) iPtr, cmd);
-    }
-    Tcl_DeleteHashTable(&nsPtr->cmdTable);
-    Tcl_InitHashTable(&nsPtr->cmdTable, TCL_STRING_KEYS);
 
     /*
      * Free the namespace's export pattern array.
@@ -1277,6 +1287,16 @@ Tcl_Import(interp, namespacePtr, pattern, allowOverwrite)
                 refPtr->nextPtr = cmdPtr->importRefPtr;
                 cmdPtr->importRefPtr = refPtr;
             } else {
+		Command *overwrite = (Command *) Tcl_GetHashValue(found);
+		if (overwrite->deleteProc == DeleteImportedCmd) {
+		    ImportedCmdData *dataPtr =
+			    (ImportedCmdData *) overwrite->objClientData;
+		    if (dataPtr->realCmdPtr
+			    == (Command *) Tcl_GetHashValue(hPtr)) {
+			/* Repeated import of same command -- acceptable */
+			return TCL_OK;
+		    }
+		}
 		Tcl_AppendStringsToObj(Tcl_GetObjResult(interp),
 		        "can't import command \"", cmdName,
 			"\": already exists", (char *) NULL);
@@ -2038,11 +2058,12 @@ Tcl_FindCommand(interp, name, contextNsPtr, flags)
         if ((nsPtr[search] != NULL) && (simpleName != NULL)) {
 	    entryPtr = Tcl_FindHashEntry(&nsPtr[search]->cmdTable,
 		    simpleName);
-            if (entryPtr != NULL) {
-                cmdPtr = (Command *) Tcl_GetHashValue(entryPtr);
-            }
-        }
+	    if (entryPtr != NULL) {
+		cmdPtr = (Command *) Tcl_GetHashValue(entryPtr);
+	    }
+	}
     }
+
     if (cmdPtr != NULL) {
         return (Tcl_Command) cmdPtr;
     } else if (flags & TCL_LEAVE_ERR_MSG) {
@@ -2877,7 +2898,7 @@ NamespaceDeleteCmd(dummy, interp, objc, objv)
         name = Tcl_GetString(objv[i]);
 	namespacePtr = Tcl_FindNamespace(interp, name,
 		(Tcl_Namespace *) NULL, /*flags*/ 0);
-        if (namespacePtr == NULL) {
+	if (namespacePtr == NULL) {
 	    Tcl_AppendStringsToObj(Tcl_GetObjResult(interp),
                     "unknown namespace \"", Tcl_GetString(objv[i]),
 		    "\" in namespace delete command", (char *) NULL);
@@ -2982,7 +3003,13 @@ NamespaceEvalCmd(dummy, interp, objc, objv)
     frame.objv = objv;  /* ref counts do not need to be incremented here */
 
     if (objc == 4) {
+#ifndef TCL_TIP280
         result = Tcl_EvalObjEx(interp, objv[3], 0);
+#else
+        /* TIP #280 : Make invoker available to eval'd script */
+        Interp* iPtr = (Interp*) interp;
+        result = TclEvalObjEx(interp, objv[3], 0, iPtr->cmdFramePtr,3);
+#endif
     } else {
 	/*
 	 * More than one argument: concatenate them together with spaces
@@ -2990,7 +3017,12 @@ NamespaceEvalCmd(dummy, interp, objc, objv)
 	 * the object when it decrements its refcount after eval'ing it.
 	 */
         objPtr = Tcl_ConcatObj(objc-3, objv+3);
+#ifndef TCL_TIP280
         result = Tcl_EvalObjEx(interp, objPtr, TCL_EVAL_DIRECT);
+#else
+	/* TIP #280. Make invoking context available to eval'd script */
+	result = TclEvalObjEx(interp, objPtr, TCL_EVAL_DIRECT, NULL, 0);
+#endif
     }
     if (result == TCL_ERROR) {
         char msg[256 + TCL_INTEGER_SPACE];

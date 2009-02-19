@@ -1,3 +1,4 @@
+# -*- tcl -*-
 # Functionality covered: operation of all IO commands, and all procedures
 # defined in generic/tclIO.c.
 #
@@ -12,7 +13,7 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
-# RCS: @(#) $Id: io.test,v 1.40.2.10 2005/04/14 07:10:52 davygrvy Exp $
+# RCS: @(#) $Id: io.test,v 1.40.2.20 2008/04/15 18:31:03 andreas_kupries Exp $
 
 if {[catch {package require tcltest 2}]} {
     puts stderr "Skipping tests in [info script].  tcltest 2 required."
@@ -115,6 +116,66 @@ test io-1.8 {Tcl_WriteChars: WriteChars} {
     close           $f 
     contents $path(test2)
 } "    \x1b\$B\$O\x1b(B"
+
+test io-1.9 {Tcl_WriteChars: WriteChars} {
+    # When closing a channel with an encoding that appends
+    # escape bytes, check for the case where the escape
+    # bytes overflow the current IO buffer. The bytes
+    # should be moved into a new buffer.
+
+    set data "1234567890 [format %c 12399]"
+
+    set sizes [list]
+
+    # With default buffer size
+    set f [open $path(test2) w]
+    fconfigure      $f -encoding iso2022-jp
+    puts -nonewline $f $data
+    close           $f
+    lappend sizes [file size $path(test2)]
+
+    # With buffer size equal to the length
+    # of the data, the escape bytes would
+    # go into the next buffer.
+
+    set f [open $path(test2) w]
+    fconfigure      $f -encoding iso2022-jp -buffersize 16
+    puts -nonewline $f $data
+    close           $f
+    lappend sizes [file size $path(test2)]
+
+    # With buffer size that is large enough
+    # to hold 1 byte of escaped data, but
+    # not all 3. This should not write
+    # the escape bytes to the first buffer
+    # and then again to the second buffer.
+
+    set f [open $path(test2) w]
+    fconfigure      $f -encoding iso2022-jp -buffersize 17
+    puts -nonewline $f $data
+    close           $f
+    lappend sizes [file size $path(test2)]
+
+    # With buffer size that can hold 2 out of
+    # 3 bytes of escaped data.
+
+    set f [open $path(test2) w]
+    fconfigure      $f -encoding iso2022-jp -buffersize 18
+    puts -nonewline $f $data
+    close           $f
+    lappend sizes [file size $path(test2)]
+
+    # With buffer size that can hold all the
+    # data and escape bytes.
+
+    set f [open $path(test2) w]
+    fconfigure      $f -encoding iso2022-jp -buffersize 19
+    puts -nonewline $f $data
+    close           $f
+    lappend sizes [file size $path(test2)]
+
+    set sizes
+} {19 19 19 19 19}
 
 test io-2.1 {WriteBytes} {
     # loop until all bytes are written
@@ -5379,14 +5440,6 @@ test io-42.3 {Tcl_FileeventCmd: replacing, with NULL chars in script} {fileevent
     lappend result [fileevent $f readable]
 } {13 11 12 {}}
 
-#
-# Test fileevent on a pipe
-#
-if {[testConstraint openpipe]} {
-catch {set f2 [open "|[list cat -u]" r+]}
-catch {set f3 [open "|[list cat -u]" r+]}
-}
-
 test io-43.1 {Tcl_FileeventCmd: creating, deleting, querying} {stdio unixExecs fileevent} {
     set result {}
     fileevent $f readable "script 1"
@@ -5398,7 +5451,10 @@ test io-43.1 {Tcl_FileeventCmd: creating, deleting, querying} {stdio unixExecs f
     fileevent $f writable {}
     lappend result [fileevent $f readable] [fileevent $f writable]
 } {{script 1} {} {script 1} {write script} {} {write script} {} {}}
-test io-43.2 {Tcl_FileeventCmd: deleting when many present} {stdio unixExecs fileevent} {
+test io-43.2 {Tcl_FileeventCmd: deleting when many present} -setup {
+    set f2 [open "|[list cat -u]" r+]
+    set f3 [open "|[list cat -u]" r+]
+} -constraints {stdio unixExecs fileevent openpipe} -body {
     set result {}
     lappend result [fileevent $f r] [fileevent $f2 r] [fileevent $f3 r]
     fileevent $f r "read f"
@@ -5411,9 +5467,15 @@ test io-43.2 {Tcl_FileeventCmd: deleting when many present} {stdio unixExecs fil
     lappend result [fileevent $f r] [fileevent $f2 r] [fileevent $f3 r]
     fileevent $f r {}
     lappend result [fileevent $f r] [fileevent $f2 r] [fileevent $f3 r]
-} {{} {} {} {read f} {read f2} {read f3} {read f} {} {read f3} {read f} {} {} {} {} {}}
+} -cleanup {
+    catch {close $f2}
+    catch {close $f3}
+} -result {{} {} {} {read f} {read f2} {read f3} {read f} {} {read f3} {read f} {} {} {} {} {}}
 
-test io-44.1 {FileEventProc procedure: normal read event} {stdio unixExecs fileevent} {
+test io-44.1 {FileEventProc procedure: normal read event} -setup {
+    set f2 [open "|[list cat -u]" r+]
+    set f3 [open "|[list cat -u]" r+]
+} -constraints {stdio unixExecs fileevent openpipe} -body {
     fileevent $f2 readable [namespace code {
 	set x [gets $f2]; fileevent $f2 readable {}
     }]
@@ -5421,8 +5483,14 @@ test io-44.1 {FileEventProc procedure: normal read event} {stdio unixExecs filee
     variable x initial
     vwait [namespace which -variable x]
     set x
-} {text}
-test io-44.2 {FileEventProc procedure: error in read event} {stdio unixExecs fileevent} {
+} -cleanup {
+    catch {close $f2}
+    catch {close $f3}
+} -result {text}
+test io-44.2 {FileEventProc procedure: error in read event} -setup {
+    set f2 [open "|[list cat -u]" r+]
+    set f3 [open "|[list cat -u]" r+]
+} -constraints {stdio unixExecs fileevent openpipe} -body {
     proc ::bgerror args "set [namespace which -variable x] \$args"
     fileevent $f2 readable {error bogus}
     puts $f2 text; flush $f2
@@ -5430,8 +5498,14 @@ test io-44.2 {FileEventProc procedure: error in read event} {stdio unixExecs fil
     vwait [namespace which -variable x]
     rename ::bgerror {}
     list $x [fileevent $f2 readable]
-} {bogus {}}
-test io-44.3 {FileEventProc procedure: normal write event} {stdio unixExecs fileevent} {
+} -cleanup {
+    catch {close $f2}
+    catch {close $f3}
+} -result {bogus {}}
+test io-44.3 {FileEventProc procedure: normal write event} -setup {
+    set f2 [open "|[list cat -u]" r+]
+    set f3 [open "|[list cat -u]" r+]
+} -constraints {stdio unixExecs fileevent openpipe} -body {
     fileevent $f2 writable [namespace code {
 	lappend x "triggered"
 	incr count -1
@@ -5445,15 +5519,24 @@ test io-44.3 {FileEventProc procedure: normal write event} {stdio unixExecs file
     vwait [namespace which -variable x]
     vwait [namespace which -variable x]
     set x
-} {initial triggered triggered triggered}
-test io-44.4 {FileEventProc procedure: eror in write event} {stdio unixExecs fileevent} {
+} -cleanup {
+    catch {close $f2}
+    catch {close $f3}
+} -result {initial triggered triggered triggered}
+test io-44.4 {FileEventProc procedure: eror in write event} -setup {
+    set f2 [open "|[list cat -u]" r+]
+    set f3 [open "|[list cat -u]" r+]
+} -constraints {stdio unixExecs fileevent openpipe} -body {
     proc ::bgerror args "set [namespace which -variable x] \$args"
     fileevent $f2 writable {error bad-write}
     variable x initial
     vwait [namespace which -variable x]
     rename ::bgerror {}
     list $x [fileevent $f2 writable]
-} {bad-write {}}
+} -cleanup {
+    catch {close $f2}
+    catch {close $f3}
+} -result {bad-write {}}
 test io-44.5 {FileEventProc procedure: end of file} {stdio unixExecs openpipe fileevent} {
     set f4 [open "|[list [interpreter] $path(cat) << foo]" r]
     fileevent $f4 readable [namespace code {
@@ -5470,9 +5553,6 @@ test io-44.5 {FileEventProc procedure: end of file} {stdio unixExecs openpipe fi
     close $f4
     set x
 } {initial foo eof}
-
-catch {close $f2}
-catch {close $f3}
 
 
 close $f
@@ -6482,13 +6562,47 @@ test io-52.4 {TclCopyChannel} {fcopy} {
     close $f2
     lappend result [file size $path(test1)]
 } {0 0 40}
-test io-52.5 {TclCopyChannel} {fcopy} {
+test io-52.5 {TclCopyChannel, all} {fcopy} {
     file delete $path(test1)
     set f1 [open $thisScript]
     set f2 [open $path(test1) w]
     fconfigure $f1 -translation lf -blocking 0
     fconfigure $f2 -translation lf -blocking 0
-    fcopy $f1 $f2 -size -1
+    fcopy $f1 $f2 -size -1 ;# -1 means 'copy all', same as if no -size specified.
+    set result [list [fconfigure $f1 -blocking] [fconfigure $f2 -blocking]]
+    close $f1
+    close $f2
+    set s1 [file size $thisScript]
+    set s2 [file size $path(test1)]
+    if {"$s1" == "$s2"} {
+        lappend result ok
+    }
+    set result
+} {0 0 ok}
+test io-52.5a {TclCopyChannel, all, other negative value} {fcopy} {
+    file delete $path(test1)
+    set f1 [open $thisScript]
+    set f2 [open $path(test1) w]
+    fconfigure $f1 -translation lf -blocking 0
+    fconfigure $f2 -translation lf -blocking 0
+    fcopy $f1 $f2 -size -2 ;# < 0 behaves like -1, copy all
+    set result [list [fconfigure $f1 -blocking] [fconfigure $f2 -blocking]]
+    close $f1
+    close $f2
+    set s1 [file size $thisScript]
+    set s2 [file size $path(test1)]
+    if {"$s1" == "$s2"} {
+        lappend result ok
+    }
+    set result
+} {0 0 ok}
+test io-52.5b {TclCopyChannel, all, wrap to negative value} {fcopy} {
+    file delete $path(test1)
+    set f1 [open $thisScript]
+    set f2 [open $path(test1) w]
+    fconfigure $f1 -translation lf -blocking 0
+    fconfigure $f2 -translation lf -blocking 0
+    fcopy $f1 $f2 -size 3221176172 ;# Wrapped to < 0, behaves like -1, copy all
     set result [list [fconfigure $f1 -blocking] [fconfigure $f2 -blocking]]
     close $f1
     close $f2
@@ -6839,6 +6953,210 @@ test io-53.7 {CopyData: Flooding fcopy from pipe} {stdio openpipe fcopy} {
     # -1=error 0=script error N=number of bytes
     expr ($fcopyTestDone == 0) ? $fcopyTestCount : -1
 } {3450}
+test io-53.8 {CopyData: async callback and error handling, Bug 1932639} -setup {
+    # copy progress callback. errors out intentionally
+    proc ::cmd args {
+	lappend ::RES "CMD $args"
+	error !STOP
+    }
+    # capture callback error here
+    proc ::bgerror args {
+	lappend ::RES "bgerror/OK $args"
+	set ::forever has-been-reached
+	return
+    }
+    # Files we use for our channels
+    set foo [makeFile ashgdfashdgfasdhgfasdhgf foo]
+    set bar [makeFile {} bar]
+    # Channels to copy between
+    set f [open $foo r] ; fconfigure $f -translation binary
+    set g [open $bar w] ; fconfigure $g -translation binary -buffering none
+} -constraints {stdio openpipe fcopy} -body {
+    # Record input size, so that result is always defined
+    lappend ::RES [file size $bar]
+    # Run the copy. Should not invoke -command now.
+    fcopy $f $g -size 2 -command ::cmd
+    # Check that -command was not called synchronously
+    set sbs [file size $bar]
+    lappend ::RES [expr {($sbs > 0) ? "sync/FAIL" : "sync/OK"}] $sbs
+    # Now let the async part happen. Should capture the error in cmd
+    # via bgerror. If not break the event loop via timer.
+    set token [after 1000 {
+	lappend ::RES {bgerror/FAIL timeout}
+	set ::forever has-been-reached
+    }]
+    vwait ::forever
+    catch {after cancel $token}
+    # Report
+    set ::RES
+} -cleanup {
+    close $f
+    close $g
+    catch {unset ::RES}
+    catch {unset ::forever}
+    rename ::cmd {}
+    rename ::bgerror {}
+    removeFile foo
+    removeFile bar
+} -result {0 sync/OK 0 {CMD 2} {bgerror/OK !STOP}}
+test io-53.8a {CopyData: async callback and error handling, Bug 1932639, at eof} -setup {
+    # copy progress callback. errors out intentionally
+    proc ::cmd args {
+	lappend ::RES "CMD $args"
+	set ::forever has-been-reached
+	return
+    }
+    # Files we use for our channels
+    set foo [makeFile ashgdfashdgfasdhgfasdhgf foo]
+    set bar [makeFile {} bar]
+    # Channels to copy between
+    set f [open $foo r] ; fconfigure $f -translation binary
+    set g [open $bar w] ; fconfigure $g -translation binary -buffering none
+} -constraints {stdio openpipe fcopy} -body {
+    # Initialize and force eof on the input.
+    seek $f 0 end ; read $f 1
+    set ::RES [eof $f]
+    # Run the copy. Should not invoke -command now.
+    fcopy $f $g -size 2 -command ::cmd
+    # Check that -command was not called synchronously
+    lappend ::RES [expr {([llength $::RES] > 1) ? "sync/FAIL" : "sync/OK"}]
+    # Now let the async part happen. Should capture the eof in cmd
+    # If not break the event loop via timer.
+    set token [after 1000 {
+	lappend ::RES {cmd/FAIL timeout}
+	set ::forever has-been-reached
+    }]
+    vwait ::forever
+    catch {after cancel $token}
+    # Report
+    set ::RES
+} -cleanup {
+    close $f
+    close $g
+    catch {unset ::RES}
+    catch {unset ::forever}
+    rename ::cmd {}
+    removeFile foo
+    removeFile bar
+} -result {1 sync/OK {CMD 0}}
+test io-53.9 {CopyData: -size and event interaction, Bug 780533} -setup {
+    set out [makeFile {} out]
+    set err [makeFile {} err]
+    set pipe [open "|[list [info nameofexecutable] 2> $err]" r+]
+    fconfigure $pipe -translation binary -buffering line
+    puts $pipe {
+	fconfigure stdout -translation binary -buffering line
+	puts stderr Waiting...
+	after 1000
+	foreach x {a b c} {
+	    puts stderr Looping...
+	    puts $x
+	    after 500
+	}
+	proc bye args {
+	    if {[gets stdin line]<0} {
+		puts stderr "CHILD: EOF detected, exiting"
+		exit
+	    } else {
+		puts stderr "CHILD: ignoring line: $line"
+	    }
+	}
+	puts stderr Now-sleeping-forever
+	fileevent stdin readable bye
+	vwait forever
+    }
+    proc ::done args {
+	set ::forever OK
+	return
+    }
+    set ::forever {}
+    set out [open $out w]
+} -constraints {stdio openpipe fcopy} -body {
+    fcopy $pipe $out -size 6 -command ::done
+    set token [after 5000 {
+	set ::forever {fcopy hangs}
+    }]
+    vwait ::forever
+    catch {after cancel $token}
+    set ::forever
+} -cleanup {
+    close $pipe
+    rename ::done {}
+    after 1000 ;# Give Windows time to kill the process
+    removeFile out
+    removeFile err
+    catch {unset ::forever}
+} -result OK
+test io-53.10 {Bug 1350564, multi-directional fcopy} -setup {
+    set err [makeFile {} err]
+    set pipe [open "|[list [info nameofexecutable] 2> $err]" r+]
+    fconfigure $pipe -translation binary -buffering line
+    puts $pipe {
+	fconfigure stderr -buffering line
+	# Kill server when pipe closed by invoker.
+	proc bye args {
+	    if {![eof stdin]} { gets stdin ; return }
+	    puts stderr BYE
+	    exit
+	}
+	# Server code. Bi-directional copy between 2 sockets.
+	proc geof {sok} {
+	    puts stderr DONE/$sok
+	    close $sok
+	}
+	proc new {sok args} {
+	    puts stderr NEW/$sok
+	    global l srv
+	    fconfigure $sok -translation binary -buffering none
+	    lappend l $sok
+	    if {[llength $l]==2} {
+		close $srv
+		foreach {a b} $l break
+		fcopy $a $b -command [list geof $a]
+		fcopy $b $a -command [list geof $b]
+		puts stderr 2COPY
+	    }
+	    puts stderr ...
+	}
+	puts stderr SRV
+	set l {}
+	set srv [socket -server new 9999]
+	puts stderr WAITING
+	fileevent stdin readable bye
+	puts OK
+	vwait forever
+    }
+    # wait for OK from server.
+    gets $pipe
+    # Now the two clients.
+    proc ::done {sock} {
+	if {[eof $sock]} { close $sock ; return }
+	lappend ::forever [gets $sock]
+	return
+    }
+    set a [socket 127.0.0.1 9999]
+    set b [socket 127.0.0.1 9999]
+    fconfigure $a -translation binary -buffering none
+    fconfigure $b -translation binary -buffering none
+    fileevent  $a readable [list ::done $a]
+    fileevent  $b readable [list ::done $b]
+} -constraints {stdio openpipe fcopy} -body {
+    # Now pass data through the server in both directions.
+    set ::forever {}
+    puts $a AB
+    vwait ::forever
+    puts $b BA
+    vwait ::forever
+    set ::forever
+} -cleanup {
+    catch {close $a}
+    catch {close $b}
+    close $pipe
+    rename ::done {}
+    after 1000 ;# Give Windows time to kill the process
+    removeFile err
+    catch {unset ::forever}
+} -result {AB BA}
 
 test io-54.1 {Recursive channel events} {socket fileevent} {
     # This test checks to see if file events are delivered during recursive

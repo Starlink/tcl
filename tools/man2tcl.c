@@ -1,11 +1,10 @@
-/* 
+/*
  * man2tcl.c --
  *
- *	This file contains a program that turns a man page of the
- *	form used for Tcl and Tk into a Tcl script that invokes
- *	a Tcl command for each construct in the man page.  The
- *	script can then be eval'ed to translate the manual entry
- *	into some other format such as MIF or HTML.
+ *	This file contains a program that turns a man page of the form used
+ *	for Tcl and Tk into a Tcl script that invokes a Tcl command for each
+ *	construct in the man page. The script can then be eval'ed to translate
+ *	the manual entry into some other format such as MIF or HTML.
  *
  * Usage:
  *
@@ -13,30 +12,29 @@
  *
  * Copyright (c) 1995 Sun Microsystems, Inc.
  *
- * See the file "license.terms" for information on usage and redistribution
- * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
+ * See the file "license.terms" for information on usage and redistribution of
+ * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: man2tcl.c,v 1.7.2.1 2003/12/09 15:32:20 dkf Exp $
+ * RCS: @(#) $Id: man2tcl.c,v 1.13.2.3 2008/10/24 00:46:27 patthoyts Exp $
  */
 
 static char sccsid[] = "@(#) man2tcl.c 1.3 95/08/12 17:34:08";
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
-#ifndef NO_ERRNO_H
 #include <errno.h>
-#endif
 
 /*
  * Imported things that aren't defined in header files:
  */
 
 /*
- * Some <errno.h> define errno to be something complex and
- * thread-aware; in that case we definitely do not want to declare
- * errno ourselves!
+ * Some <errno.h> define errno to be something complex and thread-aware; in
+ * that case we definitely do not want to declare errno ourselves!
  */
+
 #ifndef errno
 extern int errno;
 #endif
@@ -48,22 +46,25 @@ extern int errno;
 static int lineNumber;
 
 /*
- * The variable below is set to 1 if an error occurs anywhere
- * while reading in the file.
+ * The variable below is set to 1 if an error occurs anywhere while reading in
+ * the file.
  */
 
 static int status;
 
 /*
- * The variable below is set to 1 if output should be generated.
- * If it's 0, it means we're doing a pre-pass to make sure that
- * the file can be properly parsed.
+ * The variable below is set to 1 if output should be generated. If it's 0, it
+ * means we're doing a pre-pass to make sure that the file can be properly
+ * parsed.
  */
 
 static int writeOutput;
 
+#define PRINT(args)	if (writeOutput) { printf args; }
+#define PRINTC(chr)	if (writeOutput) { putc((chr), stdout); }
+
 /*
- * Prototypes for procedures defined in this file:
+ * Prototypes for functions defined in this file:
  */
 
 static void		DoMacro(char *line);
@@ -75,27 +76,27 @@ static void		QuoteText(char *string, int count);
  *
  * main --
  *
- *	This procedure is the main program, which does all of the work
- *	of the program.
+ *	This function is the main program, which does all of the work of the
+ *	program.
  *
  * Results:
- *	None: exits with a 0 return status to indicate success, or
- *	1 to indicate that there were problems in the translation.
+ *	None: exits with a 0 return status to indicate success, or 1 to
+ *	indicate that there were problems in the translation.
  *
  * Side effects:
- *	A Tcl script is output to standard output.  Error messages may
- *	be output on standard error.
+ *	A Tcl script is output to standard output. Error messages may be
+ *	output on standard error.
  *
  *----------------------------------------------------------------------
  */
 
 int
-main(argc, argv)
-    int argc;			/* Number of command-line arguments. */
-    char **argv;		/* Values of command-line arguments. */
+main(
+    int argc,			/* Number of command-line arguments. */
+    char **argv)		/* Values of command-line arguments. */
 {
     FILE *f;
-#define MAX_LINE_SIZE 1000
+#define MAX_LINE_SIZE 4000
     char line[MAX_LINE_SIZE];
     char *p;
 
@@ -117,10 +118,10 @@ main(argc, argv)
     }
 
     /*
-     * Make two passes over the file.  In the first pass, just check
-     * to make sure we can handle everything.  If there are problems,
-     * generate output and stop.  If everything is OK, make a second
-     * pass to actually generate output.
+     * Make two passes over the file. In the first pass, just check to make
+     * sure we can handle everything. If there are problems, generate output
+     * and stop. If everything is OK, make a second pass to actually generate
+     * output.
      */
 
     for (writeOutput = 0; writeOutput < 2; writeOutput++) {
@@ -134,15 +135,15 @@ main(argc, argv)
 		}
 	    }
 	    lineNumber++;
-    
-	    if ((line[0] == '\'') && (line[1] == '\\') && (line[2] == '\"')) {
-		/* 
-		 * This line is a comment.  Ignore it.
+
+	    if (((line[0] == '.') || (line[0] == '\'')) && (line[1] == '\\') && (line[2] == '\"')) {
+		/*
+		 * This line is a comment. Ignore it.
 		 */
-    
+
 		continue;
 	    }
-    
+
 	    if (strlen(line) >= MAX_LINE_SIZE -1) {
 		fprintf(stderr, "Too long line. Max is %d chars.\n",
 			MAX_LINE_SIZE - 1);
@@ -153,14 +154,14 @@ main(argc, argv)
 		/*
 		 * This line is a macro invocation.
 		 */
-    
+
 		DoMacro(line);
 	    } else {
 		/*
 		 * This line is text, possibly with formatting characters
 		 * embedded in it.
 		 */
-    
+
 		DoText(line);
 	    }
 	}
@@ -177,9 +178,9 @@ main(argc, argv)
  *
  * DoMacro --
  *
- *	This procedure is called to handle a macro invocation.
- *	It parses the arguments to the macro and generates a
- *	Tcl command to handle the invocation.
+ *	This function is called to handle a macro invocation. It parses the
+ *	arguments to the macro and generates a Tcl command to handle the
+ *	invocation.
  *
  * Results:
  *	None.
@@ -191,11 +192,12 @@ main(argc, argv)
  */
 
 static void
-DoMacro(line)
-    char *line;			/* The line of text that contains the
-				 * macro invocation. */
+DoMacro(
+    char *line)			/* The line of text that contains the macro
+				 * invocation. */
 {
     char *p, *end;
+    int quote;
 
     /*
      * If there is no macro name, then just skip the whole line.
@@ -205,13 +207,9 @@ DoMacro(line)
 	return;
     }
 
-    if (writeOutput) {
-	printf("macro");
-    }
+    PRINT(("macro"));
     if (*line != '.') {
-	if (writeOutput) {
-	    printf("2");
-	}
+	PRINT(("2"));
     }
 
     /*
@@ -220,10 +218,8 @@ DoMacro(line)
 
     p = line+1;
     while (1) {
-	if (writeOutput) {
-	    putc(' ', stdout);
-	}
-	if (*p == '"')  {
+	PRINTC(' ');
+	if (*p == '"') {
 	    /*
 	     * The argument is delimited by quotes.
 	     */
@@ -231,16 +227,19 @@ DoMacro(line)
 	    for (end = p+1; *end != '"'; end++) {
 		if (*end == 0) {
 		    fprintf(stderr,
-			"Unclosed quote in macro call on line %d.\n",
-			lineNumber);
+			    "Unclosed quote in macro call on line %d.\n",
+			    lineNumber);
 		    status = 1;
 		    break;
 		}
 	    }
 	    QuoteText(p+1, (end-(p+1)));
 	} else {
-	    for (end = p+1;  (*end != 0) && !isspace(*end); end++) {
-		/* Empty loop body. */
+	    quote = 0;
+	    for (end = p+1; (*end != 0) && (quote || !isspace(*end)); end++) {
+		if (*end == '\'') {
+		    quote = !quote;
+		}
 	    }
 	    QuoteText(p, end-p);
 	}
@@ -259,9 +258,7 @@ DoMacro(line)
 	    break;
 	}
     }
-    if (writeOutput) {
-	putc('\n', stdout);
-    }
+    PRINTC('\n');
 }
 
 /*
@@ -269,9 +266,9 @@ DoMacro(line)
  *
  * DoText --
  *
- *	This procedure is called to handle a line of troff text.
- *	It parses the text, generating Tcl commands for text and
- *	for formatting stuff such as font changes.
+ *	This function is called to handle a line of troff text. It parses the
+ *	text, generating Tcl commands for text and for formatting stuff such
+ *	as font changes.
  *
  * Results:
  *	None.
@@ -283,22 +280,20 @@ DoMacro(line)
  */
 
 static void
-DoText(line)
-    char *line;			/* The line of text. */
+DoText(
+    char *line)			/* The line of text. */
 {
     char *p, *end;
 
     /*
-     * Divide the line up into pieces consisting of backslash sequences,
-     * tabs, and other text.
+     * Divide the line up into pieces consisting of backslash sequences, tabs,
+     * and other text.
      */
 
     p = line;
     while (*p != 0) {
 	if (*p == '\t') {
-	    if (writeOutput) {
-		printf("tab\n");
-	    }
+	    PRINT(("tab\n"));
 	    p++;
 	} else if (*p != '\\') {
 	    /*
@@ -308,19 +303,15 @@ DoText(line)
 	    for (end = p+1; (*end != '\\') && (*end != 0); end++) {
 		/* Empty loop body. */
 	    }
-	    if (writeOutput) {
-		printf("text ");
-	    }
+	    PRINT(("text "));
 	    QuoteText(p, end-p);
-	    if (writeOutput) {
-		putc('\n', stdout);
-	    }
+	    PRINTC('\n');
 	    p = end;
 	} else {
 	    /*
-	     * A backslash sequence.  There are particular ones
-	     * that we understand;  output an error message for
-	     * anything else and just ignore the backslash.
+	     * A backslash sequence. There are particular ones that we
+	     * understand; output an error message for anything else and just
+	     * ignore the backslash.
 	     */
 
 	    p++;
@@ -329,26 +320,21 @@ DoText(line)
 		 * Font change.
 		 */
 
-		if (writeOutput) {
-		    printf("font %c\n", p[1]);
-		}
+		PRINT(("font %c\n", p[1]));
 		p += 2;
 	    } else if (*p == '-') {
-		if (writeOutput) {
-		    printf("dash\n");
-		}
+		PRINT(("dash\n"));
 		p++;
 	    } else if (*p == 'e') {
-		if (writeOutput) {
-		    printf("text \\\\\n");
-		}
+		PRINT(("text \\\\\n"));
 		p++;
 	    } else if (*p == '.') {
-		if (writeOutput) {
-		    printf("text .\n");
-		}
+		PRINT(("text .\n"));
 		p++;
 	    } else if (*p == '&') {
+		p++;
+	    } else if (*p == '0') {
+		PRINT(("text { }\n"));
 		p++;
 	    } else if (*p == '(') {
 		if ((p[1] == 0) || (p[2] == 0)) {
@@ -356,22 +342,24 @@ DoText(line)
 			    lineNumber);
 		    status = 1;
 		} else {
-		    if (writeOutput) {
-			printf("char {\\(%c%c}\n", p[1], p[2]);
-		    }
+		    PRINT(("char {\\(%c%c}\n", p[1], p[2]));
 		    p += 3;
 		}
+	    } else if (*p == 'N' && *(p+1) == '\'') {
+		int ch;
+
+		p += 2;
+		sscanf(p,"%d",&ch);
+		PRINT(("text \\u%04x\n", ch));
+		while(*p&&*p!='\'') p++;
+		p++;
 	    } else if (*p != 0) {
-		if (writeOutput) {
-		    printf("char {\\%c}\n", *p);
-		}
+		PRINT(("char {\\%c}\n", *p));
 		p++;
 	    }
 	}
     }
-    if (writeOutput) {
-	printf("newline\n");
-    }
+    PRINT(("newline\n"));
 }
 
 /*
@@ -379,9 +367,9 @@ DoText(line)
  *
  * QuoteText --
  *
- *	Copy the "string" argument to stdout, adding quote characters
- *	around any special Tcl characters so that they'll just be treated
- *	as ordinary text.
+ *	Copy the "string" argument to stdout, adding quote characters around
+ *	any special Tcl characters so that they'll just be treated as ordinary
+ *	text.
  *
  * Results:
  *	None.
@@ -393,26 +381,46 @@ DoText(line)
  */
 
 static void
-QuoteText(string, count)
-    char *string;		/* The line of text. */
-    int count;			/* Number of characters to write from string. */
+QuoteText(
+    char *string,		/* The line of text. */
+    int count)			/* Number of characters to write from
+				 * string. */
 {
     if (count == 0) {
-	if (writeOutput) {
-	    printf("{}");
-	}
+	PRINT(("{}"));
 	return;
     }
     for ( ; count > 0; string++, count--) {
-	if ((*string == '$') || (*string == '[') || (*string == '{')
-		|| (*string == ' ') || (*string == ';') || (*string == '\\')
-		|| (*string == '"') || (*string == '\t')) {
-	    if (writeOutput) {
-		putc('\\', stdout);
+	switch (*string) {
+	case '\\':
+	    if (*(string+1) == 'N' && *(string+2) == '\'') {
+		int ch;
+
+		string += 3;
+		count -= 3;
+		sscanf(string,"%d",&ch);
+		PRINT(("\\u%04x", ch));
+		while(count>0&&*string!='\'') {string++;count--;}
+		continue;
+	    } else if (*(string+1) == '0') {
+		PRINT(("\\ "));
+		string++;
+		count--;
+		continue;
 	    }
-	}
-	if (writeOutput) {
-	    putc(*string, stdout);
+	case '$': case '[': case '{': case ' ': case ';':
+	case '"': case '\t':
+	    PRINTC('\\');
+	default:
+	    PRINTC(*string);
 	}
     }
 }
+
+/*
+ * Local Variables:
+ * mode: c
+ * c-basic-offset: 4
+ * fill-column: 78
+ * End:
+ */

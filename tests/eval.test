@@ -11,7 +11,7 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
-# RCS: @(#) $Id: eval.test,v 1.5 2000/04/10 17:18:58 ericm Exp $
+# RCS: @(#) $Id: eval.test,v 1.9 2006/10/09 19:15:44 msofer Exp $
 
 if {[lsearch [namespace children] ::tcltest] == -1} {
     package require tcltest
@@ -47,7 +47,7 @@ test eval-2.5 {error in eval'ed command: setting errorInfo} {
 	set a 1
 	error "test error"
     }} msg
-    set errorInfo
+    set ::errorInfo
 } "test error
     while executing
 \"error \"test error\"\"
@@ -58,18 +58,29 @@ test eval-2.5 {error in eval'ed command: setting errorInfo} {
 	error \"test error\"
     }\""
 
+test eval-3.1 {eval and pure lists} {
+    eval [list list 1 2 3 4 5]
+} {1 2 3 4 5}
+test eval-3.2 {concatenating eval and pure lists} {
+    eval [list list 1] [list 2 3 4 5]
+} {1 2 3 4 5}
+test eval-3.3 {eval and canonical lists} {
+    set cmd [list list 1 2 3 4 5]
+    # Force existance of utf-8 rep
+    set dummy($cmd) $cmd
+    unset dummy
+    eval $cmd
+} {1 2 3 4 5}
+test eval-3.4 {concatenating eval and canonical lists} {
+    set cmd  [list list 1]
+    set cmd2 [list 2 3 4 5]
+    # Force existance of utf-8 rep
+    set dummy($cmd) $cmd
+    set dummy($cmd2) $cmd2
+    unset dummy
+    eval $cmd $cmd2
+} {1 2 3 4 5}
+
 # cleanup
 ::tcltest::cleanupTests
 return
-
-
-
-
-
-
-
-
-
-
-
-

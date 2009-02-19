@@ -9,10 +9,10 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
-# RCS: @(#) $Id: for.test,v 1.9 2001/12/06 10:59:18 dkf Exp $
+# RCS: @(#) $Id: for.test,v 1.16 2006/10/09 19:15:44 msofer Exp $
 
 if {[lsearch [namespace children] ::tcltest] == -1} {
-    package require tcltest
+    package require tcltest 2
     namespace import -force ::tcltest::*
 }
 
@@ -21,21 +21,21 @@ if {[lsearch [namespace children] ::tcltest] == -1} {
 test for-1.1 {TclCompileForCmd: missing initial command} {
     list [catch {for} msg] $msg
 } {1 {wrong # args: should be "for start test next command"}}
-test for-1.2 {TclCompileForCmd: error in initial command} {
-    list [catch {for {set}} msg] $msg $errorInfo
-} {1 {wrong # args: should be "for start test next command"} {wrong # args: should be "for start test next command"
-    while compiling
+test for-1.2 {TclCompileForCmd: error in initial command} -body {
+    list [catch {for {set}} msg] $msg $::errorInfo
+} -match glob -result {1 {wrong # args: should be "for start test next command"} {wrong # args: should be "for start test next command"
+    while *ing
 "for {set}"}}
 catch {unset i}
 test for-1.3 {TclCompileForCmd: missing test expression} {
     catch {for {set i 0}} msg
     set msg
 } {wrong # args: should be "for start test next command"}
-test for-1.4 {TclCompileForCmd: error in test expression} {
+test for-1.4 {TclCompileForCmd: error in test expression} -body {
     catch {for {set i 0} {$i<}} msg
-    set errorInfo
-} {wrong # args: should be "for start test next command"
-    while compiling
+    set ::errorInfo
+} -match glob -result {wrong # args: should be "for start test next command"
+    while *ing
 "for {set i 0} {$i<}"}
 test for-1.5 {TclCompileForCmd: test expression is enclosed in quotes} {
     set i 0
@@ -49,15 +49,12 @@ test for-1.7 {TclCompileForCmd: missing command body} {
     catch {for {set i 0} {$i < 5} {incr i}} msg
     set msg
 } {wrong # args: should be "for start test next command"}
-test for-1.8 {TclCompileForCmd: error compiling command body} {
+test for-1.8 {TclCompileForCmd: error compiling command body} -body {
     catch {for {set i 0} {$i < 5} {incr i} {set}} msg
-    set errorInfo
-} {wrong # args: should be "set varName ?newValue?"
-    while compiling
-"set"
-    ("for" body line 1)
-    while compiling
-"for {set i 0} {$i < 5} {incr i} {set}"}
+    set ::errorInfo
+} -match glob -result {wrong # args: should be "set varName ?newValue?"
+    while *ing
+"set"*}
 catch {unset a}
 test for-1.9 {TclCompileForCmd: simple command body} {
     set a {}
@@ -83,15 +80,12 @@ test for-1.11 {TclCompileForCmd: computed command body} {
     for {set i 1} {$i<6} {set i [expr $i+1]} $x1$bb$x2
     set a
 } {x1}
-test for-1.12 {TclCompileForCmd: error in "next" command} {
-    catch {for {set i 0} {$i < 5} {set} {puts $i}} msg
-    set errorInfo
-} {wrong # args: should be "set varName ?newValue?"
-    while compiling
-"set"
-    ("for" loop-end command)
-    while compiling
-"for {set i 0} {$i < 5} {set} {puts $i}"}
+test for-1.12 {TclCompileForCmd: error in "next" command} -body {
+    catch {for {set i 0} {$i < 5} {set} {format $i}} msg
+    set ::errorInfo
+} -match glob -result {wrong # args: should be "set varName ?newValue?"
+    while *ing
+"set"*}
 test for-1.13 {TclCompileForCmd: long command body} {
     set a {}
     for {set i 1} {$i<6} {set i [expr $i+1]} {
@@ -656,33 +650,32 @@ test for-6.5 {Tcl_ForObjCmd: number of args} {
     catch {$z {set i 0} {$i < 5} {incr i} {body} extra} msg
     set msg
 } {wrong # args: should be "for start test next command"}
-test for-6.6 {Tcl_ForObjCmd: error in initial command} {
+test for-6.6 {Tcl_ForObjCmd: error in initial command} -body {
     set z for
-    list [catch {$z {set} {$i < 5} {incr i} {body}} msg] $msg $errorInfo
-} {1 {wrong # args: should be "set varName ?newValue?"} {wrong # args: should be "set varName ?newValue?"
-    while compiling
+    list [catch {$z {set} {$i < 5} {incr i} {body}} msg] $msg $::errorInfo
+} -match glob -result {1 {wrong # args: should be "set varName ?newValue?"} {wrong # args: should be "set varName ?newValue?"
+    while *ing
 "set"
     ("for" initial command)
     invoked from within
 "$z {set} {$i < 5} {incr i} {body}"}}
-test for-6.7 {Tcl_ForObjCmd: error in test expression} {
+test for-6.7 {Tcl_ForObjCmd: error in test expression} -body {
     set z for
-    list [catch {$z {set i 0} {i < 5} {incr i} {body}} msg] $msg $errorInfo
-} {1 {syntax error in expression "i < 5": variable references require preceding $} {syntax error in expression "i < 5": variable references require preceding $
-    while executing
-"$z {set i 0} {i < 5} {incr i} {body}"}}
+    catch {$z {set i 0} {i < 5} {incr i} {body}}
+    set ::errorInfo
+} -match glob -result {*"$z {set i 0} {i < 5} {incr i} {body}"}
 test for-6.8 {Tcl_ForObjCmd: test expression is enclosed in quotes} {
     set z for
     set i 0
     $z {set i 6} "$i > 5" {incr i} {set y $i}
     set i
 } 6
-test for-6.9 {Tcl_ForObjCmd: error executing command body} {
+test for-6.9 {Tcl_ForObjCmd: error executing command body} -body {
     set z for
     catch {$z {set i 0} {$i < 5} {incr i} {set}} msg
-    set errorInfo
-} {wrong # args: should be "set varName ?newValue?"
-    while compiling
+    set ::errorInfo
+} -match glob -result {wrong # args: should be "set varName ?newValue?"
+    while *ing
 "set"
     ("for" body line 1)
     invoked from within
@@ -714,12 +707,12 @@ test for-6.12 {Tcl_ForObjCmd: computed command body} {
     $z {set i 1} {$i<6} {set i [expr $i+1]} $x1$bb$x2
     set a
 } {x1}
-test for-6.13 {Tcl_ForObjCmd: error in "next" command} {
+test for-6.13 {Tcl_ForObjCmd: error in "next" command} -body {
     set z for
     catch {$z {set i 0} {$i < 5} {set} {set j 4}} msg
-    set errorInfo
-} {wrong # args: should be "set varName ?newValue?"
-    while compiling
+    set ::errorInfo
+} -match glob -result {wrong # args: should be "set varName ?newValue?"
+    while *ing
 "set"
     ("for" loop-end command)
     invoked from within
@@ -769,7 +762,56 @@ test for-6.16 {Tcl_ForObjCmd: for command result} {
     set a [$z {set i 0} {$i < 5} {incr i} {if $i==3 break}]
     set a
 } {}
-
+test for-6.17 {Tcl_ForObjCmd: for command result} {
+    list \
+        [catch {for {break} {1} {} {}} err] $err \
+        [catch {for {continue} {1} {} {}} err] $err \
+        [catch {for {} {[break]} {} {}} err] $err \
+        [catch {for {} {[continue]} {} {}} err] $err \
+        [catch {for {} {1} {break} {}} err] $err \
+        [catch {for {} {1} {continue} {}} err] $err \
+} [list \
+    3 {} \
+    4 {} \
+    3 {} \
+    4 {} \
+    0 {} \
+    4 {} \
+    ]
+test for-6.18 {Tcl_ForObjCmd: for command result} {
+    proc p6181 {} {
+        for {break} {1} {} {}
+    }
+    proc p6182 {} {
+        for {continue} {1} {} {}
+    }
+    proc p6183 {} {
+        for {} {[break]} {} {}
+    }
+    proc p6184 {} {
+        for {} {[continue]} {} {}
+    }
+    proc p6185 {} {
+        for {} {1} {break} {}
+    }
+    proc p6186 {} {
+        for {} {1} {continue} {}
+    }
+    list \
+        [catch {p6181} err] $err \
+        [catch {p6182} err] $err \
+        [catch {p6183} err] $err \
+        [catch {p6184} err] $err \
+        [catch {p6185} err] $err \
+        [catch {p6186} err] $err
+} [list \
+    1 {invoked "break" outside of a loop} \
+    1 {invoked "continue" outside of a loop} \
+    1 {invoked "break" outside of a loop} \
+    1 {invoked "continue" outside of a loop} \
+    0 {} \
+    1 {invoked "continue" outside of a loop} \
+    ]
 
 
 # cleanup

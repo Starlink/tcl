@@ -5,7 +5,7 @@
 '\" See the file "license.terms" for information on usage and redistribution
 '\" of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 '\" 
-'\" RCS: @(#) $Id: Concat.3,v 1.5 2002/08/05 03:24:39 dgp Exp $
+'\" RCS: @(#) $Id: Concat.3,v 1.9 2005/05/10 18:33:54 kennykb Exp $
 '\" 
 .so man.macros
 .TH Tcl_Concat 3 7.5 Tcl "Tcl Library Procedures"
@@ -16,12 +16,13 @@ Tcl_Concat \- concatenate a collection of strings
 .nf
 \fB#include <tcl.h>\fR
 .sp
-CONST char *
+const char *
 \fBTcl_Concat\fR(\fIargc, argv\fR)
 .SH ARGUMENTS
+.AS "const char *const" argv[]
 .AP int argc in
 Number of strings.
-.AP "CONST char * CONST" argv[] in
+.AP "const char *const" argv[] in
 Array of strings to concatenate.  Must have \fIargc\fR entries.
 .BE
 
@@ -43,12 +44,9 @@ copies strings from \fBargv\fR to the result.  If an element of
 is ignored entirely.  This white-space removal was added to make
 the output of the \fBconcat\fR command cleaner-looking.
 .PP
-.VS
 The result string is dynamically allocated
 using \fBTcl_Alloc\fR;  the caller must eventually release the space
 by calling \fBTcl_Free\fR.
-.VE
-.VS
 .SH "SEE ALSO"
 Tcl_ConcatObj
 .SH KEYWORDS

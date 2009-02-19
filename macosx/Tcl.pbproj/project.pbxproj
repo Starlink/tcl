@@ -62,11 +62,12 @@
 			sourceTree = "<group>";
 		};
 		00E2F84C016E8B780ACA28DC = {
-			buildArgumentsString = "-c \"cd \\\"${TCL_SRCROOT}/macosx\\\" && ACTION=${ACTION} && gnumake \\${ACTION:+\\${ACTION/clean/distclean}-}${MAKE_TARGET} INSTALL_ROOT=\\\"${DSTROOT}\\\" INSTALL_PATH=\\\"${INSTALL_PATH}\\\" PREFIX=\\\"${PREFIX}\\\" BINDIR=\\\"${BINDIR}\\\" MANDIR=\\\"${MANDIR}\\\" \\${EXTRA_MAKE_FLAGS} ${ALL_SETTINGS}\"";
+			buildArgumentsString = "-c \"cd \\\"${TCL_SRCROOT}/macosx\\\" && ACTION=${ACTION} && CFLAGS=\\\"${CFLAGS}\\\" gnumake \\${ACTION:+\\${ACTION/clean/distclean}-}${MAKE_TARGET} INSTALL_ROOT=\\\"${DSTROOT}\\\" INSTALL_PATH=\\\"${INSTALL_PATH}\\\" PREFIX=\\\"${PREFIX}\\\" BINDIR=\\\"${BINDIR}\\\" MANDIR=\\\"${MANDIR}\\\" \\${EXTRA_MAKE_FLAGS} ${ALL_SETTINGS}\"";
 			buildPhases = (
 			);
 			buildSettings = {
 				BINDIR = "${PREFIX}/bin";
+				CFLAGS = "";
 				INSTALL_PATH = /Library/Frameworks;
 				MANDIR = "${PREFIX}/man";
 				PREFIX = /usr/local;
@@ -137,6 +138,7 @@
 				F5F24FB8016ECAFC01DC9062,
 				F5F24FB9016ECAFC01DC9062,
 				F5F24FBA016ECAFC01DC9062,
+				F9FED5C7047C7D1B006F146B,
 				F5F24FBB016ECAFC01DC9062,
 				F5F24FD3016ECB4901DC9062,
 				F5F24FBC016ECAFC01DC9062,
@@ -185,12 +187,10 @@
 				F5F24F6E016ECAA401DC9062,
 				F5F24F6F016ECAA401DC9062,
 				F5F24F70016ECAA401DC9062,
-				F5F24F71016ECAA401DC9062,
 				F5F24F72016ECAA401DC9062,
 				F5F24F73016ECAA401DC9062,
 				F5F24F74016ECAA401DC9062,
 				F5F24F75016ECAA401DC9062,
-				F5F24F76016ECAA401DC9062,
 				F5F24F77016ECAA401DC9062,
 				F5F24F78016ECAA401DC9062,
 				F5F24FD1016ECB1E01DC9062,
@@ -222,6 +222,7 @@
 		00E2F859016E92B00ACA28DC = {
 			children = (
 				F5A1836F018242A501DC9062,
+				F9FED5C6047C7CEC006F146B,
 			);
 			isa = PBXGroup;
 			name = Sources;
@@ -330,7 +331,7 @@
 		F53ACC5C031D9D11016F146B = {
 			isa = PBXFileReference;
 			lastKnownFileType = "compiled.mach-o.executable";
-			path = tclsh8.4;
+			path = tclsh8.5;
 			refType = 3;
 			sourceTree = BUILT_PRODUCTS_DIR;
 		};
@@ -438,15 +439,6 @@
 			refType = 2;
 			sourceTree = SOURCE_ROOT;
 		};
-		F5F24F71016ECAA401DC9062 = {
-			fileEncoding = 5;
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.c.h;
-			name = tclInitScript.h;
-			path = ../generic/tclInitScript.h;
-			refType = 2;
-			sourceTree = SOURCE_ROOT;
-		};
 		F5F24F72016ECAA401DC9062 = {
 			fileEncoding = 5;
 			isa = PBXFileReference;
@@ -480,15 +472,6 @@
 			lastKnownFileType = sourcecode.c.h;
 			name = tclIO.h;
 			path = ../generic/tclIO.h;
-			refType = 2;
-			sourceTree = SOURCE_ROOT;
-		};
-		F5F24F76016ECAA401DC9062 = {
-			fileEncoding = 5;
-			isa = PBXFileReference;
-			lastKnownFileType = sourcecode.c.h;
-			name = tclMath.h;
-			path = ../generic/tclMath.h;
 			refType = 2;
 			sourceTree = SOURCE_ROOT;
 		};
@@ -1365,7 +1348,6 @@
 				F5F24FF5016ED0DF01DC9062,
 				F5F24FF6016ED0DF01DC9062,
 				F5F24FFA016ED0DF01DC9062,
-				F5F24FFB016ED0DF01DC9062,
 				F5F24FFC016ED0DF01DC9062,
 				F5F24FFE016ED0DF01DC9062,
 				F5F25001016ED0DF01DC9062,
@@ -1438,14 +1420,6 @@
 			lastKnownFileType = text;
 			name = init.tcl;
 			path = ../library/init.tcl;
-			refType = 2;
-			sourceTree = SOURCE_ROOT;
-		};
-		F5F24FFB016ED0DF01DC9062 = {
-			isa = PBXFileReference;
-			lastKnownFileType = text;
-			name = ldAout.tcl;
-			path = ../library/ldAout.tcl;
 			refType = 2;
 			sourceTree = SOURCE_ROOT;
 		};
@@ -1542,6 +1516,23 @@
 			path = Tcl.framework;
 			refType = 3;
 			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		F9FED5C6047C7CEC006F146B = {
+			fileEncoding = 30;
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.c.c;
+			path = tclMacOSXFCmd.c;
+			refType = 4;
+			sourceTree = "<group>";
+		};
+		F9FED5C7047C7D1B006F146B = {
+			fileEncoding = 5;
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.c.c;
+			name = tclPathObj.c;
+			path = ../generic/tclPathObj.c;
+			refType = 2;
+			sourceTree = SOURCE_ROOT;
 		};
 	};
 	rootObject = 00E2F845016E82EB0ACA28DC;

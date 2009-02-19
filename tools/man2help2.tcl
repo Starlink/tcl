@@ -9,7 +9,7 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 # 
-# RCS: @(#) $Id: man2help2.tcl,v 1.12 2002/10/03 13:34:32 dkf Exp $
+# RCS: @(#) $Id: man2help2.tcl,v 1.17.2.1 2008/10/02 18:56:30 mistachkin Exp $
 # 
 
 # Global variables used by these scripts:
@@ -160,6 +160,7 @@ proc text {string} {
 	    "\t"	{\tab } \
 	    ''		"\\rdblquote " \
 	    ``		"\\ldblquote " \
+	    "\u00b7"	"\\bullet " \
 	    ] $string]
 
     # Check if this is the beginning of an international character string.
@@ -378,6 +379,9 @@ proc macro {name args} {
 	SH {
 	    SHmacro $args
 	}
+	SS {
+	    SHmacro $args subsection
+	}
 	SO {
 	    SHmacro "STANDARD OPTIONS"
 	    set state(nestingLevel) 0
@@ -421,6 +425,21 @@ proc macro {name args} {
 	}
 	VE {}
 	VS {}
+	QW {
+	    formattedText "``[lindex $args 0]''[lindex $args 1] "
+	}
+	MT {
+	    text "``'' "
+	}
+	PQ {
+	    formattedText \
+		"(``[lindex $args 0]''[lindex $args 1])[lindex $args 2] "
+	}
+	QR {
+	    formattedText "``[lindex $args 0]"
+	    dash
+	    formattedText "[lindex $args 1]''[lindex $args 2] "
+	}
 	default {
 	    puts stderr "Unknown macro: .$name [join $args " "]"
 	}
@@ -512,13 +531,12 @@ proc formattedText {text} {
 		dash
 		set text [string range $text [expr {$index+2}] end]
 	    }
-	    | {
+	    & - | {
 		set text [string range $text [expr {$index+2}] end]
 	    }
-	    o {
-		text "\\'"
-		regexp {'([^']*)'(.*)} $text all ch text
-		text $chars($ch)
+	    ( {
+		char [string range $text $index [expr {$index+3}]]
+		set text [string range $text [expr {$index+4}] end]
 	    }
 	    default {
 		puts stderr "Unknown sequence: \\$c"
@@ -567,20 +585,30 @@ proc tab {} {
 # This procedure handles the ".ta" macro, which sets tab stops.
 #
 # Arguments:
-# tabList -	List of tab stops, each consisting of a number
-#			followed by "i" (inch) or "c" (cm).
+# tabList -	List of tab stops in *roff format
 
 proc setTabs {tabList} {
     global file state
 
     set state(tabs) {}
     foreach arg $tabList {
-	set distance [expr {$state(leftMargin) \
-		+ ($state(offset) * $state(nestingLevel)) + [getTwips $arg]}]
-	lappend state(tabs) [expr {round($distance)}]
+	if {[string match +* $arg]} {
+	    set relativeTo [lindex $state(tabs) end]
+	    set arg [string range $arg 1 end]
+	} else {
+	    # Local left margin
+	    set relativeTo [expr {$state(leftMargin) \
+		    + ($state(offset) * $state(nestingLevel))}]
+	}
+	if {[regexp {^\\w'([^']*)'u$} $arg -> submatch]} {
+	    # Magic factor!
+	    set distance [expr {[string length $submatch] * 86.4}]
+	} else {
+	    set distance [getTwips $arg]
+	}
+	lappend state(tabs) [expr {round($distance + $relativeTo)}]
     }
 }
-
 
 
 # lineBreak --
@@ -651,31 +679,50 @@ proc char {name} {
     global file state
 
     switch -exact $name {
-        \\o {
+        {\o} {
 	    set state(intl) 1
 	}
-	\\\  {
+	{\ } {
 	    textSetup
 	    puts -nonewline $file " "
 	}
-	\\0 {
+	{\0} {
 	    textSetup
 	    puts -nonewline $file " \\emspace "
 	}
-	\\\\ {
+	{\\} - {\e} {
 	    textSetup
 	    puts -nonewline $file "\\\\"
 	}
-	\\(+- {
+	{\(+-} {
 	    textSetup
 	    puts -nonewline $file "\\'b1 "
 	}
-	\\% -
-	\\| {
+	{\%} - {\|} {
 	}
-	\\(bu {
+	{\(->} {
 	    textSetup
-	    puts -nonewline $file "·"
+	    puts -nonewline $file "->"
+	}
+	{\(bu} {
+	    textSetup
+	    puts -nonewline $file "\\bullet "
+	}
+	{\(co} {
+	    textSetup
+	    puts -nonewline $file "\\'a9 "
+	}
+	{\(mu} {
+	    textSetup
+	    puts -nonewline $file "\\'d7 "
+	}
+	{\(em} {
+	    textSetup
+	    puts -nonewline $file "-"
+	}
+	{\(fm} {
+	    textSetup
+	    puts -nonewline $file "\\'27 "
 	}
 	default {
 	    puts stderr "Unknown character: $name"
@@ -702,12 +749,12 @@ proc macro2 {name args} {
 
 # SHmacro --
 #
-# Subsection head; handles the .SH macro.
+# Subsection head; handles the .SH and .SS macros.
 #
 # Arguments:
 # name -		Section name.
 
-proc SHmacro {argList} {
+proc SHmacro {argList {style section}} {
     global file state
 
     set args [join $argList " "]
@@ -732,26 +779,28 @@ proc SHmacro {argList} {
 	set state(breakPending) 0
     }
     set state(noFill) 0
-    nextPara 0i
+    if {[string compare "subsection" $style] == 0} {
+	nextPara .25i
+    } else {
+	nextPara 0i
+    }
     font B
     text $args
     font R
     nextPara .5i
 }
 
-
-
 # IPmacro --
 #
 # This procedure is invoked to handle ".IP" macros, which may take any
 # of the following forms:
 #
-# .IP [1]			Translate to a "1Step" state(paragraph).
+# .IP [1]		Translate to a "1Step" state(paragraph).
 # .IP [x] (x > 1)	Translate to a "Step" state(paragraph).
-# .IP				Translate to a "Bullet" state(paragraph).
+# .IP			Translate to a "Bullet" state(paragraph).
 # .IP text count	Translate to a FirstBody state(paragraph) with special
-#					indent and tab stop based on "count", and tab after
-#					"text".
+#			indent and tab stop based on "count", and tab after
+#			"text".
 #
 # Arguments:
 # argList -		List of arguments to the .IP macro.
@@ -762,31 +811,28 @@ proc IPmacro {argList} {
     global file state
 
     set length [llength $argList]
-    if {$length == 0} {
-	newPara 0.5i
-	return
+    foreach {text indent} $argList break
+    if {$length > 2} {
+	puts stderr "Bad .IP macro: .IP [join $argList " "]"
     }
-    if {$length == 1} {
-	newPara 0.5i -0.5i
-	set state(sb) 80
-	setTabs 0.5i
-	formattedText [lindex $argList 0]
-	tab
-	return
-    }
-    if {$length == 2} {
-	set count [lindex $argList 1]
-	set tab [expr $count * 0.1]i
-	newPara $tab -$tab
-	set state(sb) 80
-	setTabs $tab
-	formattedText [lindex $argList 0]
-	tab
-	return
-    }
-    puts stderr "Bad .IP macro: .IP [join $argList " "]"
-}
 
+    if {$length == 0} {
+	set text {\(bu}
+	set indent 5
+    } elseif {$length == 1} {
+	set indent 5
+    }
+    if {$text == {\(bu}} {
+	set text "\u00b7"
+    }
+
+    set tab [expr $indent * 0.1]i
+    newPara $tab -$tab
+    set state(sb) 80
+    setTabs $tab
+    formattedText $text
+    tab
+}
 
 # TPmacro --
 #
@@ -930,6 +976,10 @@ proc getTwips {arg} {
 	puts stderr "bad distance \"$arg\""
 	return 0
     }
+    if {[string length $units] > 1} {
+	puts stderr "additional characters after unit \"$arg\""
+	set units [string index $units 0]
+    }
     switch -- $units {
 	c	{
 	    set distance [expr {$distance * 567}]
@@ -939,7 +989,7 @@ proc getTwips {arg} {
 	}
 	default {
 	    puts stderr "bad units in distance \"$arg\""
-	    continue
+	    return 0
 	}
     }
     return $distance
@@ -980,4 +1030,3 @@ proc decrNestingLevel {} {
 	incr state(nestingLevel) -1
     }
 }
-

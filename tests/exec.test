@@ -11,7 +11,7 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
-# RCS: @(#) $Id: exec.test,v 1.16.2.7 2006/01/16 19:31:19 rmax Exp $
+# RCS: @(#) $Id: exec.test,v 1.29 2008/03/11 22:23:33 das Exp $
 
 package require tcltest 2
 namespace import -force ::tcltest::*
@@ -28,6 +28,12 @@ set path(echo) [makeFile {
     puts {}
     exit
 } echo]
+
+set path(echo2) [makeFile {
+    puts stdout [join $argv]
+    puts stderr [lindex $argv 1]
+    exit
+} echo2]
 
 set path(cat) [makeFile {
     if {$argv == {}} {
@@ -81,6 +87,25 @@ set path(sh) [makeFile {
     }
     exit
 } sh]
+set path(sh2) [makeFile {
+    if {[lindex $argv 0] != "-c"} {
+	error "sh: unexpected arguments $argv"
+    }
+    set cmd [lindex $argv 1]
+    lappend cmd ";"
+
+    set newcmd {}
+    
+    foreach arg $cmd {
+	if {$arg == ";"} {
+	    eval exec -ignorestderr >@stdout [list [info nameofexecutable]] $newcmd
+	    set newcmd {}
+	    continue
+	}
+	lappend newcmd $arg
+    }
+    exit
+} sh2]
 
 set path(sleep) [makeFile {
     after [expr $argv*1000]
@@ -217,8 +242,8 @@ test exec-4.5 {redirecting output and stderr to file} {exec} {
 
 # I/O redirection: input from file.
 
-if { [set ::tcltest::testConstraints(exec)] } {
-exec [interpreter] $path(echo) "Just a few thoughts" > $path(gorp.file)
+if {[testConstraint exec]} {
+    exec [interpreter] $path(echo) "Just a few thoughts" > $path(gorp.file)
 }
 test exec-5.1 {redirecting input from file} {exec} {
     exec [interpreter] $path(cat) < $path(gorp.file)
@@ -314,8 +339,8 @@ test exec-9.6 {commands returning errors} {exec} {
     list [catch {exec [interpreter] "$path(sh)" -c "\"$path(echo)\" error msg 1>&2"} msg] $msg
 } {1 {error msg}}
 test exec-9.7 {commands returning errors} {exec stdio} {
-    list [catch {exec [interpreter] "$path(sh)" -c "\"$path(echo)\" error msg 1>&2" \
-		     | [interpreter] "$path(sh)" -c "\"$path(echo)\" error msg 1>&2"} msg] $msg
+    list [catch {exec [interpreter] "$path(sh)" -c "\"$path(echo)\" error msg 1>&2 ; \"$path(sleep)\" 1" \
+		    | [interpreter] "$path(sh)" -c "\"$path(echo)\" error msg 1>&2 ; \"$path(sleep)\" 1"} msg] $msg
 } {1 {error msg
 error msg}}
 
@@ -432,11 +457,11 @@ test exec-11.5 {commands in background} {exec} {
 # Make sure that background commands are properly reaped when
 # they eventually die.
 
-if { [set ::tcltest::testConstraints(exec)] } {
-exec [interpreter] $path(sleep) 3
+if {[testConstraint exec]} {
+    exec [interpreter] $path(sleep) 3
 }
 test exec-12.1 {reaping background processes} \
-	{exec unixOnly nonPortable} {
+	{exec unix nonPortable} {
     for {set i 0} {$i < 20} {incr i} {
 	exec echo foo > /dev/null &
     }
@@ -445,7 +470,7 @@ test exec-12.1 {reaping background processes} \
     lindex $msg 0
 } 0
 test exec-12.2 {reaping background processes} \
-	{exec unixOnly nonPortable} {
+	{exec unix nonPortable} {
     exec sleep 2 | sleep 2 | sleep 2 &
     catch {exec ps | fgrep -i "sleep" | fgrep -i -v fgrep | wc} msg
     set x [lindex $msg 0]
@@ -454,7 +479,7 @@ test exec-12.2 {reaping background processes} \
     list $x [lindex $msg 0]
 } {3 0}
 test exec-12.3 {reaping background processes} \
-	{exec unixOnly nonPortable} {
+	{exec unix nonPortable} {
     exec sleep 1000 &
     exec sleep 1000 &
     set x [exec ps | fgrep "sleep" | fgrep -v fgrep]
@@ -522,7 +547,7 @@ test exec-13.5 {extended exit result codes: max value} {
 test exec-13.6 {extended exit result codes: signalled} {   
     -constraints {win}
     -setup {
-        set tmp [makeFile {exit 0xffffffff} tmpfile.exec-13.6]
+        set tmp [makeFile {exit 0xC0000016} tmpfile.exec-13.6]
     }
     -body {
         list [catch {exec [interpreter] $tmp} err]\
@@ -544,10 +569,14 @@ test exec-14.2 {-keepnewline switch} {exec} {
 } {1 {wrong # args: should be "exec ?switches? arg ?arg ...?"}}
 test exec-14.3 {unknown switch} {exec} {
     list [catch {exec -gorp} msg] $msg
-} {1 {bad switch "-gorp": must be -keepnewline or --}}
+} {1 {bad switch "-gorp": must be -ignorestderr, -keepnewline, or --}}
 test exec-14.4 {-- switch} {exec} {
     list [catch {exec -- -gorp} msg] [string tolower $msg]
 } {1 {couldn't execute "-gorp": no such file or directory}}
+test exec-14.5 {-ignorestderr switch} {exec} {
+    # Alas, the use of -ignorestderr is buried here :-(
+    exec [interpreter] $path(sh2) -c [list $path(echo2) foo bar] 2>@1
+} "foo bar\nbar"
 
 # Redirecting standard error separately from standard output
 
@@ -679,7 +708,7 @@ test exec-19.1 {exec >> uses O_APPEND} {
 
 # cleanup
 
-foreach file {script gorp.file gorp.file2 echo cat wc sh sleep exit err} {
+foreach file {script gorp.file gorp.file2 echo echo2 cat wc sh sh2 sleep exit err} {
     removeFile $file
 }
 unset -nocomplain path

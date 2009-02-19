@@ -3,25 +3,32 @@
 # generate the file "configure", which is run during Tcl installation
 # to configure the system for the local environment.
 #
-# RCS: @(#) $Id: configure.in,v 1.68.2.23 2008/04/11 16:57:42 dgp Exp $
+# RCS: @(#) $Id: configure.in,v 1.104.2.7 2008/12/21 20:59:03 dgp Exp $
 
 AC_INIT(../generic/tcl.h)
-AC_PREREQ(2.13)
+AC_PREREQ(2.59)
 
-TCL_VERSION=8.4
+# The following define is needed when building with Cygwin since newer
+# versions of autoconf incorrectly set SHELL to /bin/bash instead of
+# /bin/sh. The bash shell seems to suffer from some strange failures.
+SHELL=/bin/sh
+
+TCL_VERSION=8.5
 TCL_MAJOR_VERSION=8
-TCL_MINOR_VERSION=4
-TCL_PATCH_LEVEL=".19"
+TCL_MINOR_VERSION=5
+TCL_PATCH_LEVEL=".6"
 VER=$TCL_MAJOR_VERSION$TCL_MINOR_VERSION
 
-TCL_DDE_VERSION=1.2
+TCL_DDE_VERSION=1.3
 TCL_DDE_MAJOR_VERSION=1
-TCL_DDE_MINOR_VERSION=2
+TCL_DDE_MINOR_VERSION=3
+TCL_DDE_PATCH_LEVEL="2"
 DDEVER=$TCL_DDE_MAJOR_VERSION$TCL_DDE_MINOR_VERSION
 
-TCL_REG_VERSION=1.1
+TCL_REG_VERSION=1.2
 TCL_REG_MAJOR_VERSION=1
-TCL_REG_MINOR_VERSION=1
+TCL_REG_MINOR_VERSION=2
+TCL_REG_PATCH_LEVEL="1"
 REGVER=$TCL_REG_MAJOR_VERSION$TCL_REG_MINOR_VERSION
 
 #------------------------------------------------------------------------
@@ -48,6 +55,8 @@ if test "${CFLAGS+set}" != "set" ; then
 fi
 
 AC_PROG_CC
+AC_C_INLINE
+AC_HEADER_STDC
 
 # To properly support cross-compilation, one would
 # need to use these tool checks instead of
@@ -76,7 +85,7 @@ if test "${GCC}" = "yes" ; then
 fi
 
 #--------------------------------------------------------------------
-# Checks to see if the make progeam sets the $MAKE variable.
+# Checks to see if the make program sets the $MAKE variable.
 #--------------------------------------------------------------------
 
 AC_PROG_MAKE_SET
@@ -85,8 +94,22 @@ AC_PROG_MAKE_SET
 # Perform additinal compiler tests.
 #--------------------------------------------------------------------
 
-AC_CYGWIN
+dnl Currently AC_CYGWIN is disabled since it invokes AC_CANONICAL_HOST
+dnl under autoconf 2.5X.
+dnl
+dnl AC_CYGWIN
 
+AC_CACHE_CHECK(for Cygwin version of gcc,
+    ac_cv_cygwin,
+AC_TRY_COMPILE([
+#ifdef __CYGWIN__
+#error cygwin
+#endif
+],
+[],
+        ac_cv_cygwin=no,
+        ac_cv_cygwin=yes)
+)
 if test "$ac_cv_cygwin" = "yes" ; then
     AC_MSG_ERROR([Compiling under Cygwin is not currently supported.
 A maintainer for the Cygwin port of Tcl/Tk is needed. See the README
@@ -243,6 +266,50 @@ if test "$tcl_cv_cast_to_union" = "yes"; then
 fi
 
 
+# See if declarations like FINDEX_INFO_LEVELS are
+# missing from winbase.h. This is known to be
+# a problem with VC++ 5.2.
+
+AC_CACHE_CHECK(for FINDEX_INFO_LEVELS in winbase.h,
+    tcl_cv_findex_enums,
+AC_TRY_COMPILE([
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#undef WIN32_LEAN_AND_MEAN
+],
+[
+  FINDEX_INFO_LEVELS i;
+  FINDEX_SEARCH_OPS j;
+],
+        tcl_cv_findex_enums=yes,
+        tcl_cv_findex_enums=no)
+)
+if test "$tcl_cv_findex_enums" = "no"; then
+    AC_DEFINE(HAVE_NO_FINDEX_ENUMS, 1,
+            [Defined when enums are missing from winbase.h])
+fi
+
+# See if MWMO_ALERTABLE is missing from winuser.h
+# This is known to be a problem with Mingw.
+
+AC_CACHE_CHECK(for MWMO_ALERTABLE in winuser.h,
+    tcl_cv_mwmo_alertable,
+AC_TRY_COMPILE([
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#undef WIN32_LEAN_AND_MEAN
+],
+[
+  int i = MWMO_ALERTABLE;
+],
+        tcl_cv_mwmo_alertable=yes,
+        tcl_cv_mwmo_alertable=no)
+)
+if test "$tcl_cv_mwmo_alertable" = "no"; then
+    AC_DEFINE(HAVE_NO_MWMO_ALERTABLE, 1,
+            [Defined when MWMO_ALERTABLE is missing from winuser.h])
+fi
+
 #--------------------------------------------------------------------
 # Determines the correct binary file extension (.o, .obj, .exe etc.)
 #--------------------------------------------------------------------
@@ -255,6 +322,12 @@ AC_EXEEXT
 #--------------------------------------------------------------------
 
 SC_ENABLE_THREADS
+
+#------------------------------------------------------------------------
+# Embedded configuration information, encoding to use for the values, TIP #59
+#------------------------------------------------------------------------
+
+SC_TCL_CFG_ENCODING
 
 #--------------------------------------------------------------------
 # The statements below define a collection of symbols related to
@@ -280,13 +353,6 @@ SC_CONFIG_CFLAGS
 SC_ENABLE_SYMBOLS
 
 TCL_DBGX=${DBGX}
-
-#--------------------------------------------------------------------
-# man2tcl needs this so that it can use errno.h
-#--------------------------------------------------------------------
-
-AC_CHECK_HEADER(errno.h, , MAN2TCLFLAGS="-DNO_ERRNO_H")
-AC_SUBST(MAN2TCLFLAGS)
 
 #------------------------------------------------------------------------
 # tclConfig.sh refers to this by a different name
@@ -358,7 +424,7 @@ fi
 #	another for platform-independent scripts.
 #--------------------------------------------------------------------
 
-if test "$prefix" != "$exec_prefix"; then
+if test "$prefix/lib" != "$libdir"; then
     TCL_PACKAGE_PATH="${libdir} ${prefix}/lib"
 else
     TCL_PACKAGE_PATH="${prefix}/lib"
@@ -432,7 +498,6 @@ AC_SUBST(TCL_NEEDS_EXP_FILE)
 AC_SUBST(TCL_BUILD_EXP_FILE)
 AC_SUBST(TCL_EXP_FILE)
 AC_SUBST(DL_LIBS)
-AC_SUBST(LIBOBJS)
 AC_SUBST(TCL_LIB_VERSIONS_OK)
 AC_SUBST(TCL_PACKAGE_PATH)
 
@@ -440,9 +505,11 @@ AC_SUBST(TCL_PACKAGE_PATH)
 AC_SUBST(TCL_DDE_VERSION)
 AC_SUBST(TCL_DDE_MAJOR_VERSION)
 AC_SUBST(TCL_DDE_MINOR_VERSION)
+AC_SUBST(TCL_DDE_PATCH_LEVEL)
 AC_SUBST(TCL_REG_VERSION)
 AC_SUBST(TCL_REG_MAJOR_VERSION)
 AC_SUBST(TCL_REG_MINOR_VERSION)
+AC_SUBST(TCL_REG_PATCH_LEVEL)
 
 AC_SUBST(RC)
 AC_SUBST(RC_OUT)

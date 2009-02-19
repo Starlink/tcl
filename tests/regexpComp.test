@@ -43,7 +43,7 @@ test regexpComp-1.2 {basic regexp operation} {
     }
 } 1
 test regexpComp-1.3 {basic regexp operation} {
-    evalInProc {    
+    evalInProc {
 	regexp ab*c ab
     }
 } 0
@@ -68,6 +68,64 @@ test regexpComp-1.7 {regexp utf compliance} {
 	list [string compare $foo $bar] [regexp 4 $bar]
     }
 } {0 0}
+
+test regexpComp-1.8 {regexp ***= metasyntax} {
+    evalInProc {
+	regexp -- "***=o" "aeiou"
+    }
+} 1
+test regexpComp-1.9 {regexp ***= metasyntax} {
+    evalInProc {
+	set string "aeiou"
+	regexp -- "***=o" $string
+    }
+} 1
+test regexpComp-1.10 {regexp ***= metasyntax} {
+    evalInProc {
+	set string "aeiou"
+	set re "***=o"
+	regexp -- $re $string
+    }
+} 1
+test regexpComp-1.11 {regexp ***= metasyntax} {
+    evalInProc {
+	regexp -- "***=y" "aeiou"
+    }
+} 0
+test regexpComp-1.12 {regexp ***= metasyntax} {
+    evalInProc {
+	set string "aeiou"
+	regexp -- "***=y" $string
+    }
+} 0
+test regexpComp-1.13 {regexp ***= metasyntax} {
+    evalInProc {
+	set string "aeiou"
+	set re "***=y"
+	regexp -- $re $string
+    }
+} 0
+test regexpComp-1.14 {regexp ***= metasyntax} {
+    evalInProc {
+	set string "aeiou"
+	set re "***=e*o"
+	regexp -- $re $string
+    }
+} 0
+test regexpComp-1.15 {regexp ***= metasyntax} {
+    evalInProc {
+	set string "ae*ou"
+	set re "***=e*o"
+	regexp -- $re $string
+    }
+} 1
+test regexpComp-1.16 {regexp ***= metasyntax} {
+    evalInProc {
+	set string {ae*[o]?ua}
+	set re {***=e*[o]?u}
+	regexp -- $re $string
+    }
+} 1
 
 test regexpComp-2.1 {getting substrings back from regexp} {
     evalInProc {
@@ -301,7 +359,7 @@ test regexpComp-6.9 {regexp errors, -start bad int check} {
     evalInProc {
 	list [catch {regexp -start bogus {^$} {}} msg] $msg
     }
-} {1 {expected integer but got "bogus"}}
+} {1 {bad index "bogus": must be integer?[+-]integer? or end?[+-]integer?}}
 
 test regexpComp-7.1 {basic regsub operation} {
     evalInProc {
@@ -542,7 +600,7 @@ test regexpComp-11.8 {regsub errors, -start bad int check} {
     evalInProc {
 	list [catch {regsub -start bogus pattern string rep var} msg] $msg
     }
-} {1 {expected integer but got "bogus"}}
+} {1 {bad index "bogus": must be integer?[+-]integer? or end?[+-]integer?}}
 
 # This test crashes on the Mac unless you increase the Stack Space to about 1
 # Meg.  This is probably bigger than most users want... 
@@ -802,6 +860,18 @@ test regexpComp-21.11 {regexp command compiling tests} {
     }
 } {0 {}}
 
+test regexpComp-22.0.1 {Bug 1810038} {
+    evalInProc {
+	regexp ($|^X)* {}
+    }
+} 1
+
+test regexpComp-22.0.2 {regexp compile and backrefs, Bug 1857126} {
+    evalInProc {
+	regexp -- {([bc])\1} bb
+    }
+} 1
+
 set i 0
 foreach {str exp result} {
     foo		^foo		1
@@ -821,6 +891,98 @@ foreach {str exp result} {
     test regexpComp-22.[incr i] {regexp command compiling tests} \
 	     [subst {evalInProc {set a "$str"; regexp {$exp} \$a}}] $result
 }
+
+set i 0
+foreach {str exp result} {
+    foo		^foo		1
+    foobar	^foobar$	1
+    foobar	bar$		1
+    foobar	^$		0
+    ""		^$		1
+    anything	$		1
+    anything	^.*$		1
+    anything	^.*a$		0
+    anything	^.*a.*$		1
+    anything	^.*.*$		1
+    anything	^.*..*$		1
+    anything	^.*b$		0
+    anything	^a.*$		1
+} {
+    test regexpComp-23.[incr i] {regexp command compiling tests INST_REGEXP} \
+	[subst {evalInProc {set a "$str"; set re "$exp"; regexp \$re \$a}}] $result
+}
+
+test regexpComp-24.1 {regexp command compiling tests} {
+    evalInProc {
+	set re foo
+	regexp -nocase $re bar
+    }
+} 0
+test regexpComp-24.2 {regexp command compiling tests} {
+    evalInProc {
+	set re {^foo$}
+	regexp $re dogfood
+    }
+} 0
+test regexpComp-24.3 {regexp command compiling tests} {
+    evalInProc {
+	set a foo
+	set re {^foo$}
+	regexp $re $a
+    }
+} 1
+test regexpComp-24.4 {regexp command compiling tests} {
+    evalInProc {
+	set re foo
+	regexp $re dogfood
+    }
+} 1
+test regexpComp-24.5 {regexp command compiling tests} {
+    evalInProc {
+	set re FOO
+	regexp -nocase $re dogfod
+    }
+} 0
+test regexpComp-24.6 {regexp command compiling tests} {
+    evalInProc {
+	set re foo
+	regexp -n $re dogfoOd
+    }
+} 1
+test regexpComp-24.7 {regexp command compiling tests} {
+    evalInProc {
+	set re FoO
+	regexp -no -- $re dogfood
+    }
+} 1
+test regexpComp-24.8 {regexp command compiling tests} {
+    evalInProc {
+	set re foo
+	regexp -- $re dogfod
+    }
+} 0
+test regexpComp-24.9 {regexp command compiling tests} {
+    evalInProc {
+	set re "("
+	list [catch {regexp -- $re dogfod} msg] $msg
+    }
+} {1 {couldn't compile regular expression pattern: parentheses () not balanced}}
+test regexpComp-24.10 {regexp command compiling tests} {
+    # Bug 1902436 - last * escaped
+    evalInProc {
+	set text {this is *bold* !}
+	set re {\*bold\*}
+	regexp -- $re $text
+    }
+} 1
+test regexpComp-24.11 {regexp command compiling tests} {
+    # Bug 1902436 - last * escaped
+    evalInProc {
+	set text {this is *bold* !}
+	set re {\*bold\*.*!}
+	regexp -- $re $text
+    }
+} 1
 
 # cleanup
 ::tcltest::cleanupTests

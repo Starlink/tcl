@@ -2,7 +2,7 @@
 '\" Copyright (c) 1998-2000 by Scriptics Corporation.
 '\" All rights reserved.
 '\" 
-'\" RCS: @(#) $Id: Init.3,v 1.1 2000/04/28 00:47:48 ericm Exp $
+'\" RCS: @(#) $Id: Init.3,v 1.6 2007/12/13 15:22:31 dgp Exp $
 '\" 
 .so man.macros
 .TH Tcl_Init 3 8.0 Tcl "Tcl Library Procedures"
@@ -16,17 +16,16 @@ Tcl_Init \- find and source initialization script
 int
 \fBTcl_Init\fR(\fIinterp\fR)
 .SH ARGUMENTS
+.AS Tcl_Interp *interp
 .AP Tcl_Interp *interp in
 Interpreter to initialize.
 .BE
 
 .SH DESCRIPTION
 .PP
-\fBTcl_Init\fR is a helper procedure that finds and \fBsource\fR's the
+\fBTcl_Init\fR is a helper procedure that finds and \fBsource\fRs the
 \fBinit.tcl\fR script, which should exist somewhere on the Tcl library
-path.  On Macintosh systems, it additionally checks for an \fBInit\fR
-resource and sources the contents of that resource if \fBinit.tcl\fR
-cannot be found.
+path.
 .PP
 \fBTcl_Init\fR is typically called from \fBTcl_AppInit\fR procedures.
 

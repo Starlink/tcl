@@ -19,14 +19,14 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclUnixPort.h,v 1.27.2.19 2007/08/07 05:04:48 das Exp $
+ * RCS: @(#) $Id: tclUnixPort.h,v 1.65 2008/03/11 22:26:27 das Exp $
  */
 
 #ifndef _TCLUNIXPORT
 #define _TCLUNIXPORT
 
-#ifndef _TCLINT
-#   include "tclInt.h"
+#ifndef MODULE_SCOPE
+#define MODULE_SCOPE extern
 #endif
 
 /*
@@ -83,26 +83,11 @@ typedef off_t		Tcl_SeekOffset;
 #   define TclOSlstat		lstat
 #endif
 
-#if !HAVE_STRTOLL && defined(TCL_WIDE_INT_TYPE) && !TCL_WIDE_INT_IS_LONG
-EXTERN Tcl_WideInt	strtoll _ANSI_ARGS_((CONST char *string,
-					     char **endPtr, int base));
-EXTERN Tcl_WideUInt	strtoull _ANSI_ARGS_((CONST char *string,
-					      char **endPtr, int base));
-#endif
-
 #include <sys/file.h>
 #ifdef HAVE_SYS_SELECT_H
 #   include <sys/select.h>
 #endif
 #include <sys/stat.h>
-
-#ifdef __CYGWIN__
-#   define timezone _timezone
-    typedef long TIMEZONE_t;
-#else	/* !__CYGWIN__ */
-    typedef int TIMEZONE_t;
-#endif	/* !__CYGWIN__ */
-
 #if TIME_WITH_SYS_TIME
 #   include <sys/time.h>
 #   include <time.h>
@@ -116,32 +101,26 @@ EXTERN Tcl_WideUInt	strtoull _ANSI_ARGS_((CONST char *string,
 #ifndef NO_SYS_WAIT_H
 #   include <sys/wait.h>
 #endif
+#if HAVE_INTTYPES_H
+#   include <inttypes.h>
+#endif
+#if HAVE_STDINT_H
+#   include <stdint.h>
+#endif
 #ifdef HAVE_UNISTD_H
 #   include <unistd.h>
 #else
 #   include "../compat/unistd.h"
 #endif
-#ifdef	USE_FIONBIO
-    /*
-     * Not using the Posix fcntl(...,O_NONBLOCK,...) interface, instead
-     * we are using ioctl(..,FIONBIO,..).
-     */
 
-#   ifdef HAVE_SYS_FILIO_H
-#	include	<sys/filio.h>	/* For FIONBIO. */
-#   endif
+MODULE_SCOPE int TclUnixSetBlockingMode(int fd, int mode);
 
-#   ifdef HAVE_SYS_IOCTL_H
-#	include	<sys/ioctl.h>	/* For FIONBIO. */
-#   endif
-#endif	/* USE_FIONBIO */
 #include <utime.h>
 
 /*
  * Socket support stuff: This likely needs more work to parameterize for
  * each system.
  */
-
 #include <sys/socket.h>		/* struct sockaddr, SOCK_STREAM, ... */
 #ifndef NO_UNAME
 #   include <sys/utsname.h>	/* uname system call. */
@@ -185,18 +164,6 @@ EXTERN Tcl_WideUInt	strtoull _ANSI_ARGS_((CONST char *string,
 
 #ifndef O_NONBLOCK
 #   define O_NONBLOCK 0x80
-#endif
-
-/*
- * HPUX needs the flag O_NONBLOCK to get the right non-blocking I/O
- * semantics, while most other systems need O_NDELAY.  Define the
- * constant NBIO_FLAG to be one of these
- */
-
-#ifdef HPUX
-#  define NBIO_FLAG O_NONBLOCK
-#else
-#  define NBIO_FLAG O_NDELAY
 #endif
 
 /*
@@ -272,21 +239,11 @@ EXTERN Tcl_WideUInt	strtoull _ANSI_ARGS_((CONST char *string,
 
 /*
  * The stuff below is needed by the "time" command.  If this system has no
- * gettimeofday call, then must use times and the CLK_TCK #define (from
- * sys/param.h) to compute elapsed time.  Unfortunately, some systems only
- * have HZ and no CLK_TCK, and some might not even have HZ.
+ * gettimeofday call, then must use times() instead.
  */
 
 #ifdef NO_GETTOD
 #   include <sys/times.h>
-#   include <sys/param.h>
-#   ifndef CLK_TCK
-#       ifdef HZ
-#           define CLK_TCK HZ
-#       else
-#           define CLK_TCK 60
-#       endif
-#   endif
 #else
 #   ifdef HAVE_BSDGETTIMEOFDAY
 #	define gettimeofday BSDgettimeofday
@@ -472,7 +429,7 @@ EXTERN int		gettimeofday _ANSI_ARGS_((struct timeval *tp,
 
 #ifdef NO_ERRNO
 extern int errno;
-#endif
+#endif /* NO_ERRNO */
 
 /*
  * Not all systems declare all the errors that Tcl uses!  Provide some
@@ -501,16 +458,6 @@ extern int errno;
 #   endif
 extern char **environ;
 #endif
-
-/*
- * At present (12/91) not all stdlib.h implementations declare strtod.
- * The declaration below is here to ensure that it's declared, so that
- * the compiler won't take the default approach of assuming it returns
- * an int.  There's no ANSI prototype for it because there would end
- * up being too many conflicts with slightly-different prototypes.
- */
-
-extern double strtod();
 
 /*
  * There is no platform-specific panic routine for Unix in the Tcl internals.
@@ -597,34 +544,13 @@ extern double strtod();
 #   if defined(__x86_64__) && !defined(FIXED_RDAR_4685553)
 #       undef USE_VFORK
 #   endif /* __x86_64__ */
+/* Workaround problems with vfork() when building with llvm-gcc-4.2 */
+#   if defined (__llvm__) && \
+	    (__GNUC__ > 4 || (__GNUC__ == 4 && (__GNUC_MINOR__ > 2 || \
+	    (__GNUC_MINOR__ == 2 && __GNUC_PATCHLEVEL__ > 0))))
+#       undef USE_VFORK
+#   endif /* __llvm__ */
 #endif /* __APPLE__ */
-
-/*
- * Darwin 8 copyfile API.
- */
-
-#ifdef HAVE_COPYFILE
-#ifdef HAVE_COPYFILE_H
-#include <copyfile.h>
-#if defined(HAVE_WEAK_IMPORT) && MAC_OS_X_VERSION_MIN_REQUIRED < 1040
-/* Support for weakly importing copyfile. */
-#define WEAK_IMPORT_COPYFILE
-extern int copyfile(const char *from, const char *to, copyfile_state_t state,
-		    copyfile_flags_t flags) WEAK_IMPORT_ATTRIBUTE;
-#endif /* HAVE_WEAK_IMPORT */
-#else /* HAVE_COPYFILE_H */
-int copyfile(const char *from, const char *to, void *state, uint32_t flags);
-#define COPYFILE_ACL            (1<<0)
-#define COPYFILE_XATTR          (1<<2)
-#define COPYFILE_NOFOLLOW_SRC   (1<<18)
-#if defined(HAVE_WEAK_IMPORT) && MAC_OS_X_VERSION_MIN_REQUIRED < 1040
-/* Support for weakly importing copyfile. */
-#define WEAK_IMPORT_COPYFILE
-extern int copyfile(const char *from, const char *to, void *state,
-                    uint32_t flags) WEAK_IMPORT_ATTRIBUTE;
-#endif /* HAVE_WEAK_IMPORT */
-#endif /* HAVE_COPYFILE_H */
-#endif /* HAVE_COPYFILE */
 
 /*
  *---------------------------------------------------------------------------
@@ -640,6 +566,7 @@ extern int copyfile(const char *from, const char *to, void *state,
 
 #ifdef DJGPP
 #define	TCL_PLATFORM_TRANSLATION	TCL_TRANSLATE_CRLF
+typedef int socklen_t;
 #else
 #define	TCL_PLATFORM_TRANSLATION	TCL_TRANSLATE_LF
 #endif
@@ -653,15 +580,12 @@ extern int copyfile(const char *from, const char *to, void *state,
 #define TclpReleaseFile(file)	/* Nothing. */
 
 /*
- * The following defines wrap the system memory allocation routines for
- * use by tclAlloc.c.  By default off unused on Unix.
+ * The following defines wrap the system memory allocation routines.
  */
 
-#if USE_TCLALLOC
-#   define TclpSysAlloc(size, isBin)	malloc((size_t)size)
-#   define TclpSysFree(ptr)		free((char*)ptr)
-#   define TclpSysRealloc(ptr, size)	realloc((char*)ptr, (size_t)size)
-#endif
+#define TclpSysAlloc(size, isBin)	malloc((size_t)size)
+#define TclpSysFree(ptr)		free((char*)ptr)
+#define TclpSysRealloc(ptr, size)	realloc((char*)ptr, (size_t)size)
 
 /*
  * The following macros and declaration wrap the C runtime library
@@ -670,35 +594,33 @@ extern int copyfile(const char *from, const char *to, void *state,
 
 #define TclpExit		exit
 
-/*
- * Platform specific mutex definition used by memory allocators.
- * These mutexes are statically allocated and explicitly initialized.
- * Most modules do not use this, but instead use Tcl_Mutex types and
- * Tcl_MutexLock and Tcl_MutexUnlock that are self-initializing.
- */
-
 #ifdef TCL_THREADS
-#include <pthread.h>
-typedef pthread_mutex_t TclpMutex;
-EXTERN void	TclpMutexInit _ANSI_ARGS_((TclpMutex *mPtr));
-EXTERN void	TclpMutexLock _ANSI_ARGS_((TclpMutex *mPtr));
-EXTERN void	TclpMutexUnlock _ANSI_ARGS_((TclpMutex *mPtr));
-EXTERN Tcl_DirEntry * 	TclpReaddir(DIR *);
-#ifndef TclpLocaltime
-EXTERN struct tm *     	TclpLocaltime(TclpTime_t_CONST);
-#endif
-#ifndef TclpGmtime
-EXTERN struct tm *     	TclpGmtime(TclpTime_t_CONST);
-#endif
+EXTERN struct tm *     	TclpLocaltime(CONST time_t *);
+EXTERN struct tm *     	TclpGmtime(CONST time_t *);
 EXTERN char *          	TclpInetNtoa(struct in_addr);
-#define inet_ntoa(x)	TclpInetNtoa(x)
-#else
-typedef int TclpMutex;
-#define	TclpMutexInit(a)
-#define	TclpMutexLock(a)
-#define	TclpMutexUnlock(a)
+/* #define localtime(x)	TclpLocaltime(x)
+ * #define gmtime(x)	TclpGmtime(x)    */
+#   undef inet_ntoa
+#   define inet_ntoa(x)	TclpInetNtoa(x)
+#   ifdef HAVE_PTHREAD_ATTR_GET_NP
+#	define TclpPthreadGetAttrs	pthread_attr_get_np
+#	ifdef ATTRGETNP_NOT_DECLARED
+/*
+ * Assume it is in pthread_np.h if it isn't in pthread.h. [Bug 1064882]
+ * We might need to revisit this in the future. :^(
+ */
+#	    include <pthread.h>
+#	    include <pthread_np.h>
+#	endif
+#   else
+#	ifdef HAVE_PTHREAD_GETATTR_NP
+#	    define TclpPthreadGetAttrs	pthread_getattr_np
+#	    ifdef GETATTRNP_NOT_DECLARED
+EXTERN int pthread_getattr_np _ANSI_ARGS_((pthread_t, pthread_attr_t *));
+#	    endif
+#	endif /* HAVE_PTHREAD_GETATTR_NP */
+#   endif /* HAVE_PTHREAD_ATTR_GET_NP */
 #endif /* TCL_THREADS */
-
 
 /*
  * Set of MT-safe implementations of some
@@ -711,14 +633,11 @@ typedef int TclpMutex;
 #include <pwd.h>
 #include <grp.h>
 
-EXTERN struct passwd*  TclpGetPwNam(const char *name);
-EXTERN struct group*   TclpGetGrNam(const char *name);
-EXTERN struct passwd*  TclpGetPwUid(uid_t uid);
-EXTERN struct group*   TclpGetGrGid(gid_t gid);
-EXTERN struct hostent* TclpGetHostByName(const char *name);
-EXTERN struct hostent* TclpGetHostByAddr(const char *addr, int length, int type);
-
-#include "tclPlatDecls.h"
-#include "tclIntPlatDecls.h"
+MODULE_SCOPE struct passwd*  TclpGetPwNam(const char *name);
+MODULE_SCOPE struct group*   TclpGetGrNam(const char *name);
+MODULE_SCOPE struct passwd*  TclpGetPwUid(uid_t uid);
+MODULE_SCOPE struct group*   TclpGetGrGid(gid_t gid);
+MODULE_SCOPE struct hostent* TclpGetHostByName(const char *name);
+MODULE_SCOPE struct hostent* TclpGetHostByAddr(const char *addr, int length, int type);
 
 #endif /* _TCLUNIXPORT */

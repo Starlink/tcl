@@ -5,7 +5,7 @@
 '\" See the file "license.terms" for information on usage and redistribution
 '\" of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 '\" 
-'\" RCS: @(#) $Id: unknown.n,v 1.4.12.1 2004/10/27 14:43:15 dkf Exp $
+'\" RCS: @(#) $Id: unknown.n,v 1.9 2007/12/13 15:22:33 dgp Exp $
 '\" 
 .so man.macros
 .TH unknown n "" Tcl "Tcl Built-In Commands"
@@ -16,22 +16,24 @@ unknown \- Handle attempts to use non-existent commands
 .SH SYNOPSIS
 \fBunknown \fIcmdName \fR?\fIarg arg ...\fR?
 .BE
-
 .SH DESCRIPTION
 .PP
 This command is invoked by the Tcl interpreter whenever a script
-tries to invoke a command that doesn't exist.  The default implementation
+tries to invoke a command that does not exist.  The default implementation
 of \fBunknown\fR is a library procedure defined when Tcl initializes an
 interpreter.  You can override the default \fBunknown\fR to change its
-functionality.  Note that there is no default implementation of
-\fBunknown\fR in a safe interpreter.
+functionality, or you can register a new handler for individual namespaces
+using the \fBnamespace unknown\fR command.  Note that there is no default 
+implementation of \fBunknown\fR in a safe interpreter.
 .PP
 If the Tcl interpreter encounters a command name for which there
-is not a defined command, then Tcl checks for the existence of
-a command named \fBunknown\fR.
-If there is no such command, then the interpreter returns an
-error.
-If the \fBunknown\fR command exists, then it is invoked with
+is not a defined command (in either the current namespace, or the 
+global namespace), then Tcl checks for the existence of
+an unknown handler for the current namespace. By default, this
+handler is a command named \fB::unknown\fR.  If there is no such 
+command, then the interpreter returns an error.
+If the \fBunknown\fR command exists (or a new handler has been
+registered for the current namespace), then it is invoked with
 arguments consisting of the fully-substituted name and arguments
 for the original non-existent command.
 The \fBunknown\fR command typically does things like searching
@@ -51,7 +53,7 @@ If the auto-load fails then \fBunknown\fR calls \fBauto_execok\fR
 to see if there is an executable file by the name \fIcmd\fR.
 If so, it invokes the Tcl \fBexec\fR command
 with \fIcmd\fR and all the \fIargs\fR as arguments.
-If \fIcmd\fR can't be auto-executed, \fBunknown\fR checks to
+If \fIcmd\fR cannot be auto-executed, \fBunknown\fR checks to
 see if the command was invoked at top-level and outside of any
 script.  If so, then \fBunknown\fR takes two additional steps.
 First, it sees if \fIcmd\fR has one of the following three forms:
@@ -82,12 +84,10 @@ rename \fBunknown\fR _original_unknown
 # Provide our own implementation
 proc \fBunknown\fR args {
     puts stderr "WARNING: unknown command: $args"
-    uplevel 1 [list _original_unknown {expand}$args]
+    uplevel 1 [list _original_unknown {*}$args]
 }
 .CE
-
 .SH "SEE ALSO"
-info(n), proc(n), interp(n), library(n)
-
+info(n), proc(n), interp(n), library(n), namespace(n)
 .SH KEYWORDS
 error, non-existent command

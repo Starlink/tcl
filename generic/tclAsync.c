@@ -1,93 +1,80 @@
-/* 
+/*
  * tclAsync.c --
  *
- *	This file provides low-level support needed to invoke signal
- *	handlers in a safe way.  The code here doesn't actually handle
- *	signals, though.  This code is based on proposals made by
- *	Mark Diekhans and Don Libes.
+ *	This file provides low-level support needed to invoke signal handlers
+ *	in a safe way. The code here doesn't actually handle signals, though.
+ *	This code is based on proposals made by Mark Diekhans and Don Libes.
  *
  * Copyright (c) 1993 The Regents of the University of California.
  * Copyright (c) 1994 Sun Microsystems, Inc.
  *
- * See the file "license.terms" for information on usage and redistribution
- * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
+ * See the file "license.terms" for information on usage and redistribution of
+ * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclAsync.c,v 1.6.12.1 2006/07/11 13:18:10 vasiljevic Exp $
+ * RCS: @(#) $Id: tclAsync.c,v 1.13.2.3 2008/05/03 19:31:28 das Exp $
  */
 
 #include "tclInt.h"
-#include "tclPort.h"
 
 /* Forward declaration */
 struct ThreadSpecificData;
 
 /*
- * One of the following structures exists for each asynchronous
- * handler:
+ * One of the following structures exists for each asynchronous handler:
  */
 
 typedef struct AsyncHandler {
-    int ready;				/* Non-zero means this handler should
-					 * be invoked in the next call to
-					 * Tcl_AsyncInvoke. */
-    struct AsyncHandler *nextPtr;	/* Next in list of all handlers for
-					 * the process. */
-    Tcl_AsyncProc *proc;		/* Procedure to call when handler
-					 * is invoked. */
-    ClientData clientData;		/* Value to pass to handler when it
-					 * is invoked. */
+    int ready;			/* Non-zero means this handler should be
+				 * invoked in the next call to
+				 * Tcl_AsyncInvoke. */
+    struct AsyncHandler *nextPtr;
+				/* Next in list of all handlers for the
+				 * process. */
+    Tcl_AsyncProc *proc;	/* Procedure to call when handler is
+				 * invoked. */
+    ClientData clientData;	/* Value to pass to handler when it is
+				 * invoked. */
     struct ThreadSpecificData *originTsd;
-					/* Used in Tcl_AsyncMark to modify thread-
-					 * specific data from outside the thread
-					 * it is associated to. */
-    Tcl_ThreadId originThrdId;		/* Origin thread where this token was
-					 * created and where it will be
-					 * yielded. */
+				/* Used in Tcl_AsyncMark to modify thread-
+				 * specific data from outside the thread it is
+				 * associated to. */
+    Tcl_ThreadId originThrdId;	/* Origin thread where this token was created
+				 * and where it will be yielded. */
 } AsyncHandler;
-
 
 typedef struct ThreadSpecificData {
     /*
-     * The variables below maintain a list of all existing handlers
-     * specific to the calling thread.
+     * The variables below maintain a list of all existing handlers specific
+     * to the calling thread.
      */
-    AsyncHandler *firstHandler;	    /* First handler defined for process,
-				     * or NULL if none. */
-    AsyncHandler *lastHandler;	    /* Last handler or NULL. */
-
-    /*
-     * The variable below is set to 1 whenever a handler becomes ready and
-     * it is cleared to zero whenever Tcl_AsyncInvoke is called.  It can be
-     * checked elsewhere in the application by calling Tcl_AsyncReady to see
-     * if Tcl_AsyncInvoke should be invoked.
-     */
-
-    int asyncReady;
-
-    /*
-     * The variable below indicates whether Tcl_AsyncInvoke is currently
-     * working.  If so then we won't set asyncReady again until
-     * Tcl_AsyncInvoke returns.
-     */
-
-    int asyncActive;
-
-    Tcl_Mutex asyncMutex;   /* Thread-specific AsyncHandler linked-list lock */
-
+    AsyncHandler *firstHandler;	/* First handler defined for process, or NULL
+				 * if none. */
+    AsyncHandler *lastHandler;	/* Last handler or NULL. */
+    int asyncReady;		/* This is set to 1 whenever a handler becomes
+				 * ready and it is cleared to zero whenever
+				 * Tcl_AsyncInvoke is called. It can be
+				 * checked elsewhere in the application by
+				 * calling Tcl_AsyncReady to see if
+				 * Tcl_AsyncInvoke should be invoked. */
+    int asyncActive;		/* Indicates whether Tcl_AsyncInvoke is
+				 * currently working. If so then we won't set
+				 * asyncReady again until Tcl_AsyncInvoke
+				 * returns. */
+    Tcl_Mutex asyncMutex;	/* Thread-specific AsyncHandler linked-list
+				 * lock */
 } ThreadSpecificData;
 static Tcl_ThreadDataKey dataKey;
-
 
 /*
  *----------------------------------------------------------------------
  *
  * TclFinalizeAsync --
  *
- *	Finalizes the mutex in the thread local data structure for the
- *	async subsystem.
+ *	Finalizes the mutex in the thread local data structure for the async
+ *	subsystem.
  *
  * Results:
- *	None.	
+ *	None.
  *
  * Side effects:
  *	Forgets knowledge of the mutex should it have been created.
@@ -96,7 +83,7 @@ static Tcl_ThreadDataKey dataKey;
  */
 
 void
-TclFinalizeAsync()
+TclFinalizeAsync(void)
 {
     ThreadSpecificData *tsdPtr = TCL_TSD_INIT(&dataKey);
 
@@ -111,12 +98,12 @@ TclFinalizeAsync()
  * Tcl_AsyncCreate --
  *
  *	This procedure creates the data structures for an asynchronous
- *	handler, so that no memory has to be allocated when the handler
- *	is activated.
+ *	handler, so that no memory has to be allocated when the handler is
+ *	activated.
  *
  * Results:
- *	The return value is a token for the handler, which can be used
- *	to activate it later on.
+ *	The return value is a token for the handler, which can be used to
+ *	activate it later on.
  *
  * Side effects:
  *	Information about the handler is recorded.
@@ -125,10 +112,10 @@ TclFinalizeAsync()
  */
 
 Tcl_AsyncHandler
-Tcl_AsyncCreate(proc, clientData)
-    Tcl_AsyncProc *proc;		/* Procedure to call when handler
-					 * is invoked. */
-    ClientData clientData;		/* Argument to pass to handler. */
+Tcl_AsyncCreate(
+    Tcl_AsyncProc *proc,	/* Procedure to call when handler is
+				 * invoked. */
+    ClientData clientData)	/* Argument to pass to handler. */
 {
     AsyncHandler *asyncPtr;
     ThreadSpecificData *tsdPtr = TCL_TSD_INIT(&dataKey);
@@ -157,10 +144,10 @@ Tcl_AsyncCreate(proc, clientData)
  *
  * Tcl_AsyncMark --
  *
- *	This procedure is called to request that an asynchronous handler
- *	be invoked as soon as possible.  It's typically called from
- *	an interrupt handler, where it isn't safe to do anything that
- *	depends on or modifies application state.
+ *	This procedure is called to request that an asynchronous handler be
+ *	invoked as soon as possible. It's typically called from an interrupt
+ *	handler, where it isn't safe to do anything that depends on or
+ *	modifies application state.
  *
  * Results:
  *	None.
@@ -172,8 +159,8 @@ Tcl_AsyncCreate(proc, clientData)
  */
 
 void
-Tcl_AsyncMark(async)
-    Tcl_AsyncHandler async;		/* Token for handler. */
+Tcl_AsyncMark(
+    Tcl_AsyncHandler async)		/* Token for handler. */
 {
     AsyncHandler *token = (AsyncHandler *) async;
 
@@ -191,13 +178,12 @@ Tcl_AsyncMark(async)
  *
  * Tcl_AsyncInvoke --
  *
- *	This procedure is called at a "safe" time at background level
- *	to invoke any active asynchronous handlers.
+ *	This procedure is called at a "safe" time at background level to
+ *	invoke any active asynchronous handlers.
  *
  * Results:
- *	The return value is a normal Tcl result, which is intended to
- *	replace the code argument as the current completion code for
- *	interp.
+ *	The return value is a normal Tcl result, which is intended to replace
+ *	the code argument as the current completion code for interp.
  *
  * Side effects:
  *	Depends on the handlers that are active.
@@ -206,14 +192,13 @@ Tcl_AsyncMark(async)
  */
 
 int
-Tcl_AsyncInvoke(interp, code)
-    Tcl_Interp *interp;			/* If invoked from Tcl_Eval just after
-					 * completing a command, points to
-					 * interpreter.  Otherwise it is
-					 * NULL. */
-    int code; 				/* If interp is non-NULL, this gives
-					 * completion code from command that
-					 * just completed. */
+Tcl_AsyncInvoke(
+    Tcl_Interp *interp,		/* If invoked from Tcl_Eval just after
+				 * completing a command, points to
+				 * interpreter. Otherwise it is NULL. */
+    int code)			/* If interp is non-NULL, this gives
+				 * completion code from command that just
+				 * completed. */
 {
     AsyncHandler *asyncPtr;
     ThreadSpecificData *tsdPtr = TCL_TSD_INIT(&dataKey);
@@ -231,13 +216,12 @@ Tcl_AsyncInvoke(interp, code)
     }
 
     /*
-     * Make one or more passes over the list of handlers, invoking
-     * at most one handler in each pass.  After invoking a handler,
-     * go back to the start of the list again so that (a) if a new
-     * higher-priority handler gets marked while executing a lower
-     * priority handler, we execute the higher-priority handler
-     * next, and (b) if a handler gets deleted during the execution
-     * of a handler, then the list structure may change so it isn't
+     * Make one or more passes over the list of handlers, invoking at most one
+     * handler in each pass. After invoking a handler, go back to the start of
+     * the list again so that (a) if a new higher-priority handler gets marked
+     * while executing a lower priority handler, we execute the higher-
+     * priority handler next, and (b) if a handler gets deleted during the
+     * execution of a handler, then the list structure may change so it isn't
      * safe to continue down the list anyway.
      */
 
@@ -266,8 +250,8 @@ Tcl_AsyncInvoke(interp, code)
  *
  * Tcl_AsyncDelete --
  *
- *	Frees up all the state for an asynchronous handler.  The handler
- *	should never be used again.
+ *	Frees up all the state for an asynchronous handler. The handler should
+ *	never be used again.
  *
  * Results:
  *	None.
@@ -275,40 +259,56 @@ Tcl_AsyncInvoke(interp, code)
  * Side effects:
  *	The state associated with the handler is deleted.
  *
+ *	Failure to locate the handler in current thread private list
+ *	of async handlers will result in panic; exception: the list
+ *	is already empty (potential trouble?).
+ *	Consequently, threads should create and delete handlers 
+ *	themselves.  I.e. a handler created by one should not be
+ *	deleted by some other thread.
+ *
  *----------------------------------------------------------------------
  */
 
 void
-Tcl_AsyncDelete(async)
-    Tcl_AsyncHandler async;		/* Token for handler to delete. */
+Tcl_AsyncDelete(
+    Tcl_AsyncHandler async)		/* Token for handler to delete. */
 {
     ThreadSpecificData *tsdPtr = TCL_TSD_INIT(&dataKey);
     AsyncHandler *asyncPtr = (AsyncHandler *) async;
-    AsyncHandler *prevPtr;
+    AsyncHandler *prevPtr, *thisPtr;
 
     /*
-     * Conservatively check the existence of the linked list of
-     * registered handlers, as we may come at this point even
-     * when the TSD's for the current thread have been already
-     * garbage-collected.
+     * Assure early handling of the constraint
+     */
+
+    if (asyncPtr->originThrdId != Tcl_GetCurrentThread()) {
+	Tcl_Panic("Tcl_AsyncDelete: async handler deleted by the wrong thread");
+    }
+
+    /*
+     * If we come to this point when TSD's for the current
+     * thread have already been garbage-collected, we are
+     * in the _serious_ trouble. OTOH, we tolerate calling
+     * with already cleaned-up handler list (should we?).
      */
 
     Tcl_MutexLock(&tsdPtr->asyncMutex);
-    if (tsdPtr->firstHandler != NULL ) {
-	if (tsdPtr->firstHandler == asyncPtr) {
+    if (tsdPtr->firstHandler != NULL) {
+	prevPtr = thisPtr = tsdPtr->firstHandler;
+	while (thisPtr != NULL && thisPtr != asyncPtr) {
+	    prevPtr = thisPtr;
+	    thisPtr = thisPtr->nextPtr;
+	}
+	if (thisPtr == NULL) {
+	    Tcl_Panic("Tcl_AsyncDelete: cannot find async handler");
+	}
+	if (asyncPtr == tsdPtr->firstHandler) {
 	    tsdPtr->firstHandler = asyncPtr->nextPtr;
-	    if (tsdPtr->firstHandler == NULL) {
-		tsdPtr->lastHandler = NULL;
-	    }
 	} else {
-	    prevPtr = tsdPtr->firstHandler;
-	    while (prevPtr->nextPtr != asyncPtr) {
-		prevPtr = prevPtr->nextPtr;
-	    }
 	    prevPtr->nextPtr = asyncPtr->nextPtr;
-	    if (tsdPtr->lastHandler == asyncPtr) {
-		tsdPtr->lastHandler = prevPtr;
-	    }
+	}
+	if (asyncPtr == tsdPtr->lastHandler) {
+	    tsdPtr->lastHandler = prevPtr;
 	}
     }
     Tcl_MutexUnlock(&tsdPtr->asyncMutex);
@@ -320,13 +320,13 @@ Tcl_AsyncDelete(async)
  *
  * Tcl_AsyncReady --
  *
- *	This procedure can be used to tell whether Tcl_AsyncInvoke
- *	needs to be called.  This procedure is the external interface
- *	for checking the thread-specific asyncReady variable.
+ *	This procedure can be used to tell whether Tcl_AsyncInvoke needs to be
+ *	called. This procedure is the external interface for checking the
+ *	thread-specific asyncReady variable.
  *
  * Results:
- * 	The return value is 1 whenever a handler is ready and is 0
- *	when no handlers are ready.
+ *	The return value is 1 whenever a handler is ready and is 0 when no
+ *	handlers are ready.
  *
  * Side effects:
  *	None.
@@ -335,8 +335,23 @@ Tcl_AsyncDelete(async)
  */
 
 int
-Tcl_AsyncReady()
+Tcl_AsyncReady(void)
 {
     ThreadSpecificData *tsdPtr = TCL_TSD_INIT(&dataKey);
     return tsdPtr->asyncReady;
 }
+
+int *
+TclGetAsyncReadyPtr(void)
+{
+    ThreadSpecificData *tsdPtr = TCL_TSD_INIT(&dataKey);
+    return &(tsdPtr->asyncReady);
+}
+
+/*
+ * Local Variables:
+ * mode: c
+ * c-basic-offset: 4
+ * fill-column: 78
+ * End:
+ */

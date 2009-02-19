@@ -11,14 +11,15 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
-# RCS: @(#) $Id: scan.test,v 1.14.2.1 2004/08/19 21:12:04 dkf Exp $
+# RCS: @(#) $Id: scan.test,v 1.21 2006/04/25 17:15:25 dgp Exp $
 
 if {[lsearch [namespace children] ::tcltest] == -1} {
     package require tcltest 2
     namespace import -force ::tcltest::*
 }
 
-::tcltest::testConstraint 64bitInts [expr {0x80000000 > 0}]
+testConstraint wideIs64bit \
+	[expr {(wide(0x80000000) > 0) && (wide(0x8000000000000000) < 0)}]
 
 test scan-1.1 {BuildCharSet, CharInSet} {
     list [scan foo {%[^o]} x] $x
@@ -340,9 +341,10 @@ test scan-4.61 {Tcl_ScanObjCmd, set errors} {
 # procedure that returns the range of integers
 
 proc int_range {} {
-    for { set MIN_INT 1 } { $MIN_INT > 0 } {} {
+    for { set MIN_INT 1 } { int($MIN_INT) > 0 } {} {
 	set MIN_INT [expr { $MIN_INT << 1 }]
     }
+    set MIN_INT [expr {int($MIN_INT)}]
     set MAX_INT [expr { ~ $MIN_INT }]
     return [list $MIN_INT $MAX_INT]
 }
@@ -417,7 +419,7 @@ test scan-5.11 {integer scanning} {nonPortable} {
     list [scan "4294967280 4294967280" "%u %d" a b] $a \
 	    [expr {$b == -16 || $b == 0x7fffffff}]
 } {2 4294967280 1}
-test scan-5.12 {integer scanning} {64bitInts} {
+test scan-5.12 {integer scanning} {wideIs64bit} {
     set a {}; set b {}; set c {}
     list [scan "7810179016327718216,6c63546f6c6c6548,661432506755433062510" \
 	    %ld,%lx,%lo a b c] $a $b $c
@@ -426,6 +428,10 @@ test scan-5.13 {integer scanning and overflow} {
     # This test used to fail on some 64-bit systems. [Bug 1011860]
     scan {300000000 3000000000 30000000000} {%ld %ld %ld}
 } {300000000 3000000000 30000000000}
+
+test scan-5.14 {integer scanning} {
+    scan 0xff %u
+} 0
 
 test scan-6.1 {floating-point scanning} {
     set a {}; set b {}; set c {}; set d {}
@@ -451,10 +457,10 @@ test scan-6.5 {floating-point scanning} {
     set a {}; set b {}; set c {}; set d {}
     list [scan "4.6 99999.7 876.43e-1 118" "%f %f %f %e" a b c d] $a $b $c $d
 } {4 4.6 99999.7 87.643 118.0}
-test scan-6.6 {floating-point scanning} {eformat} {
+test scan-6.6 {floating-point scanning} {
     set a {}; set b {}; set c {}; set d {}
     list [scan "1.2345 697.0e-3 124 .00005" "%f %e %f %e" a b c d] $a $b $c $d
-} {4 1.2345 0.697 124.0 5e-05}
+} {4 1.2345 0.697 124.0 5e-5}
 test scan-6.7 {floating-point scanning} {
     set a {}; set b {}; set c {}; set d {}
     list [scan "4.6abc" "%f %f %f %f" a b c d] $a $b $c $d
@@ -604,6 +610,12 @@ test scan-10.5 {miscellaneous tests} {
     set arr(2) {}
     list [catch {scan ab%c14 ab%%c%d arr(2)} msg] $msg $arr(2)
 } {0 1 14}
+test scan-10.6 {miscellaneous tests} {
+    scan 5a {%i%[a]}
+} {5 a}
+test scan-10.7 {miscellaneous tests} {
+    scan {5 a} {%i%[a]}
+} {5 {}}
 
 test scan-11.1 {alignment in results array (TCL_ALIGN)} {
     scan "123 13.6" "%s %f" a b
@@ -678,6 +690,82 @@ test scan-13.8 {Tcl_ScanObjCmd, inline XPG case lots of arguments} {
     list [llength $msg] [lindex $msg 99] [lindex $msg 4] [lindex $msg 199]
 } {200 10 20 30}
 
+# Big test for correct ordering of data in [expr]
+
+proc testIEEE {} {
+    variable ieeeValues
+    binary scan [binary format dd -1.0 1.0] c* c
+    switch -exact -- $c {
+	{0 0 0 0 0 0 -16 -65 0 0 0 0 0 0 -16 63} {
+	    # little endian
+	    binary scan \x00\x00\x00\x00\x00\x00\xf0\xff d \
+		ieeeValues(-Infinity)
+	    binary scan \x00\x00\x00\x00\x00\x00\xf0\xbf d \
+		ieeeValues(-Normal)
+	    binary scan \x00\x00\x00\x00\x00\x00\x08\x80 d \
+		ieeeValues(-Subnormal)
+	    binary scan \x00\x00\x00\x00\x00\x00\x00\x80 d \
+		ieeeValues(-0)
+	    binary scan \x00\x00\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(+0)
+	    binary scan \x00\x00\x00\x00\x00\x00\x08\x00 d \
+		ieeeValues(+Subnormal)
+	    binary scan \x00\x00\x00\x00\x00\x00\xf0\x3f d \
+		ieeeValues(+Normal)
+	    binary scan \x00\x00\x00\x00\x00\x00\xf0\x7f d \
+		ieeeValues(+Infinity)
+	    binary scan \x00\x00\x00\x00\x00\x00\xf8\x7f d \
+		ieeeValues(NaN)
+	    set ieeeValues(littleEndian) 1
+	    return 1
+	}
+	{-65 -16 0 0 0 0 0 0 63 -16 0 0 0 0 0 0} {
+	    binary scan \xff\xf0\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(-Infinity)
+	    binary scan \xbf\xf0\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(-Normal)
+	    binary scan \x80\x08\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(-Subnormal)
+	    binary scan \x80\x00\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(-0)
+	    binary scan \x00\x00\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(+0)
+	    binary scan \x00\x08\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(+Subnormal)
+	    binary scan \x3f\xf0\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(+Normal)
+	    binary scan \x7f\xf0\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(+Infinity)
+	    binary scan \x7f\xf8\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(NaN)
+	    set ieeeValues(littleEndian) 0
+	    return 1
+	}
+	default {
+	    return 0
+	}
+    }
+}
+
+testConstraint ieeeFloatingPoint [testIEEE]
+
+# scan infinities - not working
+
+test scan-14.1 {infinity} ieeeFloatingPoint {
+    scan Inf %g d
+    set d
+} Inf
+test scan-14.2 {infinity} ieeeFloatingPoint {
+    scan -Inf %g d
+    set d
+} -Inf
+
+# TODO - also need to scan NaN's
+
 # cleanup
 ::tcltest::cleanupTests
 return
+
+# Local Variables:
+# mode: tcl
+# End:

@@ -5,7 +5,7 @@
 '\" See the file "license.terms" for information on usage and redistribution
 '\" of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 '\" 
-'\" RCS: @(#) $Id: Async.3,v 1.5.18.1 2004/12/09 09:24:54 dkf Exp $
+'\" RCS: @(#) $Id: Async.3,v 1.12 2007/12/13 15:22:30 dgp Exp $
 '\" 
 .so man.macros
 .TH Tcl_AsyncCreate 3 7.0 Tcl "Tcl Library Procedures"
@@ -50,9 +50,9 @@ or 0 if \fIinterp\fR is NULL.
 These procedures provide a safe mechanism for dealing with
 asynchronous events such as signals.
 If an event such as a signal occurs while a Tcl script is being
-evaluated then it isn't safe to take any substantive action to
+evaluated then it is not safe to take any substantive action to
 process the event.
-For example, it isn't safe to evaluate a Tcl script since the
+For example, it is not safe to evaluate a Tcl script since the
 interpreter may already be in the middle of evaluating a script;
 it may not even be safe to allocate memory, since a memory
 allocation could have been in progress when the event occurred.
@@ -142,7 +142,6 @@ If new handlers become ready while handlers are executing,
 \fBTcl_AsyncInvoke\fR will invoke them all;  at each point it
 invokes the highest-priority (oldest) ready handler, repeating
 this over and over until there are no longer any ready handlers.
-
 .SH WARNING
 .PP
 It is almost always a bad idea for an asynchronous event
@@ -152,12 +151,11 @@ This sort of behavior can disrupt the execution of scripts in
 subtle ways and result in bugs that are extremely difficult
 to track down.
 If an asynchronous event handler needs to evaluate Tcl scripts
-then it should first save the interpreter's result plus the values
-of the variables \fBerrorInfo\fR and \fBerrorCode\fR (this can
-be done, for example, by storing them in dynamic strings).
+then it should first save the interpreter's state by calling
+\fBTcl_SaveInterpState\fR, passing in the \fIcode\fR argument.
 When the asynchronous handler is finished it should restore
-the interpreter's result, \fBerrorInfo\fR, and \fBerrorCode\fR,
-and return the \fIcode\fR argument.
+the interpreter's state by calling \fBTcl_RestoreInterpState\fR,
+and then returning the \fIcode\fR argument.
 
 .SH KEYWORDS
-asynchronous event, handler, signal
+asynchronous event, handler, signal, Tcl_SaveInterpState, thread

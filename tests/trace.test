@@ -11,17 +11,18 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
-# RCS: @(#) $Id: trace.test,v 1.26.2.18 2007/08/14 15:15:39 dgp Exp $
+# RCS: @(#) $Id: trace.test,v 1.61 2007/12/13 15:26:07 dgp Exp $
 
 if {[lsearch [namespace children] ::tcltest] == -1} {
     package require tcltest
     namespace import -force ::tcltest::*
 }
 
+testConstraint testcmdtrace [llength [info commands testcmdtrace]]
+testConstraint testevalobjv [llength [info commands testevalobjv]]
+
 # Used for constraining memory leak tests
 testConstraint memory [llength [info commands memory]]
-
-testConstraint testevalobjv [llength [info commands testevalobjv]]
 
 proc getbytes {} {
     set lines [split [memory info] "\n"]
@@ -239,8 +240,8 @@ test trace-2.6 {trace variable writes on compiled local} {
     catch {unset x}
     set info {}
     proc p {} {
-        trace add variable x write traceArray
-        set x(X) willy
+	trace add variable x write traceArray
+	set x(X) willy
     }
     p
     set info
@@ -256,6 +257,8 @@ test trace-2.7 {trace variable writes on errorInfo} -body {
    # always remove trace on errorInfo otherwise further tests will fail
    unset ::errorInfo
 } -result {::errorInfo {} write}
+
+
 
 # append no longer triggers read traces when fetching the old values of
 # variables before doing the append operation. However, lappend _does_
@@ -770,6 +773,7 @@ test trace-13.1 {delete one trace from another} {
     set x
     set info
 } {5 1}
+
 test trace-13.2 {leak when unsetting traced variable} \
     -constraints memory -body {
 	set end [getbytes]
@@ -862,7 +866,7 @@ test trace-14.3 "trace command, wrong # args errors" {
 } [list 1 "wrong # args: should be \"trace remove type ?arg arg ...?\""]
 test trace-14.4 "trace command, wrong # args errors" {
     list [catch {trace info} msg] $msg
-} [list 1 "wrong # args: should be \"trace info type ?arg arg ...?\""]
+} [list 1 "wrong # args: should be \"trace info type name\""]
 
 test trace-14.5 {trace command, invalid option} {
     list [catch {trace gorp} msg] $msg
@@ -1446,7 +1450,7 @@ test trace-20.7 {trace add command delete in subinterp while being deleted} {
 } {}
 
 proc traceDelete {cmd old new op} {
-    eval trace remove command $cmd [lindex [trace info command $cmd] 0]
+    trace remove command $cmd {*}[lindex [trace info command $cmd] 0]
     global info
     set info [list $old $new $op]
 }
@@ -1529,6 +1533,7 @@ test trace-20.16 {delete trace discards error result [Bug 1355342]} {
     trace add command foo delete {error}
     rename foo {}
 } {}
+
 
 proc foo {b} { set a $b }
 
@@ -1625,15 +1630,15 @@ test trace-21.9 {trace execution: TCL_EVAL_GLOBAL} testevalobjv {
     namespace eval test_ns_1 {
         proc soom args {lappend ::info FAIL [info level]}
         # [testevalobjv 1 ...] ought to produce the same
-	# results as [uplevel #0 ...].
+       # results as [uplevel #0 ...].
         testevalobjv 1 foo x
-	uplevel #0 foo x
+       uplevel #0 foo x
     }
     namespace delete test_ns_1
     trace remove execution foo enter soom
     set ::info
 } {SUCCESS 1 SUCCESS 1}
-    
+
 test trace-21.10 {trace execution: TCL_EVAL_GLOBAL} testevalobjv {
     trace add execution foo leave soom
     proc ::soom args {lappend ::info SUCCESS [info level]}
@@ -1641,9 +1646,9 @@ test trace-21.10 {trace execution: TCL_EVAL_GLOBAL} testevalobjv {
     namespace eval test_ns_1 {
         proc soom args {lappend ::info FAIL [info level]}
         # [testevalobjv 1 ...] ought to produce the same
-	# results as [uplevel #0 ...].
+       # results as [uplevel #0 ...].
         testevalobjv 1 foo x
-	uplevel #0 foo x
+       uplevel #0 foo x
     }
     namespace delete test_ns_1
     trace remove execution foo leave soom
@@ -1773,7 +1778,7 @@ test trace-23.3 {recursive(3) trace execution: enter, leave, enterstep, leaveste
 {factorial 3} 0 6 leave}
 
 proc traceDelete {cmd args} {
-    eval trace remove execution $cmd [lindex [trace info execution $cmd] 0]
+    trace remove execution $cmd {*}[lindex [trace info execution $cmd] 0]
     global info
     set info $args
 }
@@ -2267,8 +2272,75 @@ test trace-28.10 {exec trace info nonsense} {
     list [catch {trace remove execution} res] $res
 } {1 {wrong # args: should be "trace remove execution name opList command"}}
 
-# Missing test number to keep in sync with the 8.5 branch
-# (want to backport those tests?)
+test trace-29.1 {Tcl_CreateTrace, correct command and argc/argv arguments of trace proc} {testcmdtrace} {
+    testcmdtrace tracetest {set stuff [expr 14 + 16]}
+} {{expr 14 + 16} {expr 14 + 16} {set stuff [expr 14 + 16]} {set stuff 30}}
+test trace-29.2 {Tcl_CreateTrace, correct command and argc/argv arguments of trace proc} {testcmdtrace} {
+    testcmdtrace tracetest {set stuff [info tclversion]}
+} [concat {{info tclversion} {info tclversion} ::tcl::info::tclversion {::tcl::info::tclversion} {set stuff [info tclversion]}} [list "set stuff [info tclversion]"]]
+test trace-29.3 {Tcl_CreateTrace, correct command and argc/argv arguments of trace proc} {testcmdtrace} {
+    testcmdtrace deletetest {set stuff [info tclversion]}
+} [info tclversion]
+test trace-29.4 {Tcl_CreateTrace, check that tracing doesn't cause memory faults} {testcmdtrace} {
+    # Note that the proc call is the same as the variable name, and that
+    # the call can be direct or indirect by way of another procedure
+    proc tracer {args} {}
+    proc tracedLoop {level} {
+	incr level
+	tracer
+	foreach tracer [expr {$level==1 ? {1 2} : {}}] {tracedLoop $level}
+    }
+    testcmdtrace tracetest {tracedLoop 0}
+} {{tracedLoop 0} {tracedLoop 0} {incr level} {incr level} tracer {tracer} {expr {$level==1 ? {1 2} : {}}} {expr {$level==1 ? {1 2} : {}}} {foreach tracer [expr {$level==1 ? {1 2} : {}}] {tracedLoop $level}} {foreach tracer {1 2} {tracedLoop $level}} {tracedLoop $level} {tracedLoop 1} {incr level} {incr level} tracer {tracer} {expr {$level==1 ? {1 2} : {}}} {expr {$level==1 ? {1 2} : {}}} {foreach tracer [expr {$level==1 ? {1 2} : {}}] {tracedLoop $level}} {foreach tracer {} {tracedLoop $level}} {tracedLoop $level} {tracedLoop 1} {incr level} {incr level} tracer {tracer} {expr {$level==1 ? {1 2} : {}}} {expr {$level==1 ? {1 2} : {}}} {foreach tracer [expr {$level==1 ? {1 2} : {}}] {tracedLoop $level}} {foreach tracer {} {tracedLoop $level}}}
+catch {rename tracer {}}
+catch {rename tracedLoop {}}
+
+test trace-29.5 {Tcl_CreateObjTrace, status return TCL_ERROR} {testcmdtrace} {
+    proc Error { args } { error "Shouldn't get here" }
+    set x 1;
+    list [catch {testcmdtrace resulttest {Error $x}} result] [set result]
+} {1 {Error $x}}
+
+test trace-29.6 {Tcl_CreateObjTrace, status return TCL_RETURN} {testcmdtrace} {
+    proc Return { args } { error "Shouldn't get here" }
+    set x 1;
+    list [catch {testcmdtrace resulttest {Return $x}} result] [set result]
+} {2 {}}
+
+test trace-29.7 {Tcl_CreateObjTrace, status return TCL_BREAK} {testcmdtrace} {
+    proc Break { args } { error "Shouldn't get here" }
+    set x 1;
+    list [catch {testcmdtrace resulttest {Break $x}} result] [set result]
+} {3 {}}
+
+test trace-29.8 {Tcl_CreateObjTrace, status return TCL_CONTINUE} {testcmdtrace} {
+    proc Continue { args } { error "Shouldn't get here" }
+    set x 1;
+    list [catch {testcmdtrace resulttest {Continue $x}} result] [set result]
+} {4 {}}
+
+test trace-29.9 {Tcl_CreateObjTrace, status return unknown} {testcmdtrace} {
+    proc OtherStatus { args } { error "Shouldn't get here" }
+    set x 1;
+    list [catch {testcmdtrace resulttest {OtherStatus $x}} result] [set result]
+} {6 {}}
+
+test trace-29.10 {Tcl_CreateTrace, correct level interpretation} {testcmdtrace} {
+    proc foo {} {uplevel 1 bar}
+    proc bar {} {uplevel 1 grok}
+    proc grok {} {uplevel 1 spock}
+    proc spock {} {uplevel 1 fascinating}
+    proc fascinating {} {}
+    testcmdtrace leveltest {foo}
+} {foo {foo} {uplevel 1 bar} {uplevel 1 bar} bar {bar} {uplevel 1 grok} {uplevel 1 grok}}
+
+test trace-29.11 {Tcl_CreateTrace, multiple traces} {testcmdtrace} {
+    testcmdtrace doubletest {format xx}
+} {{format xx} {format xx}}
+
+test trace-30.1 {Tcl_DeleteTrace} {emptyTest} {
+    # the above tests have tested Tcl_DeleteTrace
+} {}
 
 test trace-31.1 {command and execution traces shared struct} {
     # Tcl Bug 807243
@@ -2316,12 +2388,12 @@ test trace-34.1 {Bug 1201035} {
     set ::x [list]
     proc foo {} {lappend ::x foo}
     proc bar args {
-	lappend ::x $args
-	trace remove execution foo leavestep bar
-	trace remove execution foo enterstep bar
-	trace add execution foo leavestep bar
-	trace add execution foo enterstep bar
-	lappend ::x done
+        lappend ::x $args
+        trace remove execution foo leavestep bar
+        trace remove execution foo enterstep bar
+        trace add execution foo leavestep bar
+        trace add execution foo enterstep bar
+        lappend ::x done
     }
     trace add execution foo leavestep bar
     trace add execution foo enterstep bar
@@ -2372,19 +2444,19 @@ test trace-34.5 {Bug 1047286} {
 test trace-34.6 {Bug 1458266} -setup {
     proc dummy {} {}
     proc stepTraceHandler {cmdString args} {
-	variable log 
-	append log "[expr {[info level] - 1}]: [lindex [split $cmdString] 0]\n"
-	dummy
-	isTracedInside_2
+        variable log
+        append log "[expr {[info level] - 1}]: [lindex [split $cmdString] 0]\n"
+        dummy
+        isTracedInside_2
     }
     proc cmdTraceHandler {cmdString args} {
-	# silent
+        # silent
     }
     proc isTracedInside_1 {} {
-	isTracedInside_2
+        isTracedInside_2
     }
     proc isTracedInside_2 {} {
-	set x 2
+        set x 2
     }
 } -body {
     variable log {}
@@ -2406,14 +2478,102 @@ test trace-34.6 {Bug 1458266} -setup {
     rename isTracedInside_2 {}
 } -result ok
 
+test trace-35.1 {527164: Keep -errorinfo of traces} -setup {
+    unset -nocomplain x y
+} -body {
+    trace add variable x write {error foo;#}
+    trace add variable y write {set x 2;#}
+    list [catch {set y 1} msg opts] $msg [dict get $opts -errorinfo]
+} -cleanup {
+    unset -nocomplain x y
+} -result {1 {can't set "y": can't set "x": foo} {foo
+    while executing
+"error foo"
+    (write trace on "x")
+    invoked from within
+"set x 2"
+    (write trace on "y")
+    invoked from within
+"set y 1"}}
+
+
+#
+# Test for the correct(?) dynamics of execution traces. This test insures that
+# the dynamics of the original implementation remain valid; note that
+# these aspects are neither documented nor do they appear in TIP 62
+
+proc traceproc {tracevar args} {
+    append ::$tracevar *
+}
+proc untraced {type} {
+    trace add execution untraced $type {traceproc tracevar}
+    append ::tracevar -
+}
+proc runbase {results base} {
+    set tt {enter leave enterstep leavestep}
+    foreach n {1 2 3 4} t $tt r $results {
+	eval [subst $base]
+    }
+}
+set base {
+    test trace-36.$n {dynamic trace creation: $t} -setup {
+	set ::tracevar {}
+    } -cleanup {
+	unset ::tracevar
+	trace remove execution untraced $t {traceproc tracevar}
+    } -body {
+	untraced $t
+	set ::tracevar
+    } -result {$r}
+}
+runbase {- - - -} $base
+
+set base {
+    test trace-37.$n {dynamic trace addition: $t} -setup {
+	set ::tracevar {}
+	set ::tracevar2 {}
+	trace add execution untraced enter {traceproc tracevar2}
+    } -cleanup {
+	trace remove execution untraced $t {traceproc tracevar}
+	trace remove execution untraced enter {traceproc tracevar2}
+	unset ::tracevar ::tracevar2
+    } -body {
+	untraced $t
+	list \$::tracevar \$::tracevar2
+    } -result {$r}
+}
+runbase {{- *} {-* *} {- *} {- *}} $base
+
+set base {
+    test trace-38.$n {dynamic trace addition: $t} -setup {
+	set ::tracevar {}
+	set ::tracevar2 {}
+	trace add execution untraced leave {traceproc tracevar2}
+    } -cleanup {
+	trace remove execution untraced $t {traceproc tracevar}
+	trace remove execution untraced leave {traceproc tracevar2}
+	unset ::tracevar ::tracevar2
+    } -body {
+	untraced $t
+	list \$::tracevar \$::tracevar2
+    } -result {$r}
+}
+runbase {{- *} {-* *} {- *} {- *}} $base
+
+
+
 # Delete procedures when done, so we don't clash with other tests
 # (e.g. foobar will clash with 'unknown' tests).
 catch {rename foobar {}}
 catch {rename foo {}}
 catch {rename bar {}}
+catch {rename untraced {}}
+catch {rename traceproc {}}
+catch {rename runbase {}}
 
-# Unset the varaible when done
+# Unset the variable when done
 catch {unset info}
+catch {unset base}
 
 # cleanup
 ::tcltest::cleanupTests

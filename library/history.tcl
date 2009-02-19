@@ -2,7 +2,7 @@
 #
 # Implementation of the history command.
 #
-# RCS: @(#) $Id: history.tcl,v 1.5.14.1 2005/07/22 21:59:40 dgp Exp $
+# RCS: @(#) $Id: history.tcl,v 1.7 2005/07/23 04:12:49 dgp Exp $
 #
 # Copyright (c) 1997 Sun Microsystems, Inc.
 #
@@ -256,7 +256,7 @@ proc history {args} {
 	if {![info exists history($i)]} {
 	    continue
 	}
-	set cmd [string map [list \n \n\t] [string trimright $history($i) \ \n]]
+        set cmd [string map [list \n \n\t] [string trimright $history($i) \ \n]]
 	append result $newline[format "%6d  %s" $i $cmd]
 	set newline \n
     }

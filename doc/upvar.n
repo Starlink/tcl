@@ -5,7 +5,7 @@
 '\" See the file "license.terms" for information on usage and redistribution
 '\" of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 '\" 
-'\" RCS: @(#) $Id: upvar.n,v 1.5.18.2 2004/11/12 09:02:30 das Exp $
+'\" RCS: @(#) $Id: upvar.n,v 1.16 2007/12/13 15:22:33 dgp Exp $
 '\" 
 .so man.macros
 .TH upvar n "" Tcl "Tcl Built-In Commands"
@@ -24,7 +24,7 @@ procedure to refer to variables in an enclosing procedure call or
 to global variables.
 \fILevel\fR may have any of the forms permitted for the \fBuplevel\fR
 command, and may be omitted if the first letter of the first \fIotherVar\fR
-isn't \fB#\fR or a digit (it defaults to \fB1\fR).
+is not \fB#\fR or a digit (it defaults to \fB1\fR).
 For each \fIotherVar\fR argument, \fBupvar\fR makes the variable
 by that name in the procedure frame given by \fIlevel\fR (or at
 global level, if \fIlevel\fR is \fB#0\fR) accessible
@@ -35,8 +35,8 @@ call;  it will be created the first time \fImyVar\fR is referenced, just like
 an ordinary variable.  There must not exist a variable by the
 name \fImyVar\fR at the time \fBupvar\fR is invoked.
 \fIMyVar\fR is always treated as the name of a variable, not an
-array element.  Even if the name looks like an array element,
-such as \fBa(b)\fR, a regular variable is created.
+array element.  An error is returned if the name looks like an array element,
+such as \fBa(b)\fR.
 \fIOtherVar\fR may refer to a scalar variable, an array,
 or an array element.
 \fBUpvar\fR returns an empty string.
@@ -46,14 +46,14 @@ procedure calling and also makes it easier to build new control constructs
 as Tcl procedures.
 For example, consider the following procedure:
 .CS
-proc add2 name {
+proc \fIadd2\fR name {
    \fBupvar\fR $name x
-   set x [expr $x+2]
+   set x [expr {$x + 2}]
 }
 .CE
-\fBadd2\fR is invoked with an argument giving the name of a variable,
-and it adds two to the value of that variable.
-Although \fBadd2\fR could have been implemented using \fBuplevel\fR
+If \fIadd2\fR is invoked with an argument giving the name of a variable,
+it adds two to the value of that variable.
+Although \fIadd2\fR could have been implemented using \fBuplevel\fR
 instead of \fBupvar\fR, \fBupvar\fR makes it simpler for \fBadd2\fR
 to access the variable in the caller's procedure frame.
 .PP
@@ -68,7 +68,6 @@ the outermost procedure call or the outermost \fBnamespace eval\fR command.
 Also, \fBuplevel #0\fR evaluates a script
 at top-level in the outermost namespace (the global namespace).
 .PP
-.VS
 If an upvar variable is unset (e.g. \fBx\fR in \fBadd2\fR above), the
 \fBunset\fR operation affects the variable it is linked to, not the
 upvar variable.  There is no way to unset an upvar variable except
@@ -82,19 +81,21 @@ unexpected manner.  If a variable trace is defined on \fIotherVar\fR, that
 trace will be triggered by actions involving \fImyVar\fR.  However,
 the trace procedure will be passed the name of \fImyVar\fR, rather
 than the name of \fIotherVar\fR.  Thus, the output of the following code
-will be \fBlocalVar\fR rather than \fBoriginalVar\fR:
+will be
+.QW "\fIlocalVar\fR"
+rather than
+.QW "\fIoriginalVar\fR" :
 .CS
-proc \fBtraceproc\fR { name index op } {
+proc \fItraceproc\fR { name index op } {
    puts $name
 }
-proc \fBsetByUpvar\fR { name value } {
+proc \fIsetByUpvar\fR { name value } {
    \fBupvar\fR $name localVar
    set localVar $value
 }
 set originalVar 1
-trace variable originalVar w \fBtraceproc\fR
-\fBsetByUpvar\fR originalVar 2
-}
+trace variable originalVar w \fItraceproc\fR
+\fIsetByUpvar\fR originalVar 2
 .CE
 .PP
 If \fIotherVar\fR refers to an element of an array, then variable
@@ -102,7 +103,6 @@ traces set for the entire array will not be invoked when \fImyVar\fR
 is accessed (but traces on the particular element will still be
 invoked).  In particular, if the array is \fBenv\fR, then changes
 made to \fImyVar\fR will not be passed to subprocesses correctly.
-.VE
 .SH EXAMPLE
 A \fBdecr\fR command that works like \fBincr\fR except it subtracts
 the value from the variable instead of adding it:

@@ -10,12 +10,14 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
-# RCS: @(#) $Id: set.test,v 1.8 2000/04/10 17:19:04 ericm Exp $
+# RCS: @(#) $Id: set.test,v 1.15 2008/02/13 20:35:03 dgp Exp $
 
 if {[lsearch [namespace children] ::tcltest] == -1} {
-    package require tcltest
+    package require tcltest 2
     namespace import -force ::tcltest::*
 }
+
+testConstraint testset2 [llength [info commands testset2]]
 
 catch {unset x}
 catch {unset i}
@@ -190,9 +192,9 @@ test set-1.22 {TclCompileSetCmd: doing assignment, large int} {
 } 200000
 test set-1.23 {TclCompileSetCmd: doing assignment, formatted int != int} {
     set i 25
-    set i 000012345     ;# an octal literal == 5349 decimal
+    set i 0o00012345     ;# an octal literal == 5349 decimal
     list $i [incr i]
-} {000012345 5350}
+} {0o00012345 5350}
 
 test set-1.24 {TclCompileSetCmd: too many arguments} {
     set i 10
@@ -233,7 +235,8 @@ test set-1.26 {TclCompileSetCmd: various array constructs} {
 {b c} foo 51}]; # " just a matching end quote
 
 test set-2.1 {set command: runtime error, bad variable name} {
-    list [catch {set {"foo}} msg] $msg $errorInfo
+    unset -nocomplain {"foo}
+    list [catch {set {"foo}} msg] $msg $::errorInfo
 } {1 {can't read ""foo": no such variable} {can't read ""foo": no such variable
     while executing
 "set {"foo}"}}
@@ -247,13 +250,14 @@ test set-2.3 {set command: runtime error, errors in reading variables} {
     set a(6) 44
     list [catch {set a(18)} msg] $msg
 } {1 {can't read "a(18)": no such element in array}}
-test set-2.4 {set command: runtime error, readonly variable} {
+test set-2.4 {set command: runtime error, readonly variable} -body {
     proc readonly args {error "variable is read-only"}
     set x 123
     trace var x w readonly
-    list [catch {set x 1} msg] $msg $errorInfo
-} {1 {can't set "x": variable is read-only} {can't set "x": variable is read-only
+    list [catch {set x 1} msg] $msg $::errorInfo
+} -match glob -result {1 {can't set "x": variable is read-only} {*variable is read-only
     while executing
+*
 "set x 1"}}
 test set-2.5 {set command: runtime error, basic array operations} {
     list [catch {set a(other)} msg] $msg
@@ -463,9 +467,9 @@ test set-3.22 {uncompiled set command: doing assignment, large int} {
 test set-3.23 {uncompiled set command: doing assignment, formatted int != int} {
     set z set
     $z i 25
-    $z i 000012345     ;# an octal literal == 5349 decimal
+    $z i 0o00012345     ;# an octal literal == 5349 decimal
     list $i [incr i]
-} {000012345 5350}
+} {0o00012345 5350}
 
 test set-3.24 {uncompiled set command: too many arguments} {
     set z set
@@ -475,8 +479,9 @@ test set-3.24 {uncompiled set command: too many arguments} {
 } {wrong # args: should be "set varName ?newValue?"}
 
 test set-4.1 {uncompiled set command: runtime error, bad variable name} {
+    unset -nocomplain {"foo}
     set z set
-    list [catch {$z {"foo}} msg] $msg $errorInfo
+    list [catch {$z {"foo}} msg] $msg $::errorInfo
 } {1 {can't read ""foo": no such variable} {can't read ""foo": no such variable
     while executing
 "$z {"foo}"}}
@@ -492,14 +497,15 @@ test set-4.3 {uncompiled set command: runtime error, errors in reading variables
     $z a(6) 44
     list [catch {$z a(18)} msg] $msg
 } {1 {can't read "a(18)": no such element in array}}
-test set-4.4 {uncompiled set command: runtime error, readonly variable} {
+test set-4.4 {uncompiled set command: runtime error, readonly variable} -body {
     set z set
     proc readonly args {error "variable is read-only"}
     $z x 123
     trace var x w readonly
-    list [catch {$z x 1} msg] $msg $errorInfo
-} {1 {can't set "x": variable is read-only} {can't set "x": variable is read-only
+    list [catch {$z x 1} msg] $msg $::errorInfo
+} -match glob -result {1 {can't set "x": variable is read-only} {*variable is read-only
     while executing
+*
 "$z x 1"}}
 test set-4.5 {uncompiled set command: runtime error, basic array operations} {
     set z set
@@ -509,6 +515,13 @@ test set-4.6 {set command: runtime error, basic array operations} {
     set z set
     list [catch {$z a} msg] $msg
 } {1 {can't read "a": variable is array}}
+
+test set-5.1 {error on malformed array name} testset2 {
+    unset -nocomplain z
+    catch {testset2 z(a) b} msg
+    catch {testset2 z(b) a} msg1
+    list $msg $msg1
+} {{can't read "z(a)(b)": variable isn't array} {can't read "z(b)(a)": variable isn't array}}
 
 # cleanup
 catch {unset a}

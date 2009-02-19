@@ -12,7 +12,7 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
-# RCS: @(#) $Id: safe.tcl,v 1.9.2.3 2005/07/22 21:59:41 dgp Exp $
+# RCS: @(#) $Id: safe.tcl,v 1.16.4.1 2008/06/25 16:42:05 andreas_kupries Exp $
 
 #
 # The implementation is based on namespaces. These naming conventions
@@ -369,12 +369,24 @@ namespace eval ::safe {
 	    lappend slave_auto_path "\$[PathToken $i]"
 	    incr i
 	}
+	# Extend the access list with the paths used to look for Tcl
+	# Modules. We safe the virtual form separately as well, as
+	# syncing it with the slave has to be defered until the
+	# necessary commands are present for setup.
+	foreach dir [::tcl::tm::list] {
+	    lappend access_path $dir
+	    Set [PathToken $i $slave] $dir
+	    lappend slave_auto_path "\$[PathToken $i]"
+	    lappend slave_tm_path   "\$[PathToken $i]"
+	    incr i
+	}
+	Set [TmPathListName      $slave] $slave_tm_path
 	Set $nname $i
-	Set [PathListName $slave] $access_path
+	Set [PathListName        $slave] $access_path
 	Set [VirtualPathListName $slave] $slave_auto_path
 
-	Set [StaticsOkName $slave] $staticsok
-	Set [NestedOkName $slave] $nestedok
+	Set [StaticsOkName  $slave] $staticsok
+	Set [NestedOkName   $slave] $nestedok
 	Set [DeleteHookName $slave] $deletehook
 
 	SyncAccessPath $slave
@@ -439,13 +451,17 @@ proc ::safe::interpAddToAccessPath {slave path} {
 	# NB we need to add [namespace current], aliases are always
 	# absolute paths.
 	::interp alias $slave source {} [namespace current]::AliasSource $slave
-	::interp alias $slave load {} [namespace current]::AliasLoad $slave
+	::interp alias $slave load   {} [namespace current]::AliasLoad $slave
 
 	# This alias lets the slave use the encoding names, convertfrom,
 	# convertto, and system, but not "encoding system <name>" to set
 	# the system encoding.
 
 	::interp alias $slave encoding {} [namespace current]::AliasEncoding \
+		$slave
+
+	# Handling Tcl Modules, we need a restricted form of Glob.
+	::interp alias $slave glob {} [namespace current]::AliasGlob \
 		$slave
 
 	# This alias lets the slave have access to a subset of the 'file'
@@ -463,26 +479,24 @@ proc ::safe::interpAddToAccessPath {slave path} {
 	# by Tcl_MakeSafe(3)
 
 
-	# Source init.tcl into the slave, to get auto_load and other
-	# procedures defined:
+	# Source init.tcl and tm.tcl into the slave, to get auto_load
+	# and other procedures defined:
 
-	# We don't try to use the -rsrc on the mac because it would get
-	# confusing if you would want to customize init.tcl
-	# for a given set of safe slaves, on all the platforms
-	# you just need to give a specific access_path and
-	# the mac should be no exception. As there is no
-	# obvious full "safe ressources" design nor implementation
-	# for the mac, safe interps there will just don't
-	# have that ability. (A specific app can still reenable
-	# that using custom aliases if they want to).
-	# It would also make the security analysis and the Safe Tcl security
-	# model platform dependant and thus more error prone.
-
-	if {[catch {::interp eval $slave\
+	if {[catch {::interp eval $slave \
 		{source [file join $tcl_library init.tcl]}} msg]} {
 	    Log $slave "can't source init.tcl ($msg)"
 	    error "can't source init.tcl into slave $slave ($msg)"
 	}
+
+	if {[catch {::interp eval $slave \
+		{source [file join $tcl_library tm.tcl]}} msg]} {
+	    Log $slave "can't source tm.tcl ($msg)"
+	    error "can't source tm.tcl into slave $slave ($msg)"
+	}
+
+	# Sync the paths used to search for Tcl modules. This can be
+	# done only now, after tm.tcl was loaded.
+	::interp eval $slave [list ::tcl::tm::add {*}[Set [TmPathListName $slave]]]
 
 	return $slave
     }
@@ -529,7 +543,7 @@ proc ::safe::interpDelete {slave} {
 		# remove the hook now, otherwise if the hook
 		# calls us somehow, we'll loop
 		Unset $hookname
-		if {[catch {eval $hook [list $slave]} err]} {
+		if {[catch {{*}$hook $slave} err]} {
 		    Log $slave "Delete hook error ($err)"
 		}
 	    }
@@ -622,6 +636,10 @@ proc ::safe::setLogCmd {args} {
     proc VirtualPathListName {slave} {
 	return "[InterpStateName $slave](access_path_slave)"
     }
+    # returns the variable name of the complete tm path list
+    proc TmPathListName {slave} {
+	return "[InterpStateName $slave](tm_path_slave)"
+    }
     # returns the variable name of the number of items
     proc PathNumberName {slave} {
 	return "[InterpStateName $slave](access_path,n)"
@@ -640,15 +658,15 @@ proc ::safe::setLogCmd {args} {
     }
     # set/get values
     proc Set {args} {
-	eval [linsert $args 0 Toplevel set]
+	Toplevel set {*}$args
     }
     # lappend on toplevel vars
     proc Lappend {args} {
-	eval [linsert $args 0 Toplevel lappend]
+	Toplevel lappend {*}$args
     }
     # unset a var/token (currently just an global level eval)
     proc Unset {args} {
-	eval [linsert $args 0 Toplevel unset]
+	Toplevel unset {*}$args
     }
     # test existance 
     proc Exists {varname} {
@@ -677,7 +695,7 @@ proc ::safe::setLogCmd {args} {
     proc TranslatePath {slave path} {
 	# somehow strip the namespaces 'functionality' out (the danger
 	# is that we would strip valid macintosh "../" queries... :
-	if {[regexp {(::)|(\.\.)} $path]} {
+	if {[string match "*::*" $path] || [string match "*..*" $path]} {
 	    error "invalid characters in path $path"
 	}
 	set n [expr {[Set [PathNumberName $slave]]-1}]
@@ -695,7 +713,7 @@ proc ::safe::setLogCmd {args} {
     proc Log {slave msg {type ERROR}} {
 	variable Log
 	if {[info exists Log] && [llength $Log]} {
-	    eval $Log [list "$type for slave $slave : $msg"]
+	    {*}$Log "$type for slave $slave : $msg"
 	}
     }
 
@@ -719,21 +737,96 @@ proc ::safe::setLogCmd {args} {
 	}
     }
 
+    # AliasGlob is the target of the "glob" alias in safe interpreters.
+
+    proc AliasGlob {slave args} {
+	Log $slave "GLOB ! $args" NOTICE
+	set cmd {}
+	set at 0
+
+	set dir        {}
+	set virtualdir {}
+
+	while {$at < [llength $args]} {
+	    switch -glob -- [set opt [lindex $args $at]] {
+		-nocomplain -
+		-join       { lappend cmd $opt ; incr at }
+		-directory  {
+		    lappend cmd $opt ; incr at
+		    set virtualdir [lindex $args $at]
+
+		    # get the real path from the virtual one.
+		    if {[catch {set dir [TranslatePath $slave $virtualdir]} msg]} {
+			Log $slave $msg
+			return -code error "permission denied"
+		    }
+		    # check that the path is in the access path of that slave
+		    if {[catch {DirInAccessPath $slave $dir} msg]} {
+			Log $slave $msg
+			return -code error "permission denied"
+		    }
+		    lappend cmd $dir ; incr at
+		}
+		pkgIndex.tcl {
+		    # Oops, this is globbing a subdirectory in regular
+		    # package search. That is not wanted. Abort,
+		    # handler does catch already (because glob was not
+		    # defined before). See package.tcl, lines 484ff in
+		    # tclPkgUnknown.
+		    error "unknown command glob"
+		}
+		-* {
+		    Log $slave "Safe base rejecting glob option '$opt'"
+		    error      "Safe base rejecting glob option '$opt'"
+		}
+		default {
+		    lappend cmd $opt ; incr at
+		}
+	    }
+	}
+
+	Log $slave "GLOB = $cmd" NOTICE
+
+	if {[catch {::interp invokehidden $slave glob {*}$cmd} msg]} {
+	    Log $slave $msg
+	    return -code error "script error"
+	}
+
+	Log $slave "GLOB @ $msg" NOTICE
+
+	# Translate path back to what the slave should see.
+	set res {}
+	foreach p $msg {
+	    regsub -- ^$dir $p $virtualdir p
+	    lappend res $p
+	}
+
+	Log $slave "GLOB @ $res" NOTICE
+	return $res
+    }
 
     # AliasSource is the target of the "source" alias in safe interpreters.
 
     proc AliasSource {slave args} {
 
 	set argc [llength $args]
-	# Allow only "source filename"
-	# (and not mac specific -rsrc for instance - see comment in ::init
-	# for current rationale)
+	# Extended for handling of Tcl Modules to allow not only
+	# "source filename", but "source -encoding E filename" as
+	# well.
+	if {[lindex $args 0] eq "-encoding"} {
+	    incr argc -2
+	    set encoding [lrange $args 0 1]
+	    set at 2
+	} else {
+	    set at 0
+	    set encoding {}
+	}
 	if {$argc != 1} {
-	    set msg "wrong # args: should be \"source fileName\""
+	    set msg "wrong # args: should be \"source ?-encoding E? fileName\""
 	    Log $slave "$msg ($args)"
 	    return -code error $msg
 	}
-	set file [lindex $args 0]
+	set file [lindex $args $at]
 	
 	# get the real path from the virtual one.
 	if {[catch {set file [TranslatePath $slave $file]} msg]} {
@@ -754,7 +847,7 @@ proc ::safe::setLogCmd {args} {
 	}
 
 	# passed all the tests , lets source it:
-	if {[catch {::interp invokehidden $slave source $file} msg]} {
+	if {[catch {::interp invokehidden $slave source {*}$encoding $file} msg]} {
 	    Log $slave $msg
 	    return -code error "script error"
 	}
@@ -854,13 +947,32 @@ proc ::safe::setLogCmd {args} {
 	}
     }
 
+    proc DirInAccessPath {slave dir} {
+	set access_path [GetAccessPath $slave]
+
+	if {[file isfile $dir]} {
+	    error "\"$dir\": is a file"
+	}
+
+	# Normalize paths for comparison since lsearch knows nothing of
+	# potential pathname anomalies.
+	set norm_dir [file normalize $dir]
+	foreach path $access_path {
+	    lappend norm_access_path [file normalize $path]
+	}
+
+	if {[lsearch -exact $norm_access_path $norm_dir] == -1} {
+	    error "\"$dir\": not in access_path"
+	}
+    }
+
     # This procedure enables access from a safe interpreter to only a subset of
     # the subcommands of a command:
 
     proc Subset {slave command okpat args} {
 	set subcommand [lindex $args 0]
 	if {[regexp $okpat $subcommand]} {
-	    return [eval [linsert $args 0 $command]]
+	    return [$command {*}$args]
 	}
 	set msg "not allowed to invoke subcommand $subcommand of $command"
 	Log $slave $msg
@@ -895,8 +1007,7 @@ proc ::safe::setLogCmd {args} {
 	set subcommand [lindex $args 0]
 
 	if {[regexp $okpat $subcommand]} {
-	    return [eval [linsert $args 0 \
-		    ::interp invokehidden $slave encoding]]
+	    return [::interp invokehidden $slave encoding {*}$args]
 	}
 
 	if {[string first $subcommand system] == 0} {

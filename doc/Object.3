@@ -4,10 +4,10 @@
 '\" See the file "license.terms" for information on usage and redistribution
 '\" of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 '\" 
-'\" RCS: @(#) $Id: Object.3,v 1.6 2002/10/22 12:16:53 dkf Exp $
+'\" RCS: @(#) $Id: Object.3,v 1.18.2.1 2008/06/27 21:44:59 dgp Exp $
 '\" 
 .so man.macros
-.TH Tcl_Obj 3 8.1 Tcl "Tcl Library Procedures"
+.TH Tcl_Obj 3 8.5 Tcl "Tcl Library Procedures"
 .BS
 .SH NAME
 Tcl_NewObj, Tcl_DuplicateObj, Tcl_IncrRefCount, Tcl_DecrRefCount, Tcl_IsShared, Tcl_InvalidateStringRep \- manipulate Tcl objects
@@ -30,7 +30,7 @@ int
 .sp
 \fBTcl_InvalidateStringRep\fR(\fIobjPtr\fR)
 .SH ARGUMENTS
-.AS Tcl_Obj *objPtr in
+.AS Tcl_Obj *objPtr
 .AP Tcl_Obj *objPtr in
 Points to an object;
 must have been the result of a previous call to \fBTcl_NewObj\fR.
@@ -102,34 +102,37 @@ reclaim an object's storage.
 .PP
 Tcl objects are typed.
 An object's internal representation is controlled by its type.
-Seven types are predefined in the Tcl core
+Several types are predefined in the Tcl core
 including integer, double, list, and bytecode.
 Extension writers can extend the set of types
-by using the procedure \fBTcl_RegisterObjType\fR .
-
+by defining their own \fBTcl_ObjType\fR structs.
 .SH "THE TCL_OBJ STRUCTURE"
 .PP
 Each Tcl object is represented by a \fBTcl_Obj\fR structure
 which is defined as follows.
 .CS
 typedef struct Tcl_Obj {
-	int \fIrefCount\fR;
-	char *\fIbytes\fR;
-	int \fIlength\fR;
-	Tcl_ObjType *\fItypePtr\fR;
-	union {
-		long \fIlongValue\fR;
-		double \fIdoubleValue\fR;
-		VOID *\fIotherValuePtr\fR;
-		struct {
-			VOID *\fIptr1\fR;
-			VOID *\fIptr2\fR;
-		} \fItwoPtrValue\fR;
-	} \fIinternalRep\fR;
+        int \fIrefCount\fR;
+        char *\fIbytes\fR;
+        int \fIlength\fR;
+        Tcl_ObjType *\fItypePtr\fR;
+        union {
+                long \fIlongValue\fR;
+                double \fIdoubleValue\fR;
+                void *\fIotherValuePtr\fR;
+                Tcl_WideInt \fIwideValue\fR;
+                struct {
+                        void *\fIptr1\fR;
+                        void *\fIptr2\fR;
+                } \fItwoPtrValue\fR;
+                struct {
+                        void *\fIptr\fR;
+                        unsigned long \fIvalue\fR;
+                } \fIptrAndLongRep\fR;
+        } \fIinternalRep\fR;
 } Tcl_Obj;
 .CE
 The \fIbytes\fR and the \fIlength\fR members together hold
-.VS 8.1
 an object's UTF-8 string representation,
 which is a \fIcounted string\fR not containing null bytes (UTF-8 null
 characters should be encoded as a two byte sequence: 192, 128.)
@@ -139,7 +142,6 @@ The byte array must always have a null byte after the last data byte,
 at offset \fIlength\fR;
 this allows string representations
 to be treated as conventional null-terminated C strings.
-.VE 8.1
 C programs use \fBTcl_GetStringFromObj\fR and \fBTcl_GetString\fR to get
 an object's string representation.
 If \fIbytes\fR is NULL,
@@ -153,10 +155,11 @@ the internal representation is invalid.
 .PP
 The \fIinternalRep\fR union member holds
 an object's internal representation.
-This is either a (long) integer, a double-precision floating point number,
+This is either a (long) integer, a double-precision floating-point number,
 a pointer to a value containing additional information
-needed by the object's type to represent the object,
-or two arbitrary pointers.
+needed by the object's type to represent the object, a Tcl_WideInt
+integer, two arbitrary pointers, or a pair made up of an unsigned long
+integer and a pointer.
 .PP
 The \fIrefCount\fR member is used to tell when it is safe to free
 an object's storage.
@@ -226,7 +229,6 @@ creates a new internal representation for an object
 and changes its \fItypePtr\fR.
 See the man page for \fBTcl_RegisterObjType\fR
 to see how to create a new object type.
-
 .SH "EXAMPLE OF THE LIFETIME OF AN OBJECT"
 .PP
 As an example of the lifetime of an object,
@@ -264,9 +266,8 @@ no longer corresponds to the internal representation.
 .CE
 The string representation of \fIx\fR's object is needed
 and is recomputed.
-The string representation is now \fB124\fR.
+The string representation is now \fB124\fR
 and both representations are again valid.
-
 .SH "STORAGE MANAGEMENT OF OBJECTS"
 .PP
 Tcl objects are allocated on the heap and are shared as much as possible
@@ -283,7 +284,7 @@ if the object's reference count drops to zero, frees its storage.
 An object shared by different code or data structures has
 \fIrefCount\fR greater than 1.
 Incrementing an object's reference count ensures that
-it won't be freed too early or have its value change accidently.
+it will not be freed too early or have its value change accidentally.
 .PP
 As an example, the bytecode interpreter shares argument objects
 between calling and called Tcl procedures to avoid having to copy objects.
@@ -299,7 +300,7 @@ When an object's reference count drops less than or equal to zero,
 \fBTcl_DecrRefCount\fR reclaims its storage.
 Most command procedures do not have to be concerned about
 reference counting since they use an object's value immediately
-and don't retain a pointer to the object after they return.
+and do not retain a pointer to the object after they return.
 However, if they do retain a pointer to an object in a data structure,
 they must be careful to increment its reference count
 since the retained pointer is a new reference.
@@ -314,26 +315,29 @@ by using \fBTcl_DuplicateObj\fR;
 this returns a new duplicate of the original object
 that has \fIrefCount\fR 0.
 If the object is not shared,
-the command procedure "owns" the object and can safely modify it directly.
+the command procedure
+.QW "owns"
+the object and can safely modify it directly.
 For example, the following code appears in the command procedure
 that implements \fBlinsert\fR.
 This procedure modifies the list object passed to it in \fIobjv[1]\fR
 by inserting \fIobjc-3\fR new elements before \fIindex\fR.
+.PP
 .CS
 listPtr = objv[1];
 if (Tcl_IsShared(listPtr)) {
-	listPtr = Tcl_DuplicateObj(listPtr);
+    listPtr = Tcl_DuplicateObj(listPtr);
 }
-result = Tcl_ListObjReplace(interp, listPtr, index, 0, (objc-3), &(objv[3]));
+result = Tcl_ListObjReplace(interp, listPtr, index, 0,
+        (objc-3), &(objv[3]));
 .CE
+.PP
 As another example, \fBincr\fR's command procedure
 must check whether the variable's object is shared before
 incrementing the integer in its internal representation.
 If it is shared, it needs to duplicate the object
-in order to avoid accidently changing values in other data structures.
-
+in order to avoid accidentally changing values in other data structures.
 .SH "SEE ALSO"
-Tcl_ConvertToType, Tcl_GetIntFromObj, Tcl_ListObjAppendElement, Tcl_ListObjIndex, Tcl_ListObjReplace, Tcl_RegisterObjType
-
+Tcl_ConvertToType(3), Tcl_GetIntFromObj(3), Tcl_ListObjAppendElement(3), Tcl_ListObjIndex(3), Tcl_ListObjReplace(3), Tcl_RegisterObjType(3)
 .SH KEYWORDS
 internal representation, object, object creation, object type, reference counting, string representation, type conversion

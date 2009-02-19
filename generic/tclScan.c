@@ -1,43 +1,33 @@
-/* 
+/*
  * tclScan.c --
  *
  *	This file contains the implementation of the "scan" command.
  *
  * Copyright (c) 1998 by Scriptics Corporation.
  *
- * See the file "license.terms" for information on usage and redistribution
- * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
+ * See the file "license.terms" for information on usage and redistribution of
+ * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclScan.c,v 1.12.2.2 2005/10/23 22:01:30 msofer Exp $
+ * RCS: @(#) $Id: tclScan.c,v 1.27 2007/12/13 15:23:20 dgp Exp $
  */
 
 #include "tclInt.h"
-/*
- * For strtoll() and strtoull() declarations on some platforms...
- */
-#include "tclPort.h"
 
 /*
  * Flag values used by Tcl_ScanObjCmd.
  */
 
-#define SCAN_NOSKIP	0x1		  /* Don't skip blanks. */
-#define SCAN_SUPPRESS	0x2		  /* Suppress assignment. */
-#define SCAN_UNSIGNED	0x4		  /* Read an unsigned value. */
-#define SCAN_WIDTH	0x8		  /* A width value was supplied. */
+#define SCAN_NOSKIP	0x1		/* Don't skip blanks. */
+#define SCAN_SUPPRESS	0x2		/* Suppress assignment. */
+#define SCAN_UNSIGNED	0x4		/* Read an unsigned value. */
+#define SCAN_WIDTH	0x8		/* A width value was supplied. */
 
-#define SCAN_SIGNOK	0x10		  /* A +/- character is allowed. */
-#define SCAN_NODIGITS	0x20		  /* No digits have been scanned. */
-#define SCAN_NOZERO	0x40		  /* No zero digits have been scanned. */
-#define SCAN_XOK	0x80		  /* An 'x' is allowed. */
-#define SCAN_PTOK	0x100		  /* Decimal point is allowed. */
-#define SCAN_EXPOK	0x200		  /* An exponent is allowed. */
-
-#define SCAN_LONGER	0x400		  /* Asked for a wide value. */
+#define SCAN_LONGER	0x400		/* Asked for a wide value. */
+#define SCAN_BIG	0x800		/* Asked for a bignum value. */
 
 /*
- * The following structure contains the information associated with
- * a character set.
+ * The following structure contains the information associated with a
+ * character set.
  */
 
 typedef struct CharSet {
@@ -55,20 +45,20 @@ typedef struct CharSet {
  * Declarations for functions used only in this file.
  */
 
-static char *	BuildCharSet _ANSI_ARGS_((CharSet *cset, char *format));
-static int	CharInSet _ANSI_ARGS_((CharSet *cset, int ch));
-static void	ReleaseCharSet _ANSI_ARGS_((CharSet *cset));
-static int	ValidateFormat _ANSI_ARGS_((Tcl_Interp *interp, char *format,
-		    int numVars, int *totalVars));
+static char *		BuildCharSet(CharSet *cset, char *format);
+static int		CharInSet(CharSet *cset, int ch);
+static void		ReleaseCharSet(CharSet *cset);
+static int		ValidateFormat(Tcl_Interp *interp, char *format,
+			    int numVars, int *totalVars);
 
 /*
  *----------------------------------------------------------------------
  *
  * BuildCharSet --
  *
- *	This function examines a character set format specification
- *	and builds a CharSet containing the individual characters and
- *	character ranges specified.
+ *	This function examines a character set format specification and builds
+ *	a CharSet containing the individual characters and character ranges
+ *	specified.
  *
  * Results:
  *	Returns the next format position.
@@ -80,16 +70,16 @@ static int	ValidateFormat _ANSI_ARGS_((Tcl_Interp *interp, char *format,
  */
 
 static char *
-BuildCharSet(cset, format)
-    CharSet *cset;
-    char *format;		/* Points to first char of set. */
+BuildCharSet(
+    CharSet *cset,
+    char *format)		/* Points to first char of set. */
 {
     Tcl_UniChar ch, start;
     int offset, nranges;
     char *end;
 
     memset(cset, 0, sizeof(CharSet));
-    
+
     offset = Tcl_UtfToUniChar(format, &ch);
     if (ch == '^') {
 	cset->exclude = 1;
@@ -113,8 +103,8 @@ BuildCharSet(cset, format)
 	end += Tcl_UtfToUniChar(end, &ch);
     }
 
-    cset->chars = (Tcl_UniChar *) ckalloc(sizeof(Tcl_UniChar)
-	    * (end - format - 1));
+    cset->chars = (Tcl_UniChar *)
+	    ckalloc(sizeof(Tcl_UniChar) * (end - format - 1));
     if (nranges > 0) {
 	cset->ranges = (struct Range *) ckalloc(sizeof(struct Range)*nranges);
     } else {
@@ -135,8 +125,8 @@ BuildCharSet(cset, format)
     while (ch != ']') {
 	if (*format == '-') {
 	    /*
-	     * This may be the first character of a range, so don't add
-	     * it yet.
+	     * This may be the first character of a range, so don't add it
+	     * yet.
 	     */
 
 	    start = ch;
@@ -163,7 +153,7 @@ BuildCharSet(cset, format)
 		} else {
 		    cset->ranges[cset->nranges].start = ch;
 		    cset->ranges[cset->nranges].end = start;
-		}		    
+		}
 		cset->nranges++;
 	    }
 	} else {
@@ -191,13 +181,14 @@ BuildCharSet(cset, format)
  */
 
 static int
-CharInSet(cset, c)
-    CharSet *cset;
-    int c;			/* Character to test, passed as int because
-				 * of non-ANSI prototypes. */
+CharInSet(
+    CharSet *cset,
+    int c)			/* Character to test, passed as int because of
+				 * non-ANSI prototypes. */
 {
     Tcl_UniChar ch = (Tcl_UniChar) c;
     int i, match = 0;
+
     for (i = 0; i < cset->nchars; i++) {
 	if (cset->chars[i] == ch) {
 	    match = 1;
@@ -206,14 +197,13 @@ CharInSet(cset, c)
     }
     if (!match) {
 	for (i = 0; i < cset->nranges; i++) {
-	    if ((cset->ranges[i].start <= ch)
-		    && (ch <= cset->ranges[i].end)) {
+	    if ((cset->ranges[i].start <= ch) && (ch <= cset->ranges[i].end)) {
 		match = 1;
 		break;
 	    }
 	}
     }
-    return (cset->exclude ? !match : match);    
+    return (cset->exclude ? !match : match);
 }
 
 /*
@@ -233,8 +223,8 @@ CharInSet(cset, c)
  */
 
 static void
-ReleaseCharSet(cset)
-    CharSet *cset;
+ReleaseCharSet(
+    CharSet *cset)
 {
     ckfree((char *)cset->chars);
     if (cset->ranges) {
@@ -247,8 +237,8 @@ ReleaseCharSet(cset)
  *
  * ValidateFormat --
  *
- *	Parse the format string and verify that it is properly formed
- *	and that there are exactly enough variables on the command line.
+ *	Parse the format string and verify that it is properly formed and that
+ *	there are exactly enough variables on the command line.
  *
  * Results:
  *	A standard Tcl result.
@@ -260,33 +250,27 @@ ReleaseCharSet(cset)
  */
 
 static int
-ValidateFormat(interp, format, numVars, totalSubs)
-    Tcl_Interp *interp;		/* Current interpreter. */
-    char *format;		/* The format string. */
-    int numVars;		/* The number of variables passed to the
-				 * scan command. */
-    int *totalSubs;		/* The number of variables that will be
+ValidateFormat(
+    Tcl_Interp *interp,		/* Current interpreter. */
+    char *format,		/* The format string. */
+    int numVars,		/* The number of variables passed to the scan
+				 * command. */
+    int *totalSubs)		/* The number of variables that will be
 				 * required. */
 {
-#define STATIC_LIST_SIZE 16
     int gotXpg, gotSequential, value, i, flags;
     char *end;
     Tcl_UniChar ch;
-    int staticAssign[STATIC_LIST_SIZE];
-    int *nassign = staticAssign;
-    int objIndex, xpgSize, nspace = STATIC_LIST_SIZE;
+    int objIndex, xpgSize, nspace = numVars;
+    int *nassign = (int *) TclStackAlloc(interp, nspace * sizeof(int));
     char buf[TCL_UTF_MAX+1];
 
     /*
-     * Initialize an array that records the number of times a variable
-     * is assigned to by the format string.  We use this to detect if
-     * a variable is multiply assigned or left unassigned.
+     * Initialize an array that records the number of times a variable is
+     * assigned to by the format string. We use this to detect if a variable
+     * is multiply assigned or left unassigned.
      */
 
-    if (numVars > nspace) {
-	nassign = (int*)ckalloc(sizeof(int) * numVars);
-	nspace = numVars;
-    }
     for (i = 0; i < nspace; i++) {
 	nassign[i] = 0;
     }
@@ -311,14 +295,14 @@ ValidateFormat(interp, format, numVars, totalSubs)
 	    goto xpgCheckDone;
 	}
 
-	if ((ch < 0x80) && isdigit(UCHAR(ch))) { /* INTL: "C" locale. */
+	if ((ch < 0x80) && isdigit(UCHAR(ch))) {	/* INTL: "C" locale. */
 	    /*
-	     * Check for an XPG3-style %n$ specification.  Note: there
-	     * must not be a mixture of XPG3 specs and non-XPG3 specs
-	     * in the same format string.
+	     * Check for an XPG3-style %n$ specification. Note: there must
+	     * not be a mixture of XPG3 specs and non-XPG3 specs in the same
+	     * format string.
 	     */
 
-	    value = strtoul(format-1, &end, 10); /* INTL: "C" locale. */
+	    value = strtoul(format-1, &end, 10);	/* INTL: "C" locale. */
 	    if (*end != '$') {
 		goto notXpg;
 	    }
@@ -335,31 +319,31 @@ ValidateFormat(interp, format, numVars, totalSubs)
 		/*
 		 * In the case where no vars are specified, the user can
 		 * specify %9999$ legally, so we have to consider special
-		 * rules for growing the assign array.  'value' is
-		 * guaranteed to be > 0.
+		 * rules for growing the assign array. 'value' is guaranteed
+		 * to be > 0.
 		 */
 		xpgSize = (xpgSize > value) ? xpgSize : value;
 	    }
 	    goto xpgCheckDone;
 	}
 
-	notXpg:
+    notXpg:
 	gotSequential = 1;
 	if (gotXpg) {
-	    mixedXPG:
+	mixedXPG:
 	    Tcl_SetResult(interp,
 		    "cannot mix \"%\" and \"%n$\" conversion specifiers",
 		    TCL_STATIC);
 	    goto error;
 	}
 
-	xpgCheckDone:
+    xpgCheckDone:
 	/*
 	 * Parse any width specifier.
 	 */
 
-	if ((ch < 0x80) && isdigit(UCHAR(ch))) { /* INTL: "C" locale. */
-	    value = strtoul(format-1, &format, 10); /* INTL: "C" locale. */
+	if ((ch < 0x80) && isdigit(UCHAR(ch))) {	/* INTL: "C" locale. */
+	    value = strtoul(format-1, &format, 10);	/* INTL: "C" locale. */
 	    flags |= SCAN_WIDTH;
 	    format += Tcl_UtfToUniChar(format, &ch);
 	}
@@ -370,6 +354,12 @@ ValidateFormat(interp, format, numVars, totalSubs)
 
 	switch (ch) {
 	case 'l':
+	    if (*format == 'l') {
+		flags |= SCAN_BIG;
+		format += 1;
+		format += Tcl_UtfToUniChar(format, &ch);
+		break;
+	    }
 	case 'L':
 	    flags |= SCAN_LONGER;
 	case 'h':
@@ -385,104 +375,104 @@ ValidateFormat(interp, format, numVars, totalSubs)
 	 */
 
 	switch (ch) {
-	    case 'c':
-                if (flags & SCAN_WIDTH) {
-		    Tcl_SetResult(interp,
-			    "field width may not be specified in %c conversion",
-			    TCL_STATIC);
-		    goto error;
-                }
-		/*
-		 * Fall through!
-		 */
-	    case 'n':
-	    case 's':
-		if (flags & SCAN_LONGER) {
-		invalidLonger:
-		    buf[Tcl_UniCharToUtf(ch, buf)] = '\0';
-		    Tcl_AppendStringsToObj(Tcl_GetObjResult(interp),
-			   "'l' modifier may not be specified in %", buf,
-			   " conversion", NULL);
-		    goto error;
-		}
-		/*
-		 * Fall through!
-		 */
-	    case 'd':
-	    case 'e':
-	    case 'f':
-	    case 'g':
-	    case 'i':
-	    case 'o':
-	    case 'u':
-	    case 'x':
- 		break;
-		/*
-		 * Bracket terms need special checking
-		 */
-	    case '[':
-		if (flags & SCAN_LONGER) {
-		    goto invalidLonger;
-		}
+	case 'c':
+	    if (flags & SCAN_WIDTH) {
+		Tcl_SetResult(interp,
+			"field width may not be specified in %c conversion",
+			TCL_STATIC);
+		goto error;
+	    }
+	    /*
+	     * Fall through!
+	     */
+	case 'n':
+	case 's':
+	    if (flags & (SCAN_LONGER|SCAN_BIG)) {
+	    invalidFieldSize:
+		buf[Tcl_UniCharToUtf(ch, buf)] = '\0';
+		Tcl_AppendResult(interp,
+			"field size modifier may not be specified in %", buf,
+			" conversion", NULL);
+		goto error;
+	    }
+	    /*
+	     * Fall through!
+	     */
+	case 'd':
+	case 'e':
+	case 'f':
+	case 'g':
+	case 'i':
+	case 'o':
+	case 'x':
+	    break;
+	case 'u':
+	    if (flags & SCAN_BIG) {
+		Tcl_SetResult(interp,
+			"unsigned bignum scans are invalid", TCL_STATIC);
+		goto error;
+	    }
+	    break;
+	    /*
+	     * Bracket terms need special checking
+	     */
+	case '[':
+	    if (flags & (SCAN_LONGER|SCAN_BIG)) {
+		goto invalidFieldSize;
+	    }
+	    if (*format == '\0') {
+		goto badSet;
+	    }
+	    format += Tcl_UtfToUniChar(format, &ch);
+	    if (ch == '^') {
 		if (*format == '\0') {
 		    goto badSet;
 		}
 		format += Tcl_UtfToUniChar(format, &ch);
-		if (ch == '^') {
-		    if (*format == '\0') {
-			goto badSet;
-		    }
-		    format += Tcl_UtfToUniChar(format, &ch);
+	    }
+	    if (ch == ']') {
+		if (*format == '\0') {
+		    goto badSet;
 		}
-		if (ch == ']') {
-		    if (*format == '\0') {
-			goto badSet;
-		    }
-		    format += Tcl_UtfToUniChar(format, &ch);
+		format += Tcl_UtfToUniChar(format, &ch);
+	    }
+	    while (ch != ']') {
+		if (*format == '\0') {
+		    goto badSet;
 		}
-		while (ch != ']') {
-		    if (*format == '\0') {
-			goto badSet;
-		    }
-		    format += Tcl_UtfToUniChar(format, &ch);
-		}
-		break;
-	    badSet:
-		Tcl_SetResult(interp, "unmatched [ in format string",
-			TCL_STATIC);
-		goto error;
-	    default:
+		format += Tcl_UtfToUniChar(format, &ch);
+	    }
+	    break;
+	badSet:
+	    Tcl_SetResult(interp, "unmatched [ in format string",
+		    TCL_STATIC);
+	    goto error;
+	default:
 	    {
 		char buf[TCL_UTF_MAX+1];
 
 		buf[Tcl_UniCharToUtf(ch, buf)] = '\0';
-		Tcl_AppendStringsToObj(Tcl_GetObjResult(interp),
-			"bad scan conversion character \"", buf, "\"", NULL);
+		Tcl_AppendResult(interp, "bad scan conversion character \"",
+			buf, "\"", NULL);
 		goto error;
 	    }
 	}
 	if (!(flags & SCAN_SUPPRESS)) {
 	    if (objIndex >= nspace) {
 		/*
-		 * Expand the nassign buffer.  If we are using XPG specifiers,
-		 * make sure that we grow to a large enough size.  xpgSize is
+		 * Expand the nassign buffer. If we are using XPG specifiers,
+		 * make sure that we grow to a large enough size. xpgSize is
 		 * guaranteed to be at least one larger than objIndex.
 		 */
+
 		value = nspace;
 		if (xpgSize) {
 		    nspace = xpgSize;
 		} else {
-		    nspace += STATIC_LIST_SIZE;
+		    nspace += 16;	/* formerly STATIC_LIST_SIZE */
 		}
-		if (nassign == staticAssign) {
-		    nassign = (void *)ckalloc(nspace * sizeof(int));
-		    for (i = 0; i < STATIC_LIST_SIZE; ++i) {
-			nassign[i] = staticAssign[i];
-		    }
-		} else {
-		    nassign = (void *)ckrealloc((void *)nassign,
-			    nspace * sizeof(int));
-		}
+		nassign = (int *) TclStackRealloc(interp, nassign,
+			nspace * sizeof(int));
 		for (i = value; i < nspace; i++) {
 		    nassign[i] = 0;
 		}
@@ -508,39 +498,39 @@ ValidateFormat(interp, format, numVars, totalSubs)
     }
     for (i = 0; i < numVars; i++) {
 	if (nassign[i] > 1) {
-	    Tcl_SetResult(interp, "variable is assigned by multiple \"%n$\" conversion specifiers", TCL_STATIC);
+	    Tcl_SetResult(interp,
+		    "variable is assigned by multiple \"%n$\" conversion specifiers",
+		    TCL_STATIC);
 	    goto error;
 	} else if (!xpgSize && (nassign[i] == 0)) {
 	    /*
-	     * If the space is empty, and xpgSize is 0 (means XPG wasn't
-	     * used, and/or numVars != 0), then too many vars were given
+	     * If the space is empty, and xpgSize is 0 (means XPG wasn't used,
+	     * and/or numVars != 0), then too many vars were given
 	     */
-	    Tcl_SetResult(interp, "variable is not assigned by any conversion specifiers", TCL_STATIC);
+
+	    Tcl_SetResult(interp,
+		    "variable is not assigned by any conversion specifiers",
+		    TCL_STATIC);
 	    goto error;
 	}
     }
 
-    if (nassign != staticAssign) {
-	ckfree((char *)nassign);
-    }
+    TclStackFree(interp, nassign);
     return TCL_OK;
 
-    badIndex:
+  badIndex:
     if (gotXpg) {
 	Tcl_SetResult(interp, "\"%n$\" argument index out of range",
 		TCL_STATIC);
     } else {
-	Tcl_SetResult(interp, 
+	Tcl_SetResult(interp,
 		"different numbers of variable names and field specifiers",
 		TCL_STATIC);
     }
 
-    error:
-    if (nassign != staticAssign) {
-	ckfree((char *)nassign);
-    }
+  error:
+    TclStackFree(interp, nassign);
     return TCL_ERROR;
-#undef STATIC_LIST_SIZE
 }
 
 /*
@@ -548,8 +538,8 @@ ValidateFormat(interp, format, numVars, totalSubs)
  *
  * Tcl_ScanObjCmd --
  *
- *	This procedure is invoked to process the "scan" Tcl command.
- *	See the user documentation for details on what it does.
+ *	This function is invoked to process the "scan" Tcl command. See the
+ *	user documentation for details on what it does.
  *
  * Results:
  *	A standard Tcl result.
@@ -562,35 +552,29 @@ ValidateFormat(interp, format, numVars, totalSubs)
 
 	/* ARGSUSED */
 int
-Tcl_ScanObjCmd(dummy, interp, objc, objv)
-    ClientData dummy;    	/* Not used. */
-    Tcl_Interp *interp;		/* Current interpreter. */
-    int objc;			/* Number of arguments. */
-    Tcl_Obj *CONST objv[];	/* Argument objects. */
+Tcl_ScanObjCmd(
+    ClientData dummy,    	/* Not used. */
+    Tcl_Interp *interp,		/* Current interpreter. */
+    int objc,			/* Number of arguments. */
+    Tcl_Obj *CONST objv[])	/* Argument objects. */
 {
     char *format;
     int numVars, nconversions, totalVars = -1;
     int objIndex, offset, i, result, code;
     long value;
-    char *string, *end, *baseString;
+    CONST char *string, *end, *baseString;
     char op = 0;
-    int base = 0;
-    int underflow = 0;
-    size_t width;
-    long (*fn)() = NULL;
-#ifndef TCL_WIDE_INT_IS_LONG
-    Tcl_WideInt (*lfn)() = NULL;
+    int width, underflow = 0;
     Tcl_WideInt wideValue;
-#endif
     Tcl_UniChar ch, sch;
     Tcl_Obj **objs = NULL, *objPtr = NULL;
     int flags;
-    char buf[513];			  /* Temporary buffer to hold scanned
-					   * number strings before they are
-					   * passed to strtoul. */
+    char buf[513];		/* Temporary buffer to hold scanned number
+				 * strings before they are passed to
+				 * strtoul. */
 
     if (objc < 3) {
-        Tcl_WrongNumArgs(interp, 1, objv,
+	Tcl_WrongNumArgs(interp, 1, objv,
 		"string format ?varName varName ...?");
 	return TCL_ERROR;
     }
@@ -601,7 +585,7 @@ Tcl_ScanObjCmd(dummy, interp, objc, objv)
     /*
      * Check for errors in the format string.
      */
-    
+
     if (ValidateFormat(interp, format, numVars, &totalVars) == TCL_ERROR) {
 	return TCL_ERROR;
     }
@@ -621,14 +605,15 @@ Tcl_ScanObjCmd(dummy, interp, objc, objv)
     baseString = string;
 
     /*
-     * Iterate over the format string filling in the result objects until
-     * we reach the end of input, the end of the format string, or there
-     * is a mismatch.
+     * Iterate over the format string filling in the result objects until we
+     * reach the end of input, the end of the format string, or there is a
+     * mismatch.
      */
 
     objIndex = 0;
     nconversions = 0;
     while (*format != '\0') {
+	int parseFlag = TCL_PARSE_NO_WHITESPACE;
 	format += Tcl_UtfToUniChar(format, &ch);
 
 	flags = 0;
@@ -648,9 +633,9 @@ Tcl_ScanObjCmd(dummy, interp, objc, objv)
 	    }
 	    continue;
 	}
-	    
+
 	if (ch != '%') {
-	    literal:
+	literal:
 	    if (*string == '\0') {
 		underflow = 1;
 		goto done;
@@ -668,17 +653,18 @@ Tcl_ScanObjCmd(dummy, interp, objc, objv)
 	}
 
 	/*
-	 * Check for assignment suppression ('*') or an XPG3-style
-	 * assignment ('%n$').
+	 * Check for assignment suppression ('*') or an XPG3-style assignment
+	 * ('%n$').
 	 */
 
 	if (ch == '*') {
 	    flags |= SCAN_SUPPRESS;
 	    format += Tcl_UtfToUniChar(format, &ch);
-	} else if ((ch < 0x80) && isdigit(UCHAR(ch))) { /* INTL: "C" locale. */
-	    value = strtoul(format-1, &end, 10); /* INTL: "C" locale. */
-	    if (*end == '$') {
-		format = end+1;
+	} else if ((ch < 0x80) && isdigit(UCHAR(ch))) {	/* INTL: "C" locale. */
+	    char *formatEnd;
+	    value = strtoul(format-1, &formatEnd, 10);/* INTL: "C" locale. */
+	    if (*formatEnd == '$') {
+		format = formatEnd+1;
 		format += Tcl_UtfToUniChar(format, &ch);
 		objIndex = (int) value - 1;
 	    }
@@ -688,8 +674,8 @@ Tcl_ScanObjCmd(dummy, interp, objc, objv)
 	 * Parse any width specifier.
 	 */
 
-	if ((ch < 0x80) && isdigit(UCHAR(ch))) { /* INTL: "C" locale. */
-	    width = strtoul(format-1, &format, 10); /* INTL: "C" locale. */
+	if ((ch < 0x80) && isdigit(UCHAR(ch))) {	/* INTL: "C" locale. */
+	    width = (int) strtoul(format-1, &format, 10);/* INTL: "C" locale. */
 	    format += Tcl_UtfToUniChar(format, &ch);
 	} else {
 	    width = 0;
@@ -701,6 +687,12 @@ Tcl_ScanObjCmd(dummy, interp, objc, objv)
 
 	switch (ch) {
 	case 'l':
+	    if (*format == 'l') {
+		flags |= SCAN_BIG;
+		format += 1;
+		format += Tcl_UtfToUniChar(format, &ch);
+		break;
+	    }
 	case 'L':
 	    flags |= SCAN_LONGER;
 	    /*
@@ -715,90 +707,70 @@ Tcl_ScanObjCmd(dummy, interp, objc, objv)
 	 */
 
 	switch (ch) {
-	    case 'n':
-		if (!(flags & SCAN_SUPPRESS)) {
-		    objPtr = Tcl_NewIntObj(string - baseString);
-		    Tcl_IncrRefCount(objPtr);
-		    objs[objIndex++] = objPtr;
-		}
-		nconversions++;
-		continue;
+	case 'n':
+	    if (!(flags & SCAN_SUPPRESS)) {
+		objPtr = Tcl_NewIntObj(string - baseString);
+		Tcl_IncrRefCount(objPtr);
+		objs[objIndex++] = objPtr;
+	    }
+	    nconversions++;
+	    continue;
 
-	    case 'd':
-		op = 'i';
-		base = 10;
-		fn = (long (*)())strtol;
-#ifndef TCL_WIDE_INT_IS_LONG
-		lfn = (Tcl_WideInt (*)())strtoll;
-#endif
-		break;
-	    case 'i':
-		op = 'i';
-		base = 0;
-		fn = (long (*)())strtol;
-#ifndef TCL_WIDE_INT_IS_LONG
-		lfn = (Tcl_WideInt (*)())strtoll;
-#endif
-		break;
-	    case 'o':
-		op = 'i';
-		base = 8;
-		fn = (long (*)())strtoul;
-#ifndef TCL_WIDE_INT_IS_LONG
-		lfn = (Tcl_WideInt (*)())strtoull;
-#endif
-		break;
-	    case 'x':
-		op = 'i';
-		base = 16;
-		fn = (long (*)())strtoul;
-#ifndef TCL_WIDE_INT_IS_LONG
-		lfn = (Tcl_WideInt (*)())strtoull;
-#endif
-		break;
-	    case 'u':
-		op = 'i';
-		base = 10;
-		flags |= SCAN_UNSIGNED;
-		fn = (long (*)())strtoul;
-#ifndef TCL_WIDE_INT_IS_LONG
-		lfn = (Tcl_WideInt (*)())strtoull;
-#endif
-		break;
+	case 'd':
+	    op = 'i';
+	    parseFlag |= TCL_PARSE_DECIMAL_ONLY;
+	    break;
+	case 'i':
+	    op = 'i';
+	    parseFlag |= TCL_PARSE_SCAN_PREFIXES;
+	    break;
+	case 'o':
+	    op = 'i';
+	    parseFlag |= TCL_PARSE_OCTAL_ONLY | TCL_PARSE_SCAN_PREFIXES;
+	    break;
+	case 'x':
+	    op = 'i';
+	    parseFlag |= TCL_PARSE_HEXADECIMAL_ONLY;
+	    break;
+	case 'u':
+	    op = 'i';
+	    parseFlag |= TCL_PARSE_DECIMAL_ONLY;
+	    flags |= SCAN_UNSIGNED;
+	    break;
 
-	    case 'f':
-	    case 'e':
-	    case 'g':
-		op = 'f';
-		break;
+	case 'f':
+	case 'e':
+	case 'g':
+	    op = 'f';
+	    break;
 
-	    case 's':
-		op = 's';
-		break;
+	case 's':
+	    op = 's';
+	    break;
 
-	    case 'c':
-		op = 'c';
-		flags |= SCAN_NOSKIP;
-		break;
-	    case '[':
-		op = '[';
-		flags |= SCAN_NOSKIP;
-		break;
+	case 'c':
+	    op = 'c';
+	    flags |= SCAN_NOSKIP;
+	    break;
+	case '[':
+	    op = '[';
+	    flags |= SCAN_NOSKIP;
+	    break;
 	}
 
 	/*
-	 * At this point, we will need additional characters from the
-	 * string to proceed.
+	 * At this point, we will need additional characters from the string
+	 * to proceed.
 	 */
 
 	if (*string == '\0') {
 	    underflow = 1;
 	    goto done;
 	}
-	
+
 	/*
-	 * Skip any leading whitespace at the beginning of a field unless
-	 * the format suppresses this behavior.
+	 * Skip any leading whitespace at the beginning of a field unless the
+	 * format suppresses this behavior.
 	 */
 
 	if (!(flags & SCAN_NOSKIP)) {
@@ -818,373 +790,217 @@ Tcl_ScanObjCmd(dummy, interp, objc, objv)
 	/*
 	 * Perform the requested scanning operation.
 	 */
-	
+
 	switch (op) {
-	    case 's':
-		/*
-		 * Scan a string up to width characters or whitespace.
-		 */
+	case 's':
+	    /*
+	     * Scan a string up to width characters or whitespace.
+	     */
 
-		if (width == 0) {
-		    width = (size_t) ~0;
-		}
-		end = string;
-		while (*end != '\0') {
-		    offset = Tcl_UtfToUniChar(end, &sch);
-		    if (Tcl_UniCharIsSpace(sch)) {
-			break;
-		    }
-		    end += offset;
-		    if (--width == 0) {
-			break;
-		    }
-		}
-		if (!(flags & SCAN_SUPPRESS)) {
-		    objPtr = Tcl_NewStringObj(string, end-string);
-		    Tcl_IncrRefCount(objPtr);
-		    objs[objIndex++] = objPtr;
-		}
-		string = end;
-		break;
-
-	    case '[': {
-		CharSet cset;
-
-		if (width == 0) {
-		    width = (size_t) ~0;
-		}
-		end = string;
-
-		format = BuildCharSet(&cset, format);
-		while (*end != '\0') {
-		    offset = Tcl_UtfToUniChar(end, &sch);
-		    if (!CharInSet(&cset, (int)sch)) {
-			break;
-		    }
-		    end += offset;
-		    if (--width == 0) {
-			break;
-		    }
-		}
-		ReleaseCharSet(&cset);
-
-		if (string == end) {
-		    /*
-		     * Nothing matched the range, stop processing
-		     */
-		    goto done;
-		}
-		if (!(flags & SCAN_SUPPRESS)) {
-		    objPtr = Tcl_NewStringObj(string, end-string);
-		    Tcl_IncrRefCount(objPtr);
-		    objs[objIndex++] = objPtr;
-		}
-		string = end;
-		
-		break;
+	    if (width == 0) {
+		width = ~0;
 	    }
-	    case 'c':
-		/*
-		 * Scan a single Unicode character.
-		 */
-
-		string += Tcl_UtfToUniChar(string, &sch);
-		if (!(flags & SCAN_SUPPRESS)) {
-		    objPtr = Tcl_NewIntObj((int)sch);
-		    Tcl_IncrRefCount(objPtr);
-		    objs[objIndex++] = objPtr;
-		}
-		break;
-
-	    case 'i':
-		/*
-		 * Scan an unsigned or signed integer.
-		 */
-
-		if ((width == 0) || (width > sizeof(buf) - 1)) {
-		    width = sizeof(buf) - 1;
-		}
-		flags |= SCAN_SIGNOK | SCAN_NODIGITS | SCAN_NOZERO;
-		for (end = buf; width > 0; width--) {
-		    switch (*string) {
-			/*
-			 * The 0 digit has special meaning at the beginning of
-			 * a number.  If we are unsure of the base, it
-			 * indicates that we are in base 8 or base 16 (if it is
-			 * followed by an 'x').
-			 *
-			 * 8.1 - 8.3.4 incorrectly handled 0x... base-16
-			 * cases for %x by not reading the 0x as the
-			 * auto-prelude for base-16. [Bug #495213]
-			 */
-			case '0':
-			    if (base == 0) {
-				base = 8;
-				flags |= SCAN_XOK;
-			    }
-			    if (base == 16) {
-				flags |= SCAN_XOK;
-			    }
-			    if (flags & SCAN_NOZERO) {
-				flags &= ~(SCAN_SIGNOK | SCAN_NODIGITS
-					| SCAN_NOZERO);
-			    } else {
-				flags &= ~(SCAN_SIGNOK | SCAN_XOK
-					| SCAN_NODIGITS);
-			    }
-			    goto addToInt;
-
-			case '1': case '2': case '3': case '4':
-			case '5': case '6': case '7':
-			    if (base == 0) {
-				base = 10;
-			    }
-			    flags &= ~(SCAN_SIGNOK | SCAN_XOK | SCAN_NODIGITS);
-			    goto addToInt;
-
-			case '8': case '9':
-			    if (base == 0) {
-				base = 10;
-			    }
-			    if (base <= 8) {
-				break;
-			    }
-			    flags &= ~(SCAN_SIGNOK | SCAN_XOK | SCAN_NODIGITS);
-			    goto addToInt;
-
-			case 'A': case 'B': case 'C':
-			case 'D': case 'E': case 'F': 
-			case 'a': case 'b': case 'c':
-			case 'd': case 'e': case 'f':
-			    if (base <= 10) {
-				break;
-			    }
-			    flags &= ~(SCAN_SIGNOK | SCAN_XOK | SCAN_NODIGITS);
-			    goto addToInt;
-
-			case '+': case '-':
-			    if (flags & SCAN_SIGNOK) {
-				flags &= ~SCAN_SIGNOK;
-				goto addToInt;
-			    }
-			    break;
-
-			case 'x': case 'X':
-			    if ((flags & SCAN_XOK) && (end == buf+1)) {
-				base = 16;
-				flags &= ~SCAN_XOK;
-				goto addToInt;
-			    }
-			    break;
-		    }
-
-		    /*
-		     * We got an illegal character so we are done accumulating.
-		     */
-
+	    end = string;
+	    while (*end != '\0') {
+		offset = Tcl_UtfToUniChar(end, &sch);
+		if (Tcl_UniCharIsSpace(sch)) {
 		    break;
-
-		    addToInt:
-		    /*
-		     * Add the character to the temporary buffer.
-		     */
-
-		    *end++ = *string++;
-		    if (*string == '\0') {
-			break;
-		    }
 		}
+		end += offset;
+		if (--width == 0) {
+		    break;
+		}
+	    }
+	    if (!(flags & SCAN_SUPPRESS)) {
+		objPtr = Tcl_NewStringObj(string, end-string);
+		Tcl_IncrRefCount(objPtr);
+		objs[objIndex++] = objPtr;
+	    }
+	    string = end;
+	    break;
 
+	case '[': {
+	    CharSet cset;
+
+	    if (width == 0) {
+		width = ~0;
+	    }
+	    end = string;
+
+	    format = BuildCharSet(&cset, format);
+	    while (*end != '\0') {
+		offset = Tcl_UtfToUniChar(end, &sch);
+		if (!CharInSet(&cset, (int)sch)) {
+		    break;
+		}
+		end += offset;
+		if (--width == 0) {
+		    break;
+		}
+	    }
+	    ReleaseCharSet(&cset);
+
+	    if (string == end) {
 		/*
-		 * Check to see if we need to back up because we only got a
-		 * sign or a trailing x after a 0.
+		 * Nothing matched the range, stop processing.
 		 */
+		goto done;
+	    }
+	    if (!(flags & SCAN_SUPPRESS)) {
+		objPtr = Tcl_NewStringObj(string, end-string);
+		Tcl_IncrRefCount(objPtr);
+		objs[objIndex++] = objPtr;
+	    }
+	    string = end;
 
-		if (flags & SCAN_NODIGITS) {
-		    if (*string == '\0') {
+	    break;
+	}
+	case 'c':
+	    /*
+	     * Scan a single Unicode character.
+	     */
+
+	    string += Tcl_UtfToUniChar(string, &sch);
+	    if (!(flags & SCAN_SUPPRESS)) {
+		objPtr = Tcl_NewIntObj((int)sch);
+		Tcl_IncrRefCount(objPtr);
+		objs[objIndex++] = objPtr;
+	    }
+	    break;
+
+	case 'i':
+	    /*
+	     * Scan an unsigned or signed integer.
+	     */
+	    objPtr = Tcl_NewLongObj(0);
+	    Tcl_IncrRefCount(objPtr);
+	    if (width == 0) {
+		width = ~0;
+	    }
+	    if (TCL_OK != TclParseNumber(NULL, objPtr, NULL, string, width,
+		    &end, TCL_PARSE_INTEGER_ONLY | parseFlag)) {
+		Tcl_DecrRefCount(objPtr);
+		if (width < 0) {
+		    if (*end == '\0') {
 			underflow = 1;
 		    }
-		    goto done;
-		} else if (end[-1] == 'x' || end[-1] == 'X') {
-		    end--;
-		    string--;
-		}
-
-
-		/*
-		 * Scan the value from the temporary buffer.  If we are
-		 * returning a large unsigned value, we have to convert it back
-		 * to a string since Tcl only supports signed values.
-		 */
-
-		if (!(flags & SCAN_SUPPRESS)) {
-		    *end = '\0';
-#ifndef TCL_WIDE_INT_IS_LONG
-		    if (flags & SCAN_LONGER) {
-			wideValue = (Tcl_WideInt) (*lfn)(buf, NULL, base);
-			if ((flags & SCAN_UNSIGNED) && (wideValue < 0)) {
-			    /* INTL: ISO digit */
-			    sprintf(buf, "%" TCL_LL_MODIFIER "u",
-				    (Tcl_WideUInt)wideValue);
-			    objPtr = Tcl_NewStringObj(buf, -1);
-			} else {
-			    objPtr = Tcl_NewWideIntObj(wideValue);
-			}
-		    } else {
-#endif /* !TCL_WIDE_INT_IS_LONG */
-			value = (long) (*fn)(buf, NULL, base);
-			if ((flags & SCAN_UNSIGNED) && (value < 0)) {
-			    sprintf(buf, "%lu", value); /* INTL: ISO digit */
-			    objPtr = Tcl_NewStringObj(buf, -1);
-			} else if ((flags & SCAN_LONGER)
-				|| (unsigned long) value > UINT_MAX) {
-			    objPtr = Tcl_NewLongObj(value);
-			} else {
-			    objPtr = Tcl_NewIntObj(value);
-			}
-#ifndef TCL_WIDE_INT_IS_LONG
+		} else {
+		    if (end == string + width) {
+			underflow = 1;
 		    }
-#endif
-		    Tcl_IncrRefCount(objPtr);
-		    objs[objIndex++] = objPtr;
 		}
-
+		goto done;
+	    }
+	    string = end;
+	    if (flags & SCAN_SUPPRESS) {
+		Tcl_DecrRefCount(objPtr);
 		break;
-
-	    case 'f':
-		/*
-		 * Scan a floating point number
-		 */
-
-		if ((width == 0) || (width > sizeof(buf) - 1)) {
-		    width = sizeof(buf) - 1;
-		}
-		flags &= ~SCAN_LONGER;
-		flags |= SCAN_SIGNOK | SCAN_NODIGITS | SCAN_PTOK | SCAN_EXPOK;
-		for (end = buf; width > 0; width--) {
-		    switch (*string) {
-			case '0': case '1': case '2': case '3':
-			case '4': case '5': case '6': case '7':
-			case '8': case '9':
-			    flags &= ~(SCAN_SIGNOK | SCAN_NODIGITS);
-			    goto addToFloat;
-			case '+': case '-':
-			    if (flags & SCAN_SIGNOK) {
-				flags &= ~SCAN_SIGNOK;
-				goto addToFloat;
-			    }
-			    break;
-			case '.':
-			    if (flags & SCAN_PTOK) {
-				flags &= ~(SCAN_SIGNOK | SCAN_PTOK);
-				goto addToFloat;
-			    }
-			    break;
-			case 'e': case 'E':
-			    /*
-			     * An exponent is not allowed until there has
-			     * been at least one digit.
-			     */
-
-			    if ((flags & (SCAN_NODIGITS | SCAN_EXPOK))
-				    == SCAN_EXPOK) {
-				flags = (flags & ~(SCAN_EXPOK|SCAN_PTOK))
-				    | SCAN_SIGNOK | SCAN_NODIGITS;
-				goto addToFloat;
-			    }
-			    break;
-		    }
-
-		    /*
-		     * We got an illegal character so we are done accumulating.
-		     */
-
-		    break;
-
-		    addToFloat:
-		    /*
-		     * Add the character to the temporary buffer.
-		     */
-
-		    *end++ = *string++;
-		    if (*string == '\0') {
-			break;
+	    }
+	    if (flags & SCAN_LONGER) {
+		if (Tcl_GetWideIntFromObj(NULL, objPtr, &wideValue) != TCL_OK) {
+		    wideValue = ~(Tcl_WideUInt)0 >> 1;	/* WIDE_MAX */
+		    if (TclGetString(objPtr)[0] == '-') {
+			wideValue++;	/* WIDE_MAX + 1 = WIDE_MIN */
 		    }
 		}
+		if ((flags & SCAN_UNSIGNED) && (wideValue < 0)) {
+		    sprintf(buf, "%" TCL_LL_MODIFIER "u",
+			    (Tcl_WideUInt)wideValue);
+		    Tcl_SetStringObj(objPtr, buf, -1);
+		} else {
+		    Tcl_SetWideIntObj(objPtr, wideValue);
+		}
+	    } else if (!(flags & SCAN_BIG)) {
+		if (TclGetLongFromObj(NULL, objPtr, &value) != TCL_OK) {
+		    if (TclGetString(objPtr)[0] == '-') {
+			value = LONG_MIN;
+		    } else {
+			value = LONG_MAX;
+		    }
+		}
+		if ((flags & SCAN_UNSIGNED) && (value < 0)) {
+		    sprintf(buf, "%lu", value);	/* INTL: ISO digit */
+		    Tcl_SetStringObj(objPtr, buf, -1);
+		} else {
+		    Tcl_SetLongObj(objPtr, value);
+		}
+	    }
+	    objs[objIndex++] = objPtr;
+	    break;
 
-		/*
-		 * Check to see if we need to back up because we saw a
-		 * trailing 'e' or sign.
-		 */
+	case 'f':
+	    /*
+	     * Scan a floating point number
+	     */
 
-		if (flags & SCAN_NODIGITS) {
-		    if (flags & SCAN_EXPOK) {
-			/*
-			 * There were no digits at all so scanning has
-			 * failed and we are done.
-			 */
-			if (*string == '\0') {
-			    underflow = 1;
-			}
+	    objPtr = Tcl_NewDoubleObj(0.0);
+	    Tcl_IncrRefCount(objPtr);
+	    if (width == 0) {
+		width = ~0;
+	    }
+	    if (TCL_OK != TclParseNumber(NULL, objPtr, NULL, string, width,
+		    &end, TCL_PARSE_DECIMAL_ONLY | TCL_PARSE_NO_WHITESPACE)) {
+		Tcl_DecrRefCount(objPtr);
+		if (width < 0) {
+		    if (*end == '\0') {
+			underflow = 1;
+		    }
+		} else {
+		    if (end == string + width) {
+			underflow = 1;
+		    }
+		}
+		goto done;
+	    } else if (flags & SCAN_SUPPRESS) {
+		Tcl_DecrRefCount(objPtr);
+		string = end;
+	    } else {
+		double dvalue;
+		if (Tcl_GetDoubleFromObj(NULL, objPtr, &dvalue) != TCL_OK) {
+#ifdef ACCEPT_NAN
+		    if (objPtr->typePtr == &tclDoubleType) {
+			dValue = objPtr->internalRep.doubleValue;
+		    } else
+#endif
+		    {
+			Tcl_DecrRefCount(objPtr);
 			goto done;
 		    }
-
-		    /*
-		     * We got a bad exponent ('e' and maybe a sign).
-		     */
-
-		    end--;
-		    string--;
-		    if (*end != 'e' && *end != 'E') {
-			end--;
-			string--;
-		    }
 		}
-
-		/*
-		 * Scan the value from the temporary buffer.
-		 */
-
-		if (!(flags & SCAN_SUPPRESS)) {
-		    double dvalue;
-		    *end = '\0';
-		    dvalue = strtod(buf, NULL);
-		    objPtr = Tcl_NewDoubleObj(dvalue);
-		    Tcl_IncrRefCount(objPtr);
-		    objs[objIndex++] = objPtr;
-		}
-		break;
+		Tcl_SetDoubleObj(objPtr, dvalue);
+		objs[objIndex++] = objPtr;
+		string = end;
+	    }
 	}
 	nconversions++;
     }
 
-    done:
+  done:
     result = 0;
     code = TCL_OK;
 
     if (numVars) {
 	/*
-	 * In this case, variables were specified (classic scan)
+	 * In this case, variables were specified (classic scan).
 	 */
+
 	for (i = 0; i < totalVars; i++) {
-	    if (objs[i] != NULL) {
-		Tcl_Obj *tmpPtr;
-		
-		result++;
-		tmpPtr = Tcl_ObjSetVar2(interp, objv[i+3], NULL, objs[i], 0);
-		Tcl_DecrRefCount(objs[i]);
-		if (tmpPtr == NULL) {
-		    Tcl_AppendStringsToObj(Tcl_GetObjResult(interp),
-			    "couldn't set variable \"",
-			    Tcl_GetString(objv[i+3]), "\"", (char *) NULL);
-		    code = TCL_ERROR;
-		}
+	    if (objs[i] == NULL) {
+		continue;
 	    }
+	    result++;
+	    if (Tcl_ObjSetVar2(interp, objv[i+3], NULL, objs[i], 0) == NULL) {
+		Tcl_AppendResult(interp, "couldn't set variable \"",
+			TclGetString(objv[i+3]), "\"", NULL);
+		code = TCL_ERROR;
+	    }
+	    Tcl_DecrRefCount(objs[i]);
 	}
     } else {
 	/*
 	 * Here no vars were specified, we want a list returned (inline scan)
 	 */
+
 	objPtr = Tcl_NewObj();
 	for (i = 0; i < totalVars; i++) {
 	    if (objs[i] != NULL) {
@@ -1192,9 +1008,10 @@ Tcl_ScanObjCmd(dummy, interp, objc, objv)
 		Tcl_DecrRefCount(objs[i]);
 	    } else {
 		/*
-		 * More %-specifiers than matching chars, so we
-		 * just spit out empty strings for these
+		 * More %-specifiers than matching chars, so we just spit out
+		 * empty strings for these.
 		 */
+
 		Tcl_ListObjAppendElement(NULL, objPtr, Tcl_NewObj());
 	    }
 	}
@@ -1220,3 +1037,11 @@ Tcl_ScanObjCmd(dummy, interp, objc, objv)
     }
     return code;
 }
+
+/*
+ * Local Variables:
+ * mode: c
+ * c-basic-offset: 4
+ * fill-column: 78
+ * End:
+ */

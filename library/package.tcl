@@ -3,7 +3,7 @@
 # utility procs formerly in init.tcl which can be loaded on demand
 # for package management.
 #
-# RCS: @(#) $Id: package.tcl,v 1.23.2.4 2006/09/22 01:26:24 andreas_kupries Exp $
+# RCS: @(#) $Id: package.tcl,v 1.35.4.1 2008/07/03 17:22:59 dgp Exp $
 #
 # Copyright (c) 1991-1993 The Regents of the University of California.
 # Copyright (c) 1994-1998 Sun Microsystems, Inc.
@@ -12,11 +12,9 @@
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
 
-# Create the package namespace
-namespace eval ::pkg {
-}
+namespace eval tcl::Pkg {}
 
-# pkg_compareExtension --
+# ::tcl::Pkg::CompareExtension --
 #
 #  Used internally by pkg_mkIndex to compare the extension of a file to
 #  a given extension. On Windows, it uses a case-insensitive comparison
@@ -31,7 +29,7 @@ namespace eval ::pkg {
 # Results:
 #  Returns 1 if the extension matches, 0 otherwise
 
-proc pkg_compareExtension { fileName {ext {}} } {
+proc tcl::Pkg::CompareExtension { fileName {ext {}} } {
     global tcl_platform
     if {$ext eq ""} {set ext [info sharedlibextension]}
     if {$tcl_platform(platform) eq "windows"} {
@@ -49,7 +47,7 @@ proc pkg_compareExtension { fileName {ext {}} } {
 	    # The current extension does not match; if it is not a numeric
 	    # value, quit, as we are only looking to ignore version number
 	    # extensions.  Otherwise we might return 1 in this case:
-	    #		pkg_compareExtension foo.so.bar .so
+	    #		tcl::Pkg::CompareExtension foo.so.bar .so
 	    # which should not match.
 
 	    if { ![string is integer -strict [string range $currExt 1 end]] } {
@@ -86,7 +84,6 @@ proc pkg_compareExtension { fileName {ext {}} } {
 #			dir.
 
 proc pkg_mkIndex {args} {
-    global errorCode errorInfo
     set usage {"pkg_mkIndex ?-direct? ?-lazy? ?-load pattern? ?-verbose? ?--? dir ?pattern ...?"};
 
     set argCount [llength $args]
@@ -137,13 +134,10 @@ proc pkg_mkIndex {args} {
 	set patternList [list "*.tcl" "*[info sharedlibextension]"]
     }
 
-    set oldDir [pwd]
-    cd $dir
-
-    if {[catch {eval [linsert $patternList 0 glob --]} fileList]} {
-	global errorCode errorInfo
-	cd $oldDir
-	return -code error -errorcode $errorCode -errorinfo $errorInfo $fileList
+    if {[catch {
+	    glob -directory $dir -tails -types {r f} -- {*}$patternList
+    } fileList o]} {
+	return -options $o $fileList
     }
     foreach file $fileList {
 	# For each file, figure out what commands and packages it provides.
@@ -155,11 +149,6 @@ proc pkg_mkIndex {args} {
 	    continue
 	}
 
-	# Changed back to the original directory before initializing the
-	# slave in case TCL_LIBRARY is a relative path (e.g. in the test
-	# suite). 
-
-	cd $oldDir
 	set c [interp create]
 
 	# Load into the child any packages currently loaded in the parent
@@ -196,7 +185,6 @@ proc pkg_mkIndex {args} {
 		$c eval [list wm withdraw .]
 	    }
 	}
-	cd $dir
 
 	$c eval {
 	    # Stub out the package command so packages can
@@ -206,7 +194,7 @@ proc pkg_mkIndex {args} {
 	    proc package {what args} {
 		switch -- $what {
 		    require { return ; # ignore transitive requires }
-		    default { uplevel 1 [linsert $args 0 __package_orig $what] }
+		    default { __package_orig $what {*}$args }
 		}
 	    }
 	    proc tclPkgUnknown args {}
@@ -226,6 +214,7 @@ proc pkg_mkIndex {args} {
 	    # to generate a pkgIndex.tcl file for the ::tcl namespace.
 
 	    namespace eval ::tcl {
+		variable dir		;# Current directory being processed
 		variable file		;# Current file being processed
 		variable direct		;# -direct flag value
 		variable x		;# Loop variable
@@ -239,6 +228,7 @@ proc pkg_mkIndex {args} {
 	    }
 	}
 
+	$c eval [list set ::tcl::dir $dir]
 	$c eval [list set ::tcl::file $file]
 	$c eval [list set ::tcl::direct $direct]
 
@@ -246,7 +236,8 @@ proc pkg_mkIndex {args} {
 	# just deleted the unknown procedure.  This doesn't handle
 	# procedures with default arguments.
 
-	foreach p {pkg_compareExtension} {
+	foreach p {::tcl::Pkg::CompareExtension} {
+	    $c eval [list namespace eval [namespace qualifiers $p] {}]
 	    $c eval [list proc $p [info args $p] [info body $p]]
 	}
 
@@ -261,8 +252,7 @@ proc pkg_mkIndex {args} {
 		proc ::tcl::GetAllNamespaces {{root ::}} {
 		    set list $root
 		    foreach ns [namespace children $root] {
-			eval [linsert [::tcl::GetAllNamespaces $ns] 0 \
-				lappend list]
+			lappend list {*}[::tcl::GetAllNamespaces $ns]
 		    }
 		    return $list
 		}
@@ -285,7 +275,7 @@ proc pkg_mkIndex {args} {
 		# on some systems (like SunOS) the loader will abort the
 		# whole application when it gets an error.
 
-		if {[pkg_compareExtension $::tcl::file [info sharedlibextension]]} {
+		if {[::tcl::Pkg::CompareExtension $::tcl::file [info sharedlibextension]]} {
 		    # The "file join ." command below is necessary.
 		    # Without it, if the file name has no \'s and we're
 		    # on UNIX, the load command will invoke the
@@ -293,11 +283,11 @@ proc pkg_mkIndex {args} {
 		    # the wrong file to be used.
 
 		    set ::tcl::debug loading
-		    load [file join . $::tcl::file]
+		    load [file join $::tcl::dir $::tcl::file]
 		    set ::tcl::type load
 		} else {
 		    set ::tcl::debug sourcing
-		    source $::tcl::file
+		    source [file join $::tcl::dir $::tcl::file]
 		    set ::tcl::type source
 		}
 
@@ -404,7 +394,7 @@ proc pkg_mkIndex {args} {
 	foreach {name version} $pkg {
 	    break
 	}
-	lappend cmd ::pkg::create -name $name -version $version
+	lappend cmd ::tcl::Pkg::Create -name $name -version $version
 	foreach spec $files($pkg) {
 	    foreach {file type procs} $spec {
 		if { $direct } {
@@ -416,10 +406,9 @@ proc pkg_mkIndex {args} {
 	append index "\n[eval $cmd]"
     }
 
-    set f [open pkgIndex.tcl w]
+    set f [open [file join $dir pkgIndex.tcl] w]
     puts $f $index
     close $f
-    cd $oldDir
 }
 
 # tclPkgSetup --
@@ -462,8 +451,7 @@ proc tclPkgSetup {dir pkg version files} {
 # It is invoked when a package that's needed can't be found.  It scans
 # the auto_path directories and their immediate children looking for
 # pkgIndex.tcl files and sources any such files that are found to setup
-# the package database.  (On the Macintosh we also search for pkgIndex
-# TEXT resources in all files.)  As it searches, it will recognize changes
+# the package database. As it searches, it will recognize changes
 # to the auto_path and scan any new directories.
 #
 # Arguments:
@@ -471,12 +459,7 @@ proc tclPkgSetup {dir pkg version files} {
 # version -		Version of desired package.  Not used.
 # exact -		Either "-exact" or omitted.  Not used.
 
-
-proc tclPkgUnknown [expr {
-			  [info exists tcl_platform(tip,268)]
-			  ? "name args"
-			  : "name version {exact {}}"
-		      }] {
+proc tclPkgUnknown {name args} {
     global auto_path env
 
     if {![info exists auto_path]} {
@@ -502,8 +485,15 @@ proc tclPkgUnknown [expr {
 	    foreach file [glob -directory $dir -join -nocomplain \
 		    * pkgIndex.tcl] {
 		set dir [file dirname $file]
-		if {![info exists procdDirs($dir)] && [file readable $file]} {
-		    if {[catch {source $file} msg]} {
+		if {![info exists procdDirs($dir)]} {
+		    set code [catch {source $file} msg opt]
+		    if {$code == 1 &&
+			    [lindex [dict get $opt -errorcode] 0] eq "POSIX" &&
+			    [lindex [dict get $opt -errorcode] 1] eq "EACCES"} {
+			# $file was not readable; silently ignore
+			continue
+		    }
+		    if {$code} {
 			tclLog "error reading package index file $file: $msg"
 		    } else {
 			set procdDirs($dir) 1
@@ -514,10 +504,16 @@ proc tclPkgUnknown [expr {
 	set dir [lindex $use_path end]
 	if {![info exists procdDirs($dir)]} {
 	    set file [file join $dir pkgIndex.tcl]
-	    # safe interps usually don't have "file readable", 
-	    # nor stderr channel
-	    if {([interp issafe] || [file readable $file])} {
-		if {[catch {source $file} msg] && ![interp issafe]}  {
+	    # safe interps usually don't have "file exists", 
+	    if {([interp issafe] || [file exists $file])} {
+		set code [catch {source $file} msg opt]
+		if {$code == 1 &&
+			[lindex [dict get $opt -errorcode] 0] eq "POSIX" &&
+			[lindex [dict get $opt -errorcode] 1] eq "EACCES"} {
+		    # $file was not readable; silently ignore
+		    continue
+		}
+		if {$code}  {
 		    tclLog "error reading package index file $file: $msg"
 		} else {
 		    set procdDirs($dir) 1
@@ -563,101 +559,6 @@ proc tclPkgUnknown [expr {
 # This procedure extends the "package unknown" function for MacOSX.
 # It scans the Resources/Scripts directories of the immediate children
 # of the auto_path directories for pkgIndex files.
-# Only installed in interps that are not safe so we don't check
-# for [interp issafe] as in tclPkgUnknown.
-#
-# Arguments:
-# original -		original [package unknown] procedure
-# name -		Name of desired package.  Not used.
-#ifndef TCL_TIP268
-# version -		Version of desired package.  Not used.
-# exact -		Either "-exact" or omitted.  Not used.
-#else
-# args -		List of requirements. Not used.
-#endif
-
-if {[info exists tcl_platform(tip,268)]} {
-    proc tcl::MacOSXPkgUnknown {original name args} {
-	#  First do the cross-platform default search
-	uplevel 1 $original [linsert $args 0 $name]
-
-	# Now do MacOSX specific searching
-	global auto_path
-
-	if {![info exists auto_path]} {
-	    return
-	}
-	# Cache the auto_path, because it may change while we run through
-	# the first set of pkgIndex.tcl files
-	set old_path [set use_path $auto_path]
-	while {[llength $use_path]} {
-	    set dir [lindex $use_path end]
-	    # get the pkgIndex files out of the subdirectories
-	    foreach file [glob -directory $dir -join -nocomplain \
-			      * Resources Scripts pkgIndex.tcl] {
-		set dir [file dirname $file]
-		if {[file readable $file] && ![info exists procdDirs($dir)]} {
-		    if {[catch {source $file} msg]} {
-			tclLog "error reading package index file $file: $msg"
-		    } else {
-			set procdDirs($dir) 1
-		    }
-		}
-	    }
-	    set use_path [lrange $use_path 0 end-1]
-	    if {$old_path ne $auto_path} {
-		foreach dir $auto_path {
-		    lappend use_path $dir
-		}
-		set old_path $auto_path
-	    }
-	}
-    }
-} else {
-    proc tcl::MacOSXPkgUnknown {original name version {exact {}}} {
-
-	#  First do the cross-platform default search
-	uplevel 1 $original [list $name $version $exact]
-
-	# Now do MacOSX specific searching
-	global auto_path
-
-	if {![info exists auto_path]} {
-	    return
-	}
-	# Cache the auto_path, because it may change while we run through
-	# the first set of pkgIndex.tcl files
-	set old_path [set use_path $auto_path]
-	while {[llength $use_path]} {
-	    set dir [lindex $use_path end]
-	    # get the pkgIndex files out of the subdirectories
-	    foreach file [glob -directory $dir -join -nocomplain \
-			      * Resources Scripts pkgIndex.tcl] {
-		set dir [file dirname $file]
-		if {[file readable $file] && ![info exists procdDirs($dir)]} {
-		    if {[catch {source $file} msg]} {
-			tclLog "error reading package index file $file: $msg"
-		    } else {
-			set procdDirs($dir) 1
-		    }
-		}
-	    }
-	    set use_path [lrange $use_path 0 end-1]
-	    if {$old_path ne $auto_path} {
-		foreach dir $auto_path {
-		    lappend use_path $dir
-		}
-		set old_path $auto_path
-	    }
-	}
-    }
-}
-
-# tcl::MacPkgUnknown --
-# This procedure extends the "package unknown" function for Mac.
-# It searches for pkgIndex TEXT resources in all files
-# Only installed in interps that are not safe so we don't check
-# for [interp issafe] as in tclPkgUnknown.
 #
 # Arguments:
 # original -		original [package unknown] procedure
@@ -665,12 +566,12 @@ if {[info exists tcl_platform(tip,268)]} {
 # version -		Version of desired package.  Not used.
 # exact -		Either "-exact" or omitted.  Not used.
 
-proc tcl::MacPkgUnknown {original name version {exact {}}} {
+proc tcl::MacOSXPkgUnknown {original name args} {
 
     #  First do the cross-platform default search
-    uplevel 1 $original [list $name $version $exact]
+    uplevel 1 $original [linsert $args 0 $name]
 
-    # Now do Mac specific searching
+    # Now do MacOSX specific searching
     global auto_path
 
     if {![info exists auto_path]} {
@@ -680,40 +581,75 @@ proc tcl::MacPkgUnknown {original name version {exact {}}} {
     # the first set of pkgIndex.tcl files
     set old_path [set use_path $auto_path]
     while {[llength $use_path]} {
-	# We look for pkgIndex TEXT resources in the resource fork of shared libraries
 	set dir [lindex $use_path end]
-	foreach x [concat [list $dir] [glob -directory $dir -nocomplain *] ] {
-	    if {[file isdirectory $x] && ![info exists procdDirs($x)]} {
-		set dir $x
-		foreach x [glob -directory $dir -nocomplain *.shlb] {
-		    if {[file isfile $x]} {
-			set res [resource open $x]
-			foreach y [resource list TEXT $res] {
-			    if {$y eq "pkgIndex"} {source -rsrc pkgIndex}
-			}
-			catch {resource close $res}
-		    }
+
+	# Make sure we only scan each directory one time.
+	if {[info exists tclSeenPath($dir)]} {
+	    set use_path [lrange $use_path 0 end-1]
+	    continue
+	}
+	set tclSeenPath($dir) 1
+
+	# get the pkgIndex files out of the subdirectories
+	foreach file [glob -directory $dir -join -nocomplain \
+		* Resources Scripts pkgIndex.tcl] {
+	    set dir [file dirname $file]
+	    if {![info exists procdDirs($dir)]} {
+		set code [catch {source $file} msg opt]
+		if {$code == 1 &&
+			[lindex [dict get $opt -errorcode] 0] eq "POSIX" &&
+			[lindex [dict get $opt -errorcode] 1] eq "EACCES"} {
+		    # $file was not readable; silently ignore
+		    continue
 		}
-		set procdDirs($dir) 1
+		if {$code} {
+		    tclLog "error reading package index file $file: $msg"
+		} else {
+		    set procdDirs($dir) 1
+		}
 	    }
 	}
 	set use_path [lrange $use_path 0 end-1]
-	if {$old_path ne $auto_path} {
-	    foreach dir $auto_path {
+
+	# Check whether any of the index scripts we [source]d above
+	# set a new value for $::auto_path.  If so, then find any
+	# new directories on the $::auto_path, and lappend them to
+	# the $use_path we are working from.  This gives index scripts
+	# the (arguably unwise) power to expand the index script search
+	# path while the search is in progress.
+	set index 0
+	if {[llength $old_path] == [llength $auto_path]} {
+	    foreach dir $auto_path old $old_path {
+		if {$dir ne $old} {
+		    # This entry in $::auto_path has changed.
+		    break
+		}
+		incr index
+	    }
+	}
+
+	# $index now points to the first element of $auto_path that
+	# has changed, or the beginning if $auto_path has changed length
+	# Scan the new elements of $auto_path for directories to add to
+	# $use_path.  Don't add directories we've already seen, or ones
+	# already on the $use_path.
+	foreach dir [lrange $auto_path $index end] {
+	    if {![info exists tclSeenPath($dir)] 
+		    && ([lsearch -exact $use_path $dir] == -1) } {
 		lappend use_path $dir
 	    }
-	    set old_path $auto_path
 	}
+	set old_path $auto_path
     }
 }
 
-# ::pkg::create --
+# ::tcl::Pkg::Create --
 #
 #	Given a package specification generate a "package ifneeded" statement
 #	for the package, suitable for inclusion in a pkgIndex.tcl file.
 #
 # Arguments:
-#	args		arguments used by the create function:
+#	args		arguments used by the Create function:
 #			-name		packageName
 #			-version	packageVersion
 #			-load		{filename ?{procs}?}
@@ -733,7 +669,7 @@ proc tcl::MacPkgUnknown {original name version {exact {}}} {
 # Results:
 #	An appropriate "package ifneeded" statement for the package.
 
-proc ::pkg::create {args} {
+proc ::tcl::Pkg::Create {args} {
     append err(usage) "[lindex [info level 0] 0] "
     append err(usage) "-name packageName -version packageVersion"
     append err(usage) "?-load {filename ?{procs}?}? ... "
@@ -826,3 +762,4 @@ proc ::pkg::create {args} {
     return $cmdline
 }
 
+interp alias {} ::pkg::create {} ::tcl::Pkg::Create 

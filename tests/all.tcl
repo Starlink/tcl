@@ -10,16 +10,10 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 # 
-# RCS: @(#) $Id: all.tcl,v 1.16 2002/04/10 19:57:15 hobbs Exp $
+# RCS: @(#) $Id: all.tcl,v 1.19 2006/11/03 00:34:52 hobbs Exp $
 
-set tcltestVersion [package require tcltest]
-namespace import -force tcltest::*
-
-if {$tcl_platform(platform) == "macintosh"} {
-	tcltest::singleProcess 1
-}
-
-tcltest::testsDirectory [file dir [info script]]
-tcltest::runAllTests
-
-return
+package require Tcl 8.5
+package require tcltest 2.2
+namespace import tcltest::*
+configure {*}$argv -testdir [file dir [info script]]
+runAllTests

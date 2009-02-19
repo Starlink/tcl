@@ -1,16 +1,16 @@
-'\"
-'\" Copyright (c) 1993 The Regents of the University of California.
-'\" Copyright (c) 1994-1996 Sun Microsystems, Inc.
-'\"
-'\" See the file "license.terms" for information on usage and redistribution
-'\" of this file, and for a DISCLAIMER OF ALL WARRANTIES.
-'\" 
-'\" RCS: @(#) $Id: string.n,v 1.17.2.4 2006/12/14 14:24:22 dkf Exp $
-'\" 
+.\"
+.\" Copyright (c) 1993 The Regents of the University of California.
+.\" Copyright (c) 1994-1996 Sun Microsystems, Inc.
+.\"
+.\" See the file "license.terms" for information on usage and redistribution
+.\" of this file, and for a DISCLAIMER OF ALL WARRANTIES.
+.\" 
+.\" RCS: @(#) $Id: string.n,v 1.43 2007/12/13 15:22:33 dgp Exp $
+.\" 
 .so man.macros
 .TH string n 8.1 Tcl "Tcl Built-In Commands"
 .BS
-'\" Note:  do not modify the .SH NAME line immediately below!
+.\" Note:  do not modify the .SH NAME line immediately below!
 .SH NAME
 string \- Manipulate strings
 .SH SYNOPSIS
@@ -41,7 +41,7 @@ first \fIlength\fR characters are used in the comparison.  If
 \fB\-length\fR is negative, it is ignored.  If \fB\-nocase\fR is
 specified, then the strings are compared in a case-insensitive manner.
 .TP
-\fBstring equal\fR ?\fB\-nocase\fR? ?\fB-length int\fR? \fIstring1 string2\fR
+\fBstring equal\fR ?\fB\-nocase\fR? ?\fB\-length int\fR? \fIstring1 string2\fR
 Perform a character-by-character comparison of strings \fIstring1\fR
 and \fIstring2\fR.  Returns 1 if \fIstring1\fR and \fIstring2\fR are
 identical, or 0 when not.  If \fB\-length\fR is specified, then only
@@ -49,13 +49,13 @@ the first \fIlength\fR characters are used in the comparison.  If
 \fB\-length\fR is negative, it is ignored.  If \fB\-nocase\fR is
 specified, then the strings are compared in a case-insensitive manner.
 .TP
-\fBstring first \fIstring1 string2\fR ?\fIstartIndex\fR?
-Search \fIstring2\fR for a sequence of characters that exactly match
-the characters in \fIstring1\fR.  If found, return the index of the
-first character in the first such match within \fIstring2\fR.  If not
+\fBstring first \fIneedleString haystackString\fR ?\fIstartIndex\fR?
+Search \fIhaystackString\fR for a sequence of characters that exactly match
+the characters in \fIneedleString\fR.  If found, return the index of the
+first character in the first such match within \fIhaystackString\fR.  If not
 found, return \-1.  If \fIstartIndex\fR is specified (in any of the
 forms accepted by the \fBindex\fR method), then the search is
-constrained to start with the character in \fIstring2\fR specified by
+constrained to start with the character in \fIhaystackString\fR specified by
 the index.  For example,
 .RS
 .CS
@@ -72,23 +72,61 @@ will return \fB\-1\fR.
 Returns the \fIcharIndex\fR'th character of the \fIstring\fR argument.
 A \fIcharIndex\fR of 0 corresponds to the first character of the
 string.  \fIcharIndex\fR may be specified as follows:
+.VS 8.5
 .RS
 .IP \fIinteger\fR 10
-The char specified at this integral index.
+For any index value that passes \fBstring is integer -strict\fR,
+the char specified at this integral index
+(e.g. \fB2\fR would refer to the
+.QW c
+in
+.QW abcd ).
 .IP \fBend\fR 10
-The last char of the string.
-.IP \fBend\-\fIinteger\fR 10
-The last char of the string minus the specified integer offset
-(e.g. \fBend\-1\fR would refer to the "c" in "abcd").
+The last char of the string
+(e.g. \fBend\fR would refer to the
+.QW d
+in
+.QW abcd ).
+.IP \fBend\fR\-\fIN\fR 10
+The last char of the string minus the specified integer offset \fIN\fR
+(e.g. \fBend\fR\-1 would refer to the
+.QW c
+in
+.QW abcd ).
+.IP \fBend\fR+\fIN\fR 10
+The last char of the string plus the specified integer offset \fIN\fR
+(e.g. \fBend\fR+\-1 would refer to the
+.QW c
+in
+.QW abcd ).
+.IP \fIM\fR+\fIN\fR 10
+The char specified at the integral index that is the sum of 
+integer values \fIM\fR and \fIN\fR
+(e.g. \fB1+1\fR would refer to the
+.QW c
+in
+.QW abcd ).
+.IP \fIM\fR\-\fIN\fR 10
+The char specified at the integral index that is the difference of 
+integer values \fIM\fR and \fIN\fR
+(e.g. \fB2\-1\fR would refer to the
+.QW b
+in
+.QW abcd ).
+.PP
+In the specifications above, the integer value \fIM\fR contains no
+trailing whitespace and the integer value \fIN\fR contains no
+leading whitespace.
 .PP
 If \fIcharIndex\fR is less than 0 or greater than or equal to the
-length of the string then an empty string is returned.
+length of the string then this command returns an empty string.
 .RE
+.VE
 .TP
 \fBstring is \fIclass\fR ?\fB\-strict\fR? ?\fB\-failindex \fIvarname\fR? \fIstring\fR
 Returns 1 if \fIstring\fR is a valid member of the specified character
 class, otherwise returns 0.  If \fB\-strict\fR is specified, then an
-empty string returns 0, otherwise and empty string will return 1 on
+empty string returns 0, otherwise an empty string will return 1 on
 any class.  If \fB\-failindex\fR is specified, then if the function
 returns 0, the index in the string where the class was no longer valid
 will be stored in the variable named \fIvarname\fR.  The \fIvarname\fR
@@ -100,7 +138,7 @@ Any Unicode alphabet or digit character.
 .IP \fBalpha\fR 12
 Any Unicode alphabet character.
 .IP \fBascii\fR 12
-Any character with a value less than \\u0080 (those that are in the
+Any character with a value less than \eu0080 (those that are in the
 7\-bit ascii range).
 .IP \fBboolean\fR 12
 Any of the forms allowed to \fBTcl_GetBoolean\fR.
@@ -119,9 +157,15 @@ false.
 .IP \fBgraph\fR 12
 Any Unicode printing character, except space.
 .IP \fBinteger\fR 12
-Any of the valid forms for an ordinary integer in Tcl, with optional
-surrounding whitespace.  In case of under/overflow in the value, 0 is
-returned and the \fIvarname\fR will contain \-1.
+Any of the valid string formats for a 32-bit integer value in Tcl,
+with optional surrounding whitespace.  In case of under/overflow in
+the value, 0 is returned and the \fIvarname\fR will contain \-1.
+.IP \fBlist\fR 12
+Any proper list structure, with optional surrounding whitespace. In
+case of improper list structure, 0 is returned and the \fIvarname\fR
+will contain the index of the
+.QW element
+where the list parsing fails, or \-1 if this cannot be determined.
 .IP \fBlower\fR 12
 Any Unicode lower case alphabet character.
 .IP \fBprint\fR 12
@@ -135,6 +179,12 @@ Any of the forms allowed to \fBTcl_GetBoolean\fR where the value is
 true.
 .IP \fBupper\fR 12
 Any upper case alphabet character in the Unicode character set.
+.VS 8.5
+.IP \fBwideinteger\fR 12
+Any of the valid forms for a wide integer in Tcl, with optional
+surrounding whitespace.  In case of under/overflow in the value, 0 is
+returned and the \fIvarname\fR will contain \-1.
+.VE 8.5
 .IP \fBwordchar\fR 12
 Any Unicode word character.  That is any alphanumeric character, and
 any Unicode connector punctuation characters (e.g. underscore).
@@ -146,13 +196,13 @@ function will return 0, then the \fIvarname\fR will always be set to
 0, due to the varied nature of a valid boolean value.
 .RE
 .TP
-\fBstring last \fIstring1 string2\fR ?\fIlastIndex\fR?
-Search \fIstring2\fR for a sequence of characters that exactly match
-the characters in \fIstring1\fR.  If found, return the index of the
-first character in the last such match within \fIstring2\fR.  If there
+\fBstring last \fIneedleString haystackString\fR ?\fIlastIndex\fR?
+Search \fIhaystackString\fR for a sequence of characters that exactly match
+the characters in \fIneedleString\fR.  If found, return the index of the
+first character in the last such match within \fIhaystackString\fR.  If there
 is no match, then return \-1.  If \fIlastIndex\fR is specified (in any
 of the forms accepted by the \fBindex\fR method), then only the
-characters in \fIstring2\fR at or before the specified \fIlastIndex\fR
+characters in \fIhaystackString\fR at or before the specified \fIlastIndex\fR
 will be considered by the search.  For example,
 .RS
 .CS
@@ -200,7 +250,7 @@ it will return the string \fB02c322c222c\fR.
 .TP
 \fBstring match\fR ?\fB\-nocase\fR? \fIpattern\fR \fIstring\fR
 See if \fIpattern\fR matches \fIstring\fR; return 1 if it does, 0 if
-it doesn't.  If \fB\-nocase\fR is specified, then the pattern attempts
+it does not.  If \fB\-nocase\fR is specified, then the pattern attempts
 to match against the string in a case insensitive manner.  For the two
 strings to match, their contents must be identical except that the
 following special sequences may appear in \fIpattern\fR:
@@ -215,10 +265,16 @@ Matches any character in the set given by \fIchars\fR.  If a sequence
 of the form \fIx\fB\-\fIy\fR appears in \fIchars\fR, then any
 character between \fIx\fR and \fIy\fR, inclusive, will match.  When
 used with \fB\-nocase\fR, the end points of the range are converted to
-lower case first.  Whereas {[A\-z]} matches '_' when matching
-case-sensitively ('_' falls between the 'Z' and 'a'), with
-\fB\-nocase\fR this is considered like {[A\-Za\-z]} (and probably what
-was meant in the first place).
+lower case first.  Whereas {[A\-z]} matches
+.QW _
+when matching case-sensitively (since
+.QW _
+falls between the
+.QW Z
+and
+.QW a ),
+with \fB\-nocase\fR this is considered like {[A\-Za\-z]} (and
+probably what was meant in the first place).
 .IP \fB\e\fIx\fR 10
 Matches the single character \fIx\fR.  This provides a way of avoiding
 the special interpretation of the characters \fB*?[]\e\fR in
@@ -251,6 +307,12 @@ and if \fIlast\fR is greater than or equal to the length of the string
 then it is treated as if it were \fBend\fR.  If \fIfirst\fR is greater
 than \fIlast\fR or the length of the initial string, or \fIlast\fR is
 less than 0, then the initial string is returned untouched.
+.VS 8.5
+.TP
+\fBstring reverse \fIstring\fR
+Returns a string that is the same length as \fIstring\fR but with its
+characters in the reverse order.
+.VE 8.5
 .TP
 \fBstring tolower \fIstring\fR ?\fIfirst\fR? ?\fIlast\fR?
 Returns a value equal to \fIstring\fR except that all upper (or title)
@@ -280,19 +342,19 @@ specified as for the \fBindex\fR method.
 .TP
 \fBstring trim \fIstring\fR ?\fIchars\fR?
 Returns a value equal to \fIstring\fR except that any leading or
-trailing characters from the set given by \fIchars\fR are removed.  If
+trailing characters present in the string given by \fIchars\fR are removed.  If
 \fIchars\fR is not specified then white space is removed (spaces,
 tabs, newlines, and carriage returns).
 .TP
 \fBstring trimleft \fIstring\fR ?\fIchars\fR?
 Returns a value equal to \fIstring\fR except that any leading
-characters from the set given by \fIchars\fR are removed.  If
+characters present in the string given by \fIchars\fR are removed.  If
 \fIchars\fR is not specified then white space is removed (spaces,
 tabs, newlines, and carriage returns).
 .TP
 \fBstring trimright \fIstring\fR ?\fIchars\fR?
 Returns a value equal to \fIstring\fR except that any trailing
-characters from the set given by \fIchars\fR are removed.  If
+characters present in the string given by \fIchars\fR are removed.  If
 \fIchars\fR is not specified then white space is removed (spaces,
 tabs, newlines, and carriage returns).
 .TP
@@ -327,4 +389,9 @@ if {$length == 0} {
 expr(n), list(n)
 
 .SH KEYWORDS
-case conversion, compare, index, match, pattern, string, word, equal, ctype
+case conversion, compare, index, match, pattern, string, word, equal,
+ctype, character, reverse
+
+.\" Local Variables:
+.\" mode: nroff
+.\" End:

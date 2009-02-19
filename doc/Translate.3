@@ -5,7 +5,7 @@
 '\" See the file "license.terms" for information on usage and redistribution
 '\" of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 '\" 
-'\" RCS: @(#) $Id: Translate.3,v 1.6 2002/02/08 02:52:54 dgp Exp $
+'\" RCS: @(#) $Id: Translate.3,v 1.13 2007/12/13 15:22:32 dgp Exp $
 '\" 
 .so man.macros
 .TH Tcl_TranslateFileName 3 8.1 Tcl "Tcl Library Procedures"
@@ -19,11 +19,12 @@ Tcl_TranslateFileName \- convert file name to native form and replace tilde with
 char *
 \fBTcl_TranslateFileName\fR(\fIinterp\fR, \fIname\fR, \fIbufferPtr\fR)
 .SH ARGUMENTS
-.AS Tcl_DString *bufferPtr
+.AS Tcl_DString *bufferPtr in/out
 .AP Tcl_Interp *interp in
 Interpreter in which to report an error, if any.
-.AP "CONST char" *name in
-File name, which may start with a ``~''.
+.AP "const char" *name in
+File name, which may start with a
+.QW ~ .
 .AP Tcl_DString *bufferPtr in/out
 If needed, this dynamic string is used to store the new file name.
 At the time of the call it should be uninitialized or free.  The
@@ -33,9 +34,18 @@ anything stored here.
 
 .SH DESCRIPTION
 .PP
-This utility procedure translates a file name to a form suitable for
-passing to the local operating system.  It converts network names into
-native form and does tilde substitution.
+This utility procedure translates a file name to a platform-specific form
+which, after being converted to the appropriate encoding, is suitable for
+passing to the local operating system.  In particular, it converts
+network names into native form and does tilde substitution.  
+.PP
+However, with the advent of the newer \fBTcl_FSGetNormalizedPath\fR and
+\fBTcl_GetNativePath\fR, there is no longer any need to use this
+procedure.  In particular, \fBTcl_GetNativePath\fR performs all the
+necessary translation and encoding conversion, is virtual-filesystem
+aware, and caches the native result for faster repeated calls.
+Finally \fBTcl_GetNativePath\fR does not require you to free anything
+afterwards.
 .PP
 If
 \fBTcl_TranslateFileName\fR has to do tilde substitution or translate
@@ -46,7 +56,7 @@ After \fBTcl_TranslateFileName\fR returns a non-NULL result, the caller must
 eventually invoke \fBTcl_DStringFree\fR to free any information
 placed in \fI*bufferPtr\fR.  The caller need not know whether or
 not \fBTcl_TranslateFileName\fR actually used the string;  \fBTcl_TranslateFileName\fR
-initializes \fI*bufferPtr\fR even if it doesn't use it, so the call to
+initializes \fI*bufferPtr\fR even if it does not use it, so the call to
 \fBTcl_DStringFree\fR will be safe in either case.
 .PP
 If an error occurs (e.g. because there was no user by the given

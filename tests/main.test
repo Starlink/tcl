@@ -1,6 +1,6 @@
 # This file contains a collection of tests for generic/tclMain.c.
 #
-# RCS: @(#) $Id: main.test,v 1.13.2.4 2006/09/04 21:36:55 dgp Exp $
+# RCS: @(#) $Id: main.test,v 1.22 2007/12/13 15:26:06 dgp Exp $
 
 if {[catch {package require tcltest 2.0.2}]} {
     puts stderr "Skipping tests in [info script]. tcltest 2.0.2 required."
@@ -8,15 +8,7 @@ if {[catch {package require tcltest 2.0.2}]} {
 }
 
 namespace eval ::tcl::test::main {
-
-    namespace import ::tcltest::test
-    namespace import ::tcltest::testConstraint
-    namespace import ::tcltest::interpreter
-    namespace import ::tcltest::cleanupTests
-    namespace import ::tcltest::makeFile
-    namespace import ::tcltest::removeFile
-    namespace import ::tcltest::temporaryDirectory
-    namespace import ::tcltest::workingDirectory
+    namespace import ::tcltest::*
 
     # Is [exec] defined?
     testConstraint exec [llength [info commands exec]]
@@ -138,6 +130,72 @@ namespace eval ::tcl::test::main {
 	removeFile \u20ac
     } -result [list [list [encoding convertfrom [encoding system] \
 	[encoding convertto [encoding system] \u20ac]]] {} 0]\n
+
+    test Tcl_Main-1.7 {
+	Tcl_Main: startup script - -encoding option
+    } -constraints {
+	stdio
+    } -setup {
+	set script [makeFile {} script]
+	file delete $script
+	set f [open $script w]
+	fconfigure $f -encoding utf-8
+	puts $f {puts [list $argv0 $argv $tcl_interactive]}
+	puts -nonewline $f {puts [string equal \u20ac }
+	puts $f "\u20ac]"
+	close $f
+	catch {set f [open "|[list [interpreter] -encoding utf-8 script]" r]}
+    } -body {
+	read $f
+    } -cleanup {
+	close $f
+	removeFile script
+    } -result [list script {} 0]\n1\n
+
+    test Tcl_Main-1.8 {
+	Tcl_Main: startup script - -encoding option - mismatched encodings
+    } -constraints {
+	stdio
+    } -setup {
+	set script [makeFile {} script]
+	file delete $script
+	set f [open $script w]
+	fconfigure $f -encoding utf-8
+	puts $f {puts [list $argv0 $argv $tcl_interactive]}
+	puts -nonewline $f {puts [string equal \u20ac }
+	puts $f "\u20ac]"
+	close $f
+	catch {set f [open "|[list [interpreter] -encoding ascii script]" r]}
+    } -body {
+	read $f
+    } -cleanup {
+	close $f
+	removeFile script
+    } -result [list script {} 0]\n0\n
+
+    test Tcl_Main-1.9 {
+	Tcl_Main: startup script - -encoding option - no abbrevation
+    } -constraints {
+	stdio
+    } -setup {
+	set script [makeFile {} script]
+	file delete $script
+	set f [open $script w]
+	fconfigure $f -encoding utf-8
+	puts $f {puts [list $argv0 $argv $tcl_interactive]}
+	puts -nonewline $f {puts [string equal \u20ac }
+	puts $f "\u20ac]"
+	close $f
+	catch {set f [open "|[list [interpreter] -enc utf-8 script]" r+]}
+    } -body {
+	type $f {
+	    puts $argv
+	}
+	list [catch {gets $f} line] $line
+    } -cleanup {
+	close $f
+	removeFile script
+    } -result {0 {-enc utf-8 script}}
 
     # Tests Tcl_Main-2.*: application-initialization procedure
 
@@ -500,24 +558,24 @@ namespace eval ::tcl::test::main {
 	\nExit MainLoop\nIn exit\neven 0\n"
 
     test Tcl_Main-4.5 {
-	Tcl_Main: Bug 1481986
+        Tcl_Main: Bug 1481986
     } -constraints {
-	exec Tcltest
+        exec Tcltest
     } -setup {
-	set rc [makeFile {
-		testsetmainloop
-		after 0 {puts "Event callback"}
-	} rc]
+        set rc [makeFile {
+                testsetmainloop
+                after 0 {puts "Event callback"}
+        } rc]
     } -body {
-	set f [open "|[list [interpreter] -appinitprocsetrcfile $rc]" w+]
-	after 1000
-	type $f {puts {Interactive output}
-	    exit
-	}
-	read $f
+        set f [open "|[list [interpreter] -appinitprocsetrcfile $rc]" w+]
+        after 1000
+        type $f {puts {Interactive output}
+            exit
+        }
+        read $f
     } -cleanup {
-	catch {close $f}
-	removeFile rc
+        catch {close $f}
+        removeFile rc
     } -result "Event callback\nInteractive output\n"
 
     # Tests Tcl_Main-5.*: interactive operations
@@ -570,8 +628,7 @@ namespace eval ::tcl::test::main {
 	after cancel $id
 	set wait
     } -cleanup {
-	if {[string equal timeout $wait]
-		&& [string equal unix $::tcl_platform(platform)]} {
+	if {[string equal timeout $wait] && [testConstraint unix]} {
 	    exec kill [pid $f]
 	}
 	close $f
@@ -594,8 +651,7 @@ namespace eval ::tcl::test::main {
 	after cancel $id
 	set wait
     } -cleanup {
-	if {[string equal timeout $wait]
-		&& [string equal unix $::tcl_platform(platform)]} {
+	if {[string equal timeout $wait] && [testConstraint unix]} {
 	    exec kill [pid $f]
 	}
 	close $f
@@ -762,6 +818,20 @@ namespace eval ::tcl::test::main {
 	close $f
 	file delete result
     } -result "Exit MainLoop\nIn exit\neven 0\n"
+
+    test Tcl_Main-5.13 {
+	Bug 1775878
+    } -constraints {
+	exec
+    } -setup {
+	catch {set f [open "|[list [interpreter]]" w+]}
+    } -body {
+	type $f "puts \\"
+	type $f return
+	list [catch {gets $f} line] $line
+    } -cleanup {
+	close $f
+    } -result [list 0 return]
 
     # Tests Tcl_Main-6.*: interactive operations with prompts
 
@@ -1145,6 +1215,21 @@ namespace eval ::tcl::test::main {
 	close $f
 	file delete result
     } -result "1\nExit MainLoop\n"
+
+    test Tcl_Main-8.13 {
+	Bug 1775878
+    } -constraints {
+	exec Tcltest
+    } -setup {
+	catch {set f [open "|[list [interpreter]]" w+]}
+    } -body {
+	exec [interpreter] << "testsetmainloop\nputs \\\npwd\ntestexitmainloop" >& result
+	set f [open result]
+	read $f
+    } -cleanup {
+	close $f
+	file delete result
+    } -result "pwd\nExit MainLoop\n"
 
     # Tests Tcl_Main-9.*: Prompt operations
 

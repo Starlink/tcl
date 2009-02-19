@@ -10,7 +10,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclIndexObj.c,v 1.16.2.1 2004/01/13 09:45:30 dkf Exp $
+ * RCS: @(#) $Id: tclIndexObj.c,v 1.16.2.5 2006/04/06 18:57:24 dgp Exp $
  */
 
 #include "tclInt.h"
@@ -171,7 +171,7 @@ Tcl_GetIndexFromObjStruct(interp, objPtr, tablePtr, offset, msg, flags,
     int flags;			/* 0 or TCL_EXACT */
     int *indexPtr;		/* Place to store resulting integer index. */
 {
-    int index, length, i, numAbbrev;
+    int index, i, numAbbrev;
     char *key, *p1;
     CONST char *p2;
     CONST char * CONST *entryPtr;
@@ -195,18 +195,10 @@ Tcl_GetIndexFromObjStruct(interp, objPtr, tablePtr, offset, msg, flags,
      * abbreviations unless TCL_EXACT is set in flags.
      */
 
-    key = Tcl_GetStringFromObj(objPtr, &length);
+    key = TclGetString(objPtr);
     index = -1;
     numAbbrev = 0;
 
-    /*
-     * The key should not be empty, otherwise it's not a match.
-     */
-    
-    if (key[0] == '\0') {
-	goto error;
-    }
-    
     /*
      * Scan the table looking for one of:
      *  - An exact match (always preferred)
@@ -235,9 +227,9 @@ Tcl_GetIndexFromObjStruct(interp, objPtr, tablePtr, offset, msg, flags,
 	}
     }
     /*
-     * Check if we were instructed to disallow abbreviations.
+     * Check if we were instructed to disallow abbreviations. 
      */
-    if ((flags & TCL_EXACT) || (numAbbrev != 1)) {
+    if ((flags & TCL_EXACT) || (key[0] == '\0') || (numAbbrev != 1)) {
 	goto error;
     }
 
@@ -274,8 +266,8 @@ Tcl_GetIndexFromObjStruct(interp, objPtr, tablePtr, offset, msg, flags,
 
 	TclNewObj(resultPtr);
 	Tcl_SetObjResult(interp, resultPtr);
-	Tcl_AppendStringsToObj(resultPtr,
-		(numAbbrev > 1) ? "ambiguous " : "bad ", msg, " \"",
+	Tcl_AppendStringsToObj(resultPtr, (numAbbrev > 1) &&
+		!(flags & TCL_EXACT) ? "ambiguous " : "bad ", msg, " \"",
 		key, "\": must be ", STRING_AT(tablePtr,offset,0), (char*)NULL);
 	for (entryPtr = NEXT_ENTRY(tablePtr, offset), count = 0;
 		*entryPtr != NULL;

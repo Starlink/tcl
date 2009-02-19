@@ -9,7 +9,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclWinPipe.c,v 1.33.2.13 2005/06/22 21:30:20 kennykb Exp $
+ * RCS: @(#) $Id: tclWinPipe.c,v 1.33.2.17 2006/03/14 20:36:39 andreas_kupries Exp $
  */
 
 #include "tclWinInt.h"
@@ -189,7 +189,6 @@ static void		PipeCheckProc(ClientData clientData, int flags);
 static int		PipeClose2Proc(ClientData instanceData,
 			    Tcl_Interp *interp, int flags);
 static int		PipeEventProc(Tcl_Event *evPtr, int flags);
-static void		PipeExitHandler(ClientData clientData);
 static int		PipeGetHandleProc(ClientData instanceData,
 			    int direction, ClientData *handlePtr);
 static void		PipeInit(void);
@@ -271,17 +270,16 @@ PipeInit()
 	tsdPtr = TCL_TSD_INIT(&dataKey);
 	tsdPtr->firstPipePtr = NULL;
 	Tcl_CreateEventSource(PipeSetupProc, PipeCheckProc, NULL);
-	Tcl_CreateThreadExitHandler(PipeExitHandler, NULL);
     }
 }
 
 /*
  *----------------------------------------------------------------------
  *
- * PipeExitHandler --
+ * TclpFinalizePipes --
  *
- *	This function is called to cleanup the pipe module before
- *	Tcl is unloaded.
+ *	This function is called from Tcl_FinalizeThread to finalize the 
+ *	platform specific pipe subsystem.
  *
  * Results:
  *	None.
@@ -292,36 +290,15 @@ PipeInit()
  *----------------------------------------------------------------------
  */
 
-static void
-PipeExitHandler(
-    ClientData clientData)	/* Old window proc */
-{
-    Tcl_DeleteEventSource(PipeSetupProc, PipeCheckProc, NULL);
-}
-
-/*
- *----------------------------------------------------------------------
- *
- * TclpFinalizePipes --
- *
- *	This function is called to cleanup the process list before
- *	Tcl is unloaded.
- *
- * Results:
- *	None.
- *
- * Side effects:
- *	Resets the process list.
- *
- *----------------------------------------------------------------------
- */
-
 void
 TclpFinalizePipes()
-{
-    Tcl_MutexLock(&pipeMutex);
-    initialized = 0;
-    Tcl_MutexUnlock(&pipeMutex);
+{    
+    ThreadSpecificData *tsdPtr;
+
+    tsdPtr = (ThreadSpecificData *)TclThreadDataKeyGet(&dataKey);
+    if (tsdPtr != NULL) {
+	Tcl_DeleteEventSource(PipeSetupProc, PipeCheckProc, NULL);
+    }
 }
 
 /*
@@ -670,7 +647,7 @@ TclpOpenFile(path, mode)
      * Seek to the end of file if we are writing.
      */
 
-    if (mode & O_WRONLY) {
+    if (mode & (O_WRONLY|O_APPEND)) {
 	SetFilePointer(handle, 0, NULL, FILE_END);
     }
 
@@ -907,6 +884,8 @@ TclpGetPid(
     Tcl_Pid pid)		/* The HANDLE of the child process. */
 {
     ProcInfo *infoPtr;
+
+    PipeInit();
 
     Tcl_MutexLock(&pipeMutex);
     for (infoPtr = procList; infoPtr != NULL; infoPtr = infoPtr->nextPtr) {
@@ -2502,7 +2481,7 @@ Tcl_WaitPid(
     int *statPtr,
     int options)
 {
-    ProcInfo *infoPtr, **prevPtrPtr;
+    ProcInfo *infoPtr = NULL, **prevPtrPtr;
     DWORD flags;
     Tcl_Pid result;
     DWORD ret, exitCode;
@@ -2519,7 +2498,13 @@ Tcl_WaitPid(
     }
 
     /*
-     * Find the process on the process list.
+     * Find the process and cut it from the process list.
+     * SF Tcl Bug  859820, Backport of its fix.
+     * SF Tcl Bug 1381436, asking for the backport.
+     *     
+     * [x] Cutting the infoPtr after the closehandle allows the
+     * pointer to become stale. We do it here, and compensate if the
+     * process was not done yet.
      */
 
     Tcl_MutexLock(&pipeMutex);
@@ -2527,6 +2512,7 @@ Tcl_WaitPid(
     for (infoPtr = procList; infoPtr != NULL;
 	    prevPtrPtr = &infoPtr->nextPtr, infoPtr = infoPtr->nextPtr) {
 	 if (infoPtr->hProcess == (HANDLE) pid) {
+	    *prevPtrPtr = infoPtr->nextPtr;
 	    break;
 	}
     }
@@ -2556,6 +2542,14 @@ Tcl_WaitPid(
     if (ret == WAIT_TIMEOUT) {
 	*statPtr = 0;
 	if (options & WNOHANG) {
+	    /*
+	     * Re-insert the cut infoPtr back on the list.
+	     * See [x] for explanation.
+	     */
+	    Tcl_MutexLock(&pipeMutex);
+	    infoPtr->nextPtr = procList;
+	    procList = infoPtr;
+	    Tcl_MutexUnlock(&pipeMutex);
 	    return 0;
 	} else {
 	    result = 0;
@@ -2576,12 +2570,12 @@ Tcl_WaitPid(
 		case EXCEPTION_FLT_UNDERFLOW:
 		case EXCEPTION_INT_DIVIDE_BY_ZERO:
 		case EXCEPTION_INT_OVERFLOW:
-		    *statPtr = SIGFPE;
+		    *statPtr = 0xC0000000 | SIGFPE;
 		    break;
 
 		case EXCEPTION_PRIV_INSTRUCTION:
 		case EXCEPTION_ILLEGAL_INSTRUCTION:
-		    *statPtr = SIGILL;
+		    *statPtr = 0xC0000000 | SIGILL;
 		    break;
 
 		case EXCEPTION_ACCESS_VIOLATION:
@@ -2592,37 +2586,32 @@ Tcl_WaitPid(
 		case EXCEPTION_INVALID_DISPOSITION:
 		case EXCEPTION_GUARD_PAGE:
 		case EXCEPTION_INVALID_HANDLE:
-		    *statPtr = SIGSEGV;
+		    *statPtr = 0xC0000000 | SIGSEGV;
 		    break;
 
 		case CONTROL_C_EXIT:
-		    *statPtr = SIGINT;
+		    *statPtr = 0xC0000000 | SIGINT;
 		    break;
 
 		default:
-		    *statPtr = SIGABRT;
+		    *statPtr = 0xC0000000 | SIGABRT;
 		    break;
 	    }
 	} else {
-	    /*
-	     * Non exception, normal, exit code.  Note that the exit code
-	     * is truncated to a byte range.
-	     */
-	    *statPtr = ((exitCode << 8) & 0xff00);
+	    *statPtr = exitCode;
 	}
 	result = pid;
     } else {
 	errno = ECHILD;
-        *statPtr = ECHILD;
+        *statPtr = 0xC0000000 | ECHILD;
 	result = (Tcl_Pid) -1;
     }
 
     /*
-     * Remove the process from the process list and close the process handle.
+     * Officially close the process handle.
      */
 
     CloseHandle(infoPtr->hProcess);
-    *prevPtrPtr = infoPtr->nextPtr;
     ckfree((char*)infoPtr);
 
     return result;

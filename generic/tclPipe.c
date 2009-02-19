@@ -10,7 +10,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclPipe.c,v 1.7.2.1 2004/07/02 23:37:31 hobbs Exp $
+ * RCS: @(#) $Id: tclPipe.c,v 1.7.2.5 2006/03/16 00:35:58 andreas_kupries Exp $
  */
 
 #include "tclInt.h"
@@ -135,11 +135,10 @@ FileForRedirect(interp, spec, atOK, arg, nextArg, flags, skipPtr, closePtr,
 	    *skipPtr = 2;
 	}
 	name = Tcl_TranslateFileName(interp, spec, &nameString);
-	if (name != NULL) {
-	    file = TclpOpenFile(name, flags);
-	} else {
-	    file = NULL;
+	if (name == NULL) {
+	    return NULL;
 	}
+	file = TclpOpenFile(name, flags);
 	Tcl_DStringFree(&nameString);
 	if (file == NULL) {
 	    Tcl_AppendResult(interp, "couldn't ",
@@ -508,7 +507,8 @@ TclCreatePipeline(interp, argc, argv, pidArrayPtr, inPipePtr,
     				 * closed when cleaning up. */
     int errorRelease = 0;
     CONST char *p;
-    int skip, lastBar, lastArg, i, j, atOK, flags, errorToOutput = 0;
+    CONST char *nextArg;
+    int skip, lastBar, lastArg, i, j, atOK, flags, needCmd, errorToOutput = 0;
     Tcl_DString execBuffer;
     TclFile pipeIn;
     TclFile curInFile, curOutFile, curErrFile;
@@ -546,6 +546,7 @@ TclCreatePipeline(interp, argc, argv, pidArrayPtr, inPipePtr,
 
     lastBar = -1;
     cmdCount = 1;
+    needCmd = 1;
     for (i = 0; i < argc; i++) {
 	errorToOutput = 0;
 	skip = 0;
@@ -565,6 +566,7 @@ TclCreatePipeline(interp, argc, argv, pidArrayPtr, inPipePtr,
 	    }
 	    lastBar = i;
 	    cmdCount++;
+	    needCmd = 1;
 	    break;
 
 	case '<':
@@ -581,7 +583,7 @@ TclCreatePipeline(interp, argc, argv, pidArrayPtr, inPipePtr,
 		inputLiteral = p + 1;
 		skip = 1;
 		if (*inputLiteral == '\0') {
-		    inputLiteral = argv[i + 1];
+		    inputLiteral = ((i + 1) == argc) ? NULL : argv[i + 1];
 		    if (inputLiteral == NULL) {
 			Tcl_AppendResult(interp, "can't specify \"", argv[i],
 				"\" as last word in command", (char *) NULL);
@@ -590,9 +592,10 @@ TclCreatePipeline(interp, argc, argv, pidArrayPtr, inPipePtr,
 		    skip = 2;
 		}
 	    } else {
+		nextArg = ((i + 1) == argc) ? NULL : argv[i + 1];
 		inputLiteral = NULL;
 		inputFile = FileForRedirect(interp, p, 1, argv[i], 
-			argv[i + 1], O_RDONLY, &skip, &inputClose, &inputRelease);
+			nextArg, O_RDONLY, &skip, &inputClose, &inputRelease);
 		if (inputFile == NULL) {
 		    goto error;
 		}
@@ -605,7 +608,13 @@ TclCreatePipeline(interp, argc, argv, pidArrayPtr, inPipePtr,
 	    if (*p == '>') {
 		p++;
 		atOK = 0;
-		flags = O_WRONLY | O_CREAT;
+
+		/*
+		 * Note that the O_APPEND flag only has an effect on POSIX
+		 * platforms. On Windows, we just have to carry on regardless.
+		 */
+
+		flags = O_WRONLY | O_CREAT | O_APPEND;
 	    }
 	    if (*p == '&') {
 		if (errorClose != 0) {
@@ -637,8 +646,9 @@ TclCreatePipeline(interp, argc, argv, pidArrayPtr, inPipePtr,
 		    TclpReleaseFile(outputFile);
 		}
 	    }
+	    nextArg = ((i + 1) == argc) ? NULL : argv[i + 1];
 	    outputFile = FileForRedirect(interp, p, atOK, argv[i], 
-		    argv[i + 1], flags, &skip, &outputClose, &outputRelease);
+		    nextArg, flags, &skip, &outputClose, &outputRelease);
 	    if (outputFile == NULL) {
 		goto error;
 	    }
@@ -690,13 +700,19 @@ TclCreatePipeline(interp, argc, argv, pidArrayPtr, inPipePtr,
 		errorToOutput = 2;
 		skip = 1;
 	    } else {
+		nextArg = ((i + 1) == argc) ? NULL : argv[i + 1];
 		errorFile = FileForRedirect(interp, p, atOK, argv[i], 
-			argv[i + 1], flags, &skip, &errorClose, &errorRelease);
+			nextArg, flags, &skip, &errorClose, &errorRelease);
 		if (errorFile == NULL) {
 		    goto error;
 		}
 	    }
 	    break;
+
+	default:
+	  /* Got a command word, not a redirection */
+	  needCmd = 0;
+	  break;
 	}
 
 	if (skip != 0) {
@@ -706,6 +722,15 @@ TclCreatePipeline(interp, argc, argv, pidArrayPtr, inPipePtr,
 	    argc -= skip;
 	    i -= 1;
 	}
+    }
+
+    if (needCmd) {
+        /* We had a bar followed only by redirections. */
+
+        Tcl_SetResult(interp,
+		      "illegal use of | or |& in command",
+		      TCL_STATIC);
+	goto error;
     }
 
     if (inputFile == NULL) {
@@ -858,7 +883,6 @@ TclCreatePipeline(interp, argc, argv, pidArrayPtr, inPipePtr,
 		}
 	    }
 	}
-	argv[lastArg] = NULL;
 
 	/*
 	 * If this is the last segment, use the specified outputFile.
@@ -866,9 +890,10 @@ TclCreatePipeline(interp, argc, argv, pidArrayPtr, inPipePtr,
 	 * curInFile for the next segment of the pipe.
 	 */
 
-	if (lastArg == argc) { 
+	if (lastArg == argc) {
 	    curOutFile = outputFile;
 	} else {
+	    argv[lastArg] = NULL;
 	    if (TclpCreatePipe(&pipeIn, &curOutFile) == 0) {
 		Tcl_AppendResult(interp, "couldn't create pipe: ",
 			Tcl_PosixError(interp), (char *) NULL);

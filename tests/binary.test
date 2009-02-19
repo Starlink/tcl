@@ -10,7 +10,7 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
-# RCS: @(#) $Id: binary.test,v 1.11.2.2 2003/12/02 09:31:54 dkf Exp $
+# RCS: @(#) $Id: binary.test,v 1.11.2.5 2008/03/24 03:05:07 patthoyts Exp $
 
 if {[lsearch [namespace children] ::tcltest] == -1} {
     package require tcltest
@@ -532,6 +532,10 @@ test binary-14.17 {Tcl_BinaryObjCmd: format} {nonPortable pcOnly} {
     set a {1.6 3.4}
     binary format d1 $a
 } \x9a\x99\x99\x99\x99\x99\xf9\x3f
+test binary-14.18 {FormatNumber: Bug 1116542} {
+    binary scan [binary format d 1.25] d w
+    set w
+} 1.25
 
 test binary-15.1 {Tcl_BinaryObjCmd: format} {
     list [catch {binary format ax*a "y" "z"} msg] $msg
@@ -545,6 +549,24 @@ test binary-15.3 {Tcl_BinaryObjCmd: format} {
 test binary-15.4 {Tcl_BinaryObjCmd: format} {
     binary format a*X3x3a* "foo" "z"
 } \x00\x00\x00z
+test binary-15.5 {Tcl_BinaryObjCmd: format - bug #1923966} {
+    binary format x0s 1
+} \x01\x00
+test binary-15.6 {Tcl_BinaryObjCmd: format - bug #1923966} {
+    binary format x0ss 1 1
+} \x01\x00\x01\x00
+test binary-15.5 {Tcl_BinaryObjCmd: format - bug #1923966} {
+    binary format x0s 1
+} \x01\x00
+test binary-15.6 {Tcl_BinaryObjCmd: format - bug #1923966} {
+    binary format x0ss 1 1
+} \x01\x00\x01\x00
+test binary-15.7 {Tcl_BinaryObjCmd: format - bug #1923966} {
+    binary format x1s 1
+} \x00\x01\x00
+test binary-15.8 {Tcl_BinaryObjCmd: format - bug #1923966} {
+    binary format x1ss 1 1
+} \x00\x01\x00\x01\x00
 
 test binary-16.1 {Tcl_BinaryObjCmd: format} {
     binary format a*X*a "foo" "z"
@@ -1456,9 +1478,9 @@ test binary-41.8 {ScanNumber: word alignment} {nonPortable pcOnly} {
 } {2 1 1.6}
 
 test binary-42.1 {Tcl_BinaryObjCmd: bad arguments} {} {
-    catch {binary ""} result
+    catch {binary ?} result
     set result
-} {bad option "": must be format or scan}
+} {bad option "?": must be format or scan}
 
 # Wide int (guaranteed at least 64-bit) handling
 test binary-43.1 {Tcl_BinaryObjCmd: format wide int} {} {

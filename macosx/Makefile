@@ -4,7 +4,12 @@
 #	uses the standard unix build system in tcl/unix (which can be used directly instead of this
 #	if you are not using the tk/macosx projects).
 #
-# RCS: @(#) $Id: Makefile,v 1.5.2.13 2005/06/03 08:53:12 das Exp $
+# Copyright (c) 2002-2007 Daniel A. Steffen <das@users.sourceforge.net>
+#
+# See the file "license.terms" for information on usage and redistribution of
+# this file, and for a DISCLAIMER OF ALL WARRANTIES.
+#
+# RCS: @(#) $Id: Makefile,v 1.5.2.18 2007/09/13 15:28:17 das Exp $
 #
 ########################################################################################################
 
@@ -18,8 +23,8 @@ BUILD_DIR		?= ${CURDIR}/../../build
 SYMROOT			?= ${BUILD_DIR}/${PROJECT}
 OBJROOT			?= ${SYMROOT}
 
-EXTRA_CONFIGURE_ARGS 	?= 
-EXTRA_MAKE_ARGS		?= 
+EXTRA_CONFIGURE_ARGS	?=
+EXTRA_MAKE_ARGS		?=
 
 INSTALL_PATH		?= /Library/Frameworks
 PREFIX			?= /usr/local
@@ -28,12 +33,12 @@ LIBDIR			?= ${INSTALL_PATH}
 MANDIR			?= ${PREFIX}/man
 
 # set to non-empty value to install manpages in addition to html help:
-INSTALL_MANPAGES 	?= 
+INSTALL_MANPAGES	?=
 
 #-------------------------------------------------------------------------------------------------------
 # meta targets
 
-meta 			:= all install embedded install-embedded clean distclean test
+meta			:= all install embedded install-embedded clean distclean test
 
 styles			:= develop deploy
 
@@ -75,7 +80,7 @@ deploy_make_args	:= BUILD_STYLE=Deployment INSTALL_TARGET=install-strip \
 embedded_make_args	:= EMBEDDED_BUILD=1
 install_make_args	:= INSTALL_BUILD=1
 
-${targets}: 
+${targets}:
 	${MAKE} ${action}${PROJECT} \
 	$(foreach s,${styles} embedded install,$(if $(findstring $s,$@),${${s}_make_args}))
 
@@ -89,7 +94,7 @@ UNIX_DIR		:= ${CURDIR}/../unix
 VERSION			:= $(shell awk -F= '/^TCL_VERSION/ {print $$2; nextfile}' ${UNIX_DIR}/configure.in)
 TCLSH			:= tclsh${VERSION}
 
-BUILD_TARGET		:= tclsh tcltest
+BUILD_TARGET		:= all tcltest
 INSTALL_TARGET		:= install
 
 export CPPROG		:= cp -p
@@ -108,7 +113,7 @@ endif
 MAKE_VARS		:= INSTALL_ROOT INSTALL_TARGETS VERSION GENERIC_FLAGS
 MAKE_ARGS_V		= $(foreach v,${MAKE_VARS},$v='${$v}')
 
-build-${PROJECT}:	target = ${TARGET}
+build-${PROJECT}:	target = ${BUILD_TARGET}
 install-${PROJECT}:	target = ${INSTALL_TARGET}
 clean-${PROJECT} distclean-${PROJECT} test-${PROJECT}: \
 			target = $*
@@ -121,20 +126,24 @@ DO_MAKE			= +${MAKE} -C ${OBJ_DIR} ${target} ${MAKE_ARGS_V} ${MAKE_ARGS} ${EXTRA
 ${PROJECT}:
 	${MAKE} install-${PROJECT} INSTALL_ROOT=${OBJ_DIR}/
 
-${OBJ_DIR}/Makefile: ${UNIX_DIR}/Makefile.in ${UNIX_DIR}/configure
-	mkdir -p ${OBJ_DIR} && cd ${OBJ_DIR} && ${UNIX_DIR}/configure \
+${OBJ_DIR}/Makefile: ${UNIX_DIR}/Makefile.in ${UNIX_DIR}/configure \
+		     ${UNIX_DIR}/tclConfig.sh.in Tcl-Info.plist.in
+	mkdir -p ${OBJ_DIR} && cd ${OBJ_DIR} && \
+	if [ ${UNIX_DIR}/configure -nt config.status ]; then ${UNIX_DIR}/configure \
 	--prefix=${PREFIX} --bindir=${BINDIR} --libdir=${LIBDIR} \
-	--mandir=${MANDIR} --enable-threads --enable-framework \
-	${CONFIGURE_ARGS} ${EXTRA_CONFIGURE_ARGS}
+	--mandir=${MANDIR} --enable-threads --enable-framework --enable-dtrace \
+	${CONFIGURE_ARGS} ${EXTRA_CONFIGURE_ARGS}; else ./config.status; fi
 
 build-${PROJECT}: ${OBJ_DIR}/Makefile
 	${DO_MAKE}
+ifeq (${INSTALL_BUILD},)
 # symolic link hackery to trick
 # 'make install INSTALL_ROOT=${OBJ_DIR}'
 # into building Tcl.framework and tclsh in ${SYMROOT}
 	@cd ${OBJ_DIR} && mkdir -p $(dir ./${LIBDIR}) $(dir ./${BINDIR}) ${SYMROOT} && \
 	rm -f ./${LIBDIR} ./${BINDIR} && ln -fs ${SYMROOT} ./${LIBDIR} && \
 	ln -fs ${SYMROOT} ./${BINDIR} && ln -fs ${OBJ_DIR}/tcltest ${SYMROOT}
+endif
 
 install-${PROJECT}: build-${PROJECT}
 ifeq (${EMBEDDED_BUILD}_${INSTALL_ROOT},1_)
@@ -150,14 +159,17 @@ ifeq (${EMBEDDED_BUILD},1)
 	@rm -f "${INSTALL_ROOT}${BINDIR}/${TCLSH}" && \
 	rmdir -p "${INSTALL_ROOT}${BINDIR}" 2>&- || true
 else
-# redo prebinding
-	@cd ${INSTALL_ROOT}/ && \
+# redo prebinding (when not building for Mac OS X 10.4 or later only)
+	@if [ "`echo "$${MACOSX_DEPLOYMENT_TARGET}" | \
+	awk -F '10\\.' '{print int($$2)}'`" -lt 4 -a "`echo "$${CFLAGS}" | \
+	awk -F '-mmacosx-version-min=10\\.' '{print int($$2)}'`" -lt 4 ]; \
+	then cd ${INSTALL_ROOT}/; \
 	if [ ! -d usr/lib ]; then mkdir -p usr && ln -fs /usr/lib usr/ && RM_USRLIB=1; fi; \
 	if [ ! -d System ]; then ln -fs /System . && RM_SYSTEM=1; fi; \
 	redo_prebinding -r . "./${LIBDIR}/${PRODUCT_NAME}.framework/Versions/${VERSION}/${PRODUCT_NAME}"; \
 	redo_prebinding -r . "./${BINDIR}/${TCLSH}"; \
 	if [ -n "$${RM_USRLIB:-}" ]; then rm -f usr/lib; rmdir -p usr 2>&-; fi; \
-	if [ -n "$${RM_SYSTEM:-}" ]; then rm -f System; fi
+	if [ -n "$${RM_SYSTEM:-}" ]; then rm -f System; fi; fi
 # install tclsh symbolic link
 	@ln -fs ${TCLSH} ${INSTALL_ROOT}${BINDIR}/tclsh
 endif
@@ -181,7 +193,7 @@ clean-${PROJECT}: %-${PROJECT}:
 distclean-${PROJECT}: %-${PROJECT}: clean-${PROJECT}
 	${DO_MAKE}
 	rm -rf ${OBJ_DIR}
-	
+
 test-${PROJECT}: %-${PROJECT}: build-${PROJECT}
 	${DO_MAKE}
 

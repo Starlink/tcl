@@ -17,7 +17,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclIOUtil.c,v 1.77.2.21 2005/05/24 04:19:32 das Exp $
+ * RCS: @(#) $Id: tclIOUtil.c,v 1.77.2.35 2007/12/14 02:29:21 hobbs Exp $
  */
 
 #include "tclInt.h"
@@ -86,13 +86,13 @@ extern int theFilesystemEpoch;
 /* 
  * Private functions for use in this file
  */
-Tcl_PathType     FSGetPathType  _ANSI_ARGS_((Tcl_Obj *pathObjPtr, 
+static Tcl_PathType     FSGetPathType  _ANSI_ARGS_((Tcl_Obj *pathObjPtr, 
 			    Tcl_Filesystem **filesystemPtrPtr, 
 			    int *driveNameLengthPtr));
-Tcl_PathType     GetPathType  _ANSI_ARGS_((Tcl_Obj *pathObjPtr, 
+static Tcl_PathType     GetPathType  _ANSI_ARGS_((Tcl_Obj *pathObjPtr, 
 			    Tcl_Filesystem **filesystemPtrPtr, 
 			    int *driveNameLengthPtr, Tcl_Obj **driveNameRef));
-Tcl_FSPathInFilesystemProc NativePathInFilesystem;
+static Tcl_FSPathInFilesystemProc NativePathInFilesystem;
 static Tcl_Obj*  TclFSNormalizeAbsolutePath 
 			    _ANSI_ARGS_((Tcl_Interp* interp, Tcl_Obj *pathPtr,
 					 ClientData *clientDataPtr));
@@ -144,8 +144,19 @@ Tcl_Stat(path, oldStyleBuf)
 #   define OUT_OF_RANGE(x) \
 	(((Tcl_WideInt)(x)) < Tcl_LongAsWide(LONG_MIN) || \
 	 ((Tcl_WideInt)(x)) > Tcl_LongAsWide(LONG_MAX))
+#if defined(__GNUC__) && __GNUC__ >= 2
+/*
+ * Workaround gcc warning of "comparison is always false due to limited range of
+ * data type" in this macro by checking max type size, and when necessary ANDing
+ * with the complement of ULONG_MAX instead of the comparison:
+ */
+#   define OUT_OF_URANGE(x) \
+	((((Tcl_WideUInt)(~ (__typeof__(x)) 0)) > (Tcl_WideUInt)ULONG_MAX) && \
+	 (((Tcl_WideUInt)(x)) & ~(Tcl_WideUInt)ULONG_MAX))
+#else
 #   define OUT_OF_URANGE(x) \
 	(((Tcl_WideUInt)(x)) > (Tcl_WideUInt)ULONG_MAX)
+#endif
 
 	/*
 	 * Perform the result-buffer overflow check manually.
@@ -362,7 +373,6 @@ TCL_DECLARE_MUTEX(obsoleteFsHookMutex)
  */
 static Tcl_FSFilesystemSeparatorProc NativeFilesystemSeparator;
 static Tcl_FSFreeInternalRepProc NativeFreeInternalRep;
-Tcl_FSDupInternalRepProc NativeDupInternalRep;
 static Tcl_FSCreateInternalRepProc NativeCreateNativeRep;
 static Tcl_FSFileAttrStringsProc NativeFileAttrStrings;
 static Tcl_FSFileAttrsGetProc NativeFileAttrsGet;
@@ -409,7 +419,7 @@ Tcl_Filesystem tclNativeFilesystem = {
     sizeof(Tcl_Filesystem),
     TCL_FILESYSTEM_VERSION_1,
     &NativePathInFilesystem,
-    &NativeDupInternalRep,
+    &TclNativeDupInternalRep,
     &NativeFreeInternalRep,
     &TclpNativeToNormalized,
     &NativeCreateNativeRep,
@@ -535,6 +545,7 @@ FsThrExitProc(cd)
     /* Trash the cwd copy */
     if (tsdPtr->cwdPathPtr != NULL) {
 	Tcl_DecrRefCount(tsdPtr->cwdPathPtr);
+	tsdPtr->cwdPathPtr = NULL;
     }
     /* Trash the filesystems cache */
     fsRecPtr = tsdPtr->filesystemList;
@@ -545,6 +556,7 @@ FsThrExitProc(cd)
 	}
 	fsRecPtr = tmpFsRecPtr;
     }
+    tsdPtr->initialized = 0;
 }
 
 int 
@@ -601,7 +613,7 @@ FsRecacheFilesystemList(void)
     /*
      * Code below operates on shared data. We
      * are already called under mutex lock so   
-     * we can safely proceede.
+     * we can safely proceed.
      */
 
     /* Locate tail of the global filesystem list */
@@ -737,7 +749,7 @@ TclFinalizeFilesystem()
 	FilesystemRecord *tmpFsRecPtr = fsRecPtr->nextPtr;
 	if (fsRecPtr->fileRefCount <= 0) {
 	    /* The native filesystem is static, so we don't free it */
-	    if (fsRecPtr != &nativeFilesystemRecord) {
+	    if (fsRecPtr->fsPtr != &tclNativeFilesystem) {
 		ckfree((char *)fsRecPtr);
 	    }
 	}
@@ -920,7 +932,7 @@ Tcl_FSUnregister(fsPtr)
      */
 
     fsRecPtr = filesystemList;
-    while ((retVal == TCL_ERROR) && (fsRecPtr != &nativeFilesystemRecord)) {
+    while ((retVal == TCL_ERROR) && (fsRecPtr->fsPtr != &tclNativeFilesystem)) {
 	if (fsRecPtr->fsPtr == fsPtr) {
 	    if (fsRecPtr->prevPtr) {
 		fsRecPtr->prevPtr->nextPtr = fsRecPtr->nextPtr;
@@ -1319,7 +1331,7 @@ Tcl_FSData(fsPtr)
  *
  *---------------------------------------------------------------------------
  */
-Tcl_Obj*
+static Tcl_Obj *
 TclFSNormalizeAbsolutePath(interp, pathPtr, clientDataPtr)
     Tcl_Interp* interp;    /* Interpreter to use */
     Tcl_Obj *pathPtr;      /* Absolute path to normalize */
@@ -1460,7 +1472,7 @@ TclFSNormalizeToUniquePath(interp, pathPtr, startAt, clientDataPtr)
 
     fsRecPtr = firstFsRecPtr;
     while (fsRecPtr != NULL) {
-        if (fsRecPtr == &nativeFilesystemRecord) {
+        if (fsRecPtr->fsPtr == &tclNativeFilesystem) {
 	    Tcl_FSNormalizePathProc *proc = fsRecPtr->fsPtr->normalizePathProc;
 	    if (proc != NULL) {
 		startAt = (*proc)(interp, pathPtr, startAt);
@@ -1473,7 +1485,7 @@ TclFSNormalizeToUniquePath(interp, pathPtr, startAt, clientDataPtr)
     fsRecPtr = firstFsRecPtr; 
     while (fsRecPtr != NULL) {
 	/* Skip the native system next time through */
-	if (fsRecPtr != &nativeFilesystemRecord) {
+	if (fsRecPtr->fsPtr != &tclNativeFilesystem) {
 	    Tcl_FSNormalizePathProc *proc = fsRecPtr->fsPtr->normalizePathProc;
 	    if (proc != NULL) {
 		startAt = (*proc)(interp, pathPtr, startAt);
@@ -1556,7 +1568,11 @@ TclGetOpenMode(interp, string, seekFlagPtr)
 		mode = O_WRONLY|O_CREAT|O_TRUNC;
 		break;
 	    case 'a':
-		mode = O_WRONLY|O_CREAT;
+	        /* [Bug 680143].
+		 * Added O_APPEND for proper automatic
+		 * seek-to-end-on-write by the OS.
+		 */
+	        mode = O_WRONLY|O_CREAT|O_APPEND;
                 *seekFlagPtr = 1;
 		break;
 	    default:
@@ -1569,7 +1585,11 @@ TclGetOpenMode(interp, string, seekFlagPtr)
 		return -1;
 	}
 	if (string[1] == '+') {
-	    mode &= ~(O_RDONLY|O_WRONLY);
+	    /*
+	     * Must remove the O_APPEND flag so that the seek command
+	     * works. [Bug 1773127]
+	     */
+	    mode &= ~(O_RDONLY|O_WRONLY|O_APPEND);
 	    mode |= O_RDWR;
 	    if (string[2] != 0) {
 		goto error;
@@ -1708,6 +1728,7 @@ Tcl_FSEvalFile(interp, pathPtr)
 
     result = TCL_ERROR;
     objPtr = Tcl_NewObj();
+    Tcl_IncrRefCount(objPtr);
 
     if (Tcl_FSStat(pathPtr, &statBuf) == -1) {
         Tcl_SetErrno(errno);
@@ -1746,6 +1767,12 @@ Tcl_FSEvalFile(interp, pathPtr)
     iPtr->scriptFile = pathPtr;
     Tcl_IncrRefCount(iPtr->scriptFile);
     string = Tcl_GetStringFromObj(objPtr, &length);
+
+#ifdef TCL_TIP280
+    /* TIP #280 Force the evaluator to open a frame for a sourced
+     * file. */
+    iPtr->evalFlags |= TCL_EVAL_FILE;
+#endif
     result = Tcl_EvalEx(interp, string, length, 0);
     /* 
      * Now we have to be careful; the script may have changed the
@@ -1853,7 +1880,9 @@ Tcl_PosixError(interp)
 
     msg = Tcl_ErrnoMsg(errno);
     id = Tcl_ErrnoId();
-    Tcl_SetErrorCode(interp, "POSIX", id, msg, (char *) NULL);
+    if (interp) {
+	Tcl_SetErrorCode(interp, "POSIX", id, msg, (char *) NULL);
+    }
     return msg;
 }
 
@@ -2947,7 +2976,7 @@ Tcl_FSLoadFile(interp, pathPtr, sym1, sym2, proc1Ptr, proc2Ptr,
 		} else {
 		    /* We need the native rep */
 		    tvdlPtr->divertedFileNativeRep = 
-		      NativeDupInternalRep(Tcl_FSGetInternalRep(copyToPtr, 
+		      TclNativeDupInternalRep(Tcl_FSGetInternalRep(copyToPtr, 
 								copyFsPtr));
 		    /* 
 		     * We don't need or want references to the copied
@@ -3261,7 +3290,7 @@ FsListMounts(pathPtr, pattern)
 
     fsRecPtr = FsGetFirstFilesystem();
     while (fsRecPtr != NULL) {
-	if (fsRecPtr != &nativeFilesystemRecord) {
+	if (fsRecPtr->fsPtr != &tclNativeFilesystem) {
 	    Tcl_FSMatchInDirectoryProc *proc = 
 				  fsRecPtr->fsPtr->matchInDirectoryProc;
 	    if (proc != NULL) {
@@ -3418,7 +3447,7 @@ TclFSInternalToNormalized(fromFilesystem, clientData, fsRecPtrPtr)
  *----------------------------------------------------------------------
  */
 
-Tcl_PathType
+static Tcl_PathType
 GetPathType(pathObjPtr, filesystemPtrPtr, driveNameLengthPtr, driveNameRef)
     Tcl_Obj *pathObjPtr;
     Tcl_Filesystem **filesystemPtrPtr;
@@ -3994,6 +4023,9 @@ NativeCreateNativeRep(pathObjPtr)
 
     /* Make sure the normalized path is set */
     validPathObjPtr = Tcl_FSGetNormalizedPath(NULL, pathObjPtr);
+    if (validPathObjPtr == NULL) {
+	return NULL;
+    }
 
     str = Tcl_GetStringFromObj(validPathObjPtr, &len);
 #ifdef __WIN32__
@@ -4009,7 +4041,7 @@ NativeCreateNativeRep(pathObjPtr)
 #endif
     nativePathPtr = ckalloc((unsigned) len);
     memcpy((VOID*)nativePathPtr, (VOID*)Tcl_DStringValue(&ds), (size_t) len);
-	  
+
     Tcl_DStringFree(&ds);
     return (ClientData)nativePathPtr;
 }
@@ -4075,7 +4107,7 @@ TclpNativeToNormalized(clientData)
 /*
  *---------------------------------------------------------------------------
  *
- * NativeDupInternalRep --
+ * TclNativeDupInternalRep --
  *
  *      Duplicate the native representation.
  *
@@ -4089,7 +4121,7 @@ TclpNativeToNormalized(clientData)
  *---------------------------------------------------------------------------
  */
 ClientData 
-NativeDupInternalRep(clientData)
+TclNativeDupInternalRep(clientData)
     ClientData clientData;
 {
     ClientData copy;
@@ -4592,7 +4624,7 @@ static int 		FindSplitPos _ANSI_ARGS_((char *path, char *separator));
  * Define the 'path' object type, which Tcl uses to represent
  * file paths internally.
  */
-Tcl_ObjType tclFsPathType = {
+static Tcl_ObjType tclFsPathType = {
     "path",				/* name */
     FreeFsPathInternalRep,		/* freeIntRepProc */
     DupFsPathInternalRep,	        /* dupIntRepProc */
@@ -4701,7 +4733,7 @@ Tcl_FSGetPathType(pathObjPtr)
  *----------------------------------------------------------------------
  */
 
-Tcl_PathType
+static Tcl_PathType
 FSGetPathType(pathObjPtr, filesystemPtrPtr, driveNameLengthPtr)
     Tcl_Obj *pathObjPtr;
     Tcl_Filesystem **filesystemPtrPtr;
@@ -5417,7 +5449,9 @@ Tcl_FSGetTranslatedPath(interp, pathPtr)
 	retObj = srcFsPathPtr->translatedPathPtr;
     }
 
-    Tcl_IncrRefCount(retObj);
+    if (retObj) {
+	Tcl_IncrRefCount(retObj);
+    }
     return retObj;
 }
 
@@ -5852,12 +5886,16 @@ Tcl_FSGetInternalRep(pathObjPtr, fsPtr)
 
     if (srcFsPathPtr->nativePathPtr == NULL) {
 	Tcl_FSCreateInternalRepProc *proc;
-	proc = srcFsPathPtr->fsRecPtr->fsPtr->createInternalRepProc;
+	char *nativePathPtr;
 
+	proc = srcFsPathPtr->fsRecPtr->fsPtr->createInternalRepProc;
 	if (proc == NULL) {
 	    return NULL;
 	}
-	srcFsPathPtr->nativePathPtr = (*proc)(pathObjPtr);
+
+	nativePathPtr = (*proc)(pathObjPtr);
+	srcFsPathPtr  = (FsPath*) PATHOBJ(pathObjPtr);
+	srcFsPathPtr->nativePathPtr = nativePathPtr;
     }
 
     return srcFsPathPtr->nativePathPtr;
@@ -6391,7 +6429,7 @@ UpdateStringOfFsPath(objPtr)
  *
  *---------------------------------------------------------------------------
  */
-int 
+static int 
 NativePathInFilesystem(pathPtr, clientDataPtr)
     Tcl_Obj *pathPtr;
     ClientData *clientDataPtr;

@@ -61,11 +61,12 @@ struct nfa *parent;		/* NULL if primary NFA */
 	nfa->nstates = 0;
 	nfa->cm = cm;
 	nfa->v = v;
+	nfa->size = 0;
 	nfa->bos[0] = nfa->bos[1] = COLORLESS;
 	nfa->eos[0] = nfa->eos[1] = COLORLESS;
+	nfa->parent = parent;
 	nfa->post = newfstate(nfa, '@');	/* number 0 */
 	nfa->pre = newfstate(nfa, '>');		/* number 1 */
-	nfa->parent = parent;
 
 	nfa->init = newstate(nfa);		/* may become invalid later */
 	nfa->final = newstate(nfa);
@@ -85,6 +86,57 @@ struct nfa *parent;		/* NULL if primary NFA */
 		return NULL;
 	}
 	return nfa;
+}
+
+/*
+ - too_many_states - checks if the max states exceeds the compile-time value
+ ^ static int too_many_states(struct nfa *);
+ */
+static int
+too_many_states(nfa)
+struct nfa *nfa;
+{
+	struct nfa *parent = nfa->parent;
+	size_t sz = nfa->size;
+	while (parent != NULL) {
+		sz = parent->size;
+		parent = parent->parent;
+	}
+	if (sz > REG_MAX_STATES)
+		return 1;
+	return 0;
+}
+
+/*
+ - increment_size - increases the tracked size of the NFA and its parents.
+ ^ static void increment_size(struct nfa *);
+ */
+static void
+increment_size(nfa)
+struct nfa *nfa;
+{
+	struct nfa *parent = nfa->parent;
+	nfa->size++;
+	while (parent != NULL) {
+		parent->size++;
+		parent = parent->parent;
+	}
+}
+
+/*
+ - decrement_size - increases the tracked size of the NFA and its parents.
+ ^ static void decrement_size(struct nfa *);
+ */
+static void
+decrement_size(nfa)
+struct nfa *nfa;
+{
+	struct nfa *parent = nfa->parent;
+	nfa->size--;
+	while (parent != NULL) {
+		parent->size--;
+		parent = parent->parent;
+	}
 }
 
 /*
@@ -123,6 +175,11 @@ struct nfa *nfa;
 {
 	struct state *s;
 
+	if (too_many_states(nfa)) {
+		/* XXX: add specific error for this */
+		NERR(REG_ETOOBIG);
+		return NULL;
+	}
 	if (nfa->free != NULL) {
 		s = nfa->free;
 		nfa->free = s->next;
@@ -154,6 +211,8 @@ struct nfa *nfa;
 	}
 	s->prev = nfa->slast;
 	nfa->slast = s;
+	/* Track the current size and the parent size */
+	increment_size(nfa);
 	return s;
 }
 
@@ -221,6 +280,7 @@ struct state *s;
 	s->prev = NULL;
 	s->next = nfa->free;	/* don't delete it, put it on the free list */
 	nfa->free = s;
+	decrement_size(nfa);
 }
 
 /*
@@ -651,6 +711,8 @@ struct state *stmp;		/* s's duplicate, or NULL */
 
 	for (a = s->outs; a != NULL && !NISERR(); a = a->outchain) {
 		duptraverse(nfa, a->to, (struct state *)NULL);
+		if (NISERR())
+			break;
 		assert(a->to->tmp != NULL);
 		cparc(nfa, a, s->tmp, a->to->tmp);
 	}
@@ -803,6 +865,26 @@ struct arc *con;
 		return 1;
 	}
 
+	/*
+	 * DGP 2007-11-15: Cloning a state with a circular constraint on its
+	 * list of outs can lead to trouble [Bug 1810038], so get rid of them
+	 * first.
+	 */
+
+	for (a = from->outs; a != NULL; a = nexta) {
+		nexta = a->outchain;
+		switch (a->type) {
+		case '^':
+		case '$':
+		case BEHIND:
+		case AHEAD:
+			if (from == a->to) {
+				freearc(nfa, a);
+			}
+			break;
+		}
+	}
+
 	/* first, clone from state if necessary to avoid other outarcs */
 	if (from->nouts > 1) {
 		s = newstate(nfa);
@@ -919,6 +1001,29 @@ struct arc *con;
 	if (to->nouts == 0) {	/* dead end */
 		freearc(nfa, con);
 		return 1;
+	}
+
+	/*
+	 * DGP 2007-11-15: Here we duplicate the same protections as appear
+	 * in pull() above to avoid troubles with cloning a state with a
+	 * circular constraint on its list of ins.  It is not clear whether
+	 * this is necessary, or is protecting against a "can't happen".
+	 * Any test case that actually leads to a freearc() call here would
+	 * be a welcome addition to the test suite.
+	 */
+
+	for (a = to->ins; a != NULL; a = nexta) {
+		nexta = a->inchain;
+		switch (a->type) {
+		case '^':
+		case '$':
+		case BEHIND:
+		case AHEAD:
+			if (a->from == to) {
+				freearc(nfa, a);
+			}
+			break;
+		}
 	}
 
 	/* first, clone to state if necessary to avoid other inarcs */
@@ -1041,7 +1146,8 @@ FILE *f;			/* for debug output; NULL none */
 	/* find and eliminate empties until there are no more */
 	do {
 		progress = 0;
-		for (s = nfa->states; s != NULL && !NISERR(); s = nexts) {
+		for (s = nfa->states; s != NULL && !NISERR()
+			&& s->no != FREESTATE; s = nexts) {
 			nexts = s->next;
 			for (a = s->outs; a != NULL && !NISERR(); a = nexta) {
 				nexta = a->outchain;

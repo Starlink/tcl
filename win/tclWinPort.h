@@ -10,7 +10,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclWinPort.h,v 1.36 2002/11/27 18:13:38 davygrvy Exp $
+ * RCS: @(#) $Id: tclWinPort.h,v 1.36.2.2 2005/11/04 18:33:35 patthoyts Exp $
  */
 
 #ifndef _TCLWINPORT
@@ -230,15 +230,15 @@
 #endif /* TCL_UNION_WAIT */
 
 #ifndef WIFEXITED
-#   define WIFEXITED(stat)  (((*((int *) &(stat))) & 0xff) == 0)
+#   define WIFEXITED(stat)  (((*((int *) &(stat))) & 0xC0000000) == 0)
 #endif
 
 #ifndef WEXITSTATUS
-#   define WEXITSTATUS(stat) (((*((int *) &(stat))) >> 8) & 0xff)
+#   define WEXITSTATUS(stat) (*((int *) &(stat)))
 #endif
 
 #ifndef WIFSIGNALED
-#   define WIFSIGNALED(stat) (((*((int *) &(stat)))) && ((*((int *) &(stat))) == ((*((int *) &(stat))) & 0x00ff)))
+#   define WIFSIGNALED(stat) ((*((int *) &(stat))) & 0xC0000000)
 #endif
 
 #ifndef WTERMSIG
@@ -246,7 +246,7 @@
 #endif
 
 #ifndef WIFSTOPPED
-#   define WIFSTOPPED(stat)  (((*((int *) &(stat))) & 0xff) == 0177)
+#   define WIFSTOPPED(stat)  0
 #endif
 
 #ifndef WSTOPSIG
@@ -423,7 +423,8 @@
  * the C level environment in synch with the system level environment.
  */
 
-#define USE_PUTENV	1
+#define USE_PUTENV		1
+#define USE_PUTENV_FOR_UNSET	1
 
 /*
  * Msvcrt's putenv() copies the string rather than takes ownership of it.

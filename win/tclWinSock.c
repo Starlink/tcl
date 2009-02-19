@@ -8,7 +8,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclWinSock.c,v 1.36.2.3 2005/01/27 22:53:39 andreas_kupries Exp $
+ * RCS: @(#) $Id: tclWinSock.c,v 1.36.2.8 2007/11/29 00:31:51 hobbs Exp $
  */
 
 #include "tclWinInt.h"
@@ -249,7 +249,6 @@ static LRESULT CALLBACK	    SocketProc _ANSI_ARGS_((HWND hwnd,
 				    UINT message, WPARAM wParam,
 				    LPARAM lParam));
 static Tcl_EventSetupProc   SocketSetupProc;
-static Tcl_ExitProc	    SocketThreadExitHandler;
 static int		    SocketsEnabled _ANSI_ARGS_((void));
 static void		    TcpAccept _ANSI_ARGS_((SocketInfo *infoPtr));
 static Tcl_DriverBlockModeProc	TcpBlockProc;
@@ -303,7 +302,7 @@ static Tcl_ChannelType tcpChannelType = {
  *	library and set up the winSock function table.  If successful,
  *	registers the event window for the socket notifier code.
  *
- *	Assumes Mutex is held.
+ *	Assumes socketMutex is held.
  *
  * Results:
  *	None.
@@ -491,45 +490,41 @@ InitSockets()
     if (tsdPtr == NULL) {
 	tsdPtr = TCL_TSD_INIT(&dataKey);
 	tsdPtr->socketList = NULL;
-	tsdPtr->hwnd = NULL;
-
-	tsdPtr->threadId = Tcl_GetCurrentThread();
-	
+	tsdPtr->hwnd       = NULL;
+	tsdPtr->threadId   = Tcl_GetCurrentThread();
 	tsdPtr->readyEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
+	if (tsdPtr->readyEvent == NULL) {
+	    goto unloadLibrary;
+	}
 	tsdPtr->socketListLock = CreateEvent(NULL, FALSE, TRUE, NULL);
+	if (tsdPtr->socketListLock == NULL) {
+	    goto unloadLibrary;
+	}
 	tsdPtr->socketThread = CreateThread(NULL, 256, SocketThread,
 		tsdPtr, 0, &id);
-	SetThreadPriority(tsdPtr->socketThread, THREAD_PRIORITY_HIGHEST);
-
 	if (tsdPtr->socketThread == NULL) {
 	    goto unloadLibrary;
 	}
-	
+
+	SetThreadPriority(tsdPtr->socketThread, THREAD_PRIORITY_HIGHEST);
 
 	/*
-	 * Wait for the thread to signal that the window has
-	 * been created and is ready to go.  Timeout after twenty
-	 * seconds.
+	 * Wait for the thread to signal when the window has
+	 * been created and if it is ready to go.
 	 */
-	
-	if (WaitForSingleObject(tsdPtr->readyEvent, 20000)
-		== WAIT_TIMEOUT) {
-	    goto unloadLibrary;
-	}
+
+	WaitForSingleObject(tsdPtr->readyEvent, INFINITE);
 
 	if (tsdPtr->hwnd == NULL) {
-	    goto unloadLibrary;
+	    goto unloadLibrary; /* Trouble creating the window */
 	}
-	
+
 	Tcl_CreateEventSource(SocketSetupProc, SocketCheckProc, NULL);
-	Tcl_CreateThreadExitHandler(SocketThreadExitHandler, NULL);
     }
     return;
 
 unloadLibrary:
-    if (tsdPtr != NULL && tsdPtr->hwnd != NULL) {
-	SocketThreadExitHandler(0);
-    }
+    TclpFinalizeSockets();
     FreeLibrary(winSock.hModule);
     winSock.hModule = NULL;
     return;
@@ -568,7 +563,7 @@ SocketsEnabled()
  *
  * SocketExitHandler --
  *
- *	Callback invoked during exit clean up to delete the socket
+ *	Callback invoked during app exit clean up to delete the socket
  *	communication window and to release the WinSock DLL.
  *
  * Results:
@@ -591,7 +586,7 @@ SocketExitHandler(clientData)
 	 * Make sure the socket event handling window is cleaned-up
 	 * for, at most, this thread.
 	 */
-	SocketThreadExitHandler(clientData);
+	TclpFinalizeSockets();
 	UnregisterClass("TclSocket", TclWinGetTclInstance());
 	winSock.WSACleanup();
 	FreeLibrary(winSock.hModule);
@@ -605,49 +600,50 @@ SocketExitHandler(clientData)
 /*
  *----------------------------------------------------------------------
  *
- * SocketThreadExitHandler --
+ * TclpFinalizeSockets --
  *
- *	Callback invoked during thread clean up to delete the socket
- *	event source.
+ *	This function is called from Tcl_FinalizeThread to finalize
+ *	the platform specific socket subsystem.
+ *	Also, it may be called from within this module to cleanup
+ *	the state if unable to initialize the sockets subsystem.
  *
  * Results:
  *	None.
  *
  * Side effects:
- *	Delete the event source.
+ *	Deletes the event source and destroys the socket thread.
  *
  *----------------------------------------------------------------------
  */
 
-    /* ARGSUSED */
-static void
-SocketThreadExitHandler(clientData)
-    ClientData clientData;              /* Not used. */
+void
+TclpFinalizeSockets()
 {
-    ThreadSpecificData *tsdPtr = 
-	(ThreadSpecificData *)TclThreadDataKeyGet(&dataKey);
+    ThreadSpecificData *tsdPtr;
 
-    if (tsdPtr != NULL && tsdPtr->socketThread != NULL) {
-	DWORD exitCode;
-
-	GetExitCodeThread(tsdPtr->socketThread, &exitCode);
-	if (exitCode == STILL_ACTIVE) {
-	    PostMessage(tsdPtr->hwnd, SOCKET_TERMINATE, 0, 0);
-	    /*
-	     * Wait for the thread to close.  This ensures that we are
-	     * completely cleaned up before we leave this function.
-	     * If Tcl_Finalize was called from DllMain, the thread
-	     * is in a paused state so we need to timeout and continue.
-	     */
-
-	    WaitForSingleObject(tsdPtr->socketThread, 100);
+    tsdPtr = (ThreadSpecificData *)TclThreadDataKeyGet(&dataKey);
+    if (tsdPtr != NULL) {
+	if (tsdPtr->socketThread != NULL) {
+	    if (tsdPtr->hwnd != NULL) {
+		PostMessage(tsdPtr->hwnd, SOCKET_TERMINATE, 0, 0);
+		/*
+		 * Wait for the thread to exit. This ensures that we are
+		 * completely cleaned up before we leave this function.
+		 */
+		WaitForSingleObject(tsdPtr->readyEvent, INFINITE);
+		tsdPtr->hwnd = NULL;
+	    }
+	    CloseHandle(tsdPtr->socketThread);
+	    tsdPtr->socketThread = NULL;
 	}
-	CloseHandle(tsdPtr->socketThread);
-	tsdPtr->socketThread = NULL;
-	CloseHandle(tsdPtr->readyEvent);
-	CloseHandle(tsdPtr->socketListLock);
-
-	Tcl_DeleteThreadExitHandler(SocketThreadExitHandler, NULL);
+	if (tsdPtr->readyEvent != NULL) {
+	    CloseHandle(tsdPtr->readyEvent);
+	    tsdPtr->readyEvent = NULL;
+	}
+	if (tsdPtr->socketListLock != NULL) {
+	    CloseHandle(tsdPtr->socketListLock);
+	    tsdPtr->socketListLock = NULL;
+	}
 	Tcl_DeleteEventSource(SocketSetupProc, SocketCheckProc, NULL);
     }
 }
@@ -1033,7 +1029,6 @@ NewSocketInfo(socket)
     SOCKET socket;
 {
     SocketInfo *infoPtr;
-    ThreadSpecificData *tsdPtr = TCL_TSD_INIT(&dataKey);
 
     infoPtr = (SocketInfo *) ckalloc((unsigned) sizeof(SocketInfo));
     infoPtr->socket = socket;
@@ -1088,7 +1083,7 @@ CreateSocket(interp, port, host, server, myaddr, myport, async)
 				 * in progress. */
     SOCKADDR_IN sockaddr;	/* Socket address */
     SOCKADDR_IN mysockaddr;	/* Socket address for client */
-    SOCKET sock;
+    SOCKET sock = INVALID_SOCKET;
     SocketInfo *infoPtr;	/* The returned value. */
     ThreadSpecificData *tsdPtr = 
 	(ThreadSpecificData *)TclThreadDataKeyGet(&dataKey);
@@ -2324,29 +2319,44 @@ SocketThread(LPVOID arg)
     MSG msg;
     ThreadSpecificData *tsdPtr = (ThreadSpecificData *)(arg);
 
+    /*
+     * Create a dummy window receiving socket events.
+     */
+
     tsdPtr->hwnd = CreateWindow("TclSocket", "TclSocket", 
 	    WS_TILED, 0, 0, 0, 0, NULL, NULL, windowClass.hInstance, arg);
 
     /*
-     * Signal the main thread that the window has been created
-     * and that the socket thread is ready to go.
+     * Signalize thread creator that we are done creating the window.
      */
-    
+
     SetEvent(tsdPtr->readyEvent);
-    
+
+    /*
+     * If unable to create the window, exit this thread immediately.
+     */
+
     if (tsdPtr->hwnd == NULL) {
 	return 1;
     }
 
     /*
      * Process all messages on the socket window until WM_QUIT.
+     * This threads exits only when instructed to do so by the
+     * call to PostMessage(SOCKET_TERMINATE) in TclpFinalizeSockets().
      */
 
     while (GetMessage(&msg, NULL, 0, 0) > 0) {
 	DispatchMessage(&msg);
     }
 
-    return msg.wParam;
+    /*
+     * This releases waiters on thread exit in TclpFinalizeSockets()
+     */
+
+    SetEvent(tsdPtr->readyEvent);
+
+    return (DWORD)msg.wParam;
 }
 
 
@@ -2533,41 +2543,28 @@ Tcl_GetHostName()
     Tcl_MutexLock(&socketMutex);
     InitSockets();
 
-    if (hostnameInitialized) {
-	Tcl_MutexUnlock(&socketMutex);
-        return hostname;
-    }
-    Tcl_MutexUnlock(&socketMutex);
-	
-    if (TclpHasSockets(NULL) == TCL_OK) {
+    if (!hostnameInitialized) {
 	/*
-	 * INTL: bug
+	 * Convert hostname from native to UTF then change to lowercase.
 	 */
-
-	if (winSock.gethostname(hostname, sizeof(hostname)) == 0) {
-	    Tcl_MutexLock(&socketMutex);
-	    hostnameInitialized = 1;
-	    Tcl_MutexUnlock(&socketMutex);
-	    return hostname;
-	}
-    }
-    Tcl_MutexLock(&socketMutex);
-    length = sizeof(hostname);
-    if ((*tclWinProcs->getComputerNameProc)(wbuf, &length) != 0) {
-	/*
-	 * Convert string from native to UTF then change to lowercase.
-	 */
-
 	Tcl_DString ds;
 
-	lstrcpynA(hostname, Tcl_WinTCharToUtf((TCHAR *) wbuf, -1, &ds),
-		sizeof(hostname));
+	length = sizeof(hostname);
+	/* same as SocketsEnabled without the socketMutex lock */
+	if ((winSock.hModule != NULL)
+		&& (winSock.gethostname(hostname, length) == 0)) {
+	    Tcl_ExternalToUtfDString(NULL, hostname, -1, &ds);
+	} else if ((*tclWinProcs->getComputerNameProc)(wbuf, &length) != 0) {
+	    Tcl_WinTCharToUtf((TCHAR *) wbuf, -1, &ds);
+	} else {
+	    Tcl_DStringInit(&ds);
+	    Tcl_DStringSetLength(&ds, 0);
+	}
+	lstrcpynA(hostname, Tcl_DStringValue(&ds), sizeof(hostname));
 	Tcl_DStringFree(&ds);
 	Tcl_UtfToLower(hostname);
-    } else {
-	hostname[0] = '\0';
+	hostnameInitialized = 1;
     }
-    hostnameInitialized = 1;
     Tcl_MutexUnlock(&socketMutex);
     return hostname;
 }
@@ -2703,7 +2700,7 @@ TcpThreadActionProc (instanceData, action)
 
 	notifyCmd = SELECT;
     } else {
-        SocketInfo **nextPtrPtr;
+	SocketInfo **nextPtrPtr;
 	int removed = 0;
 
 	tsdPtr  = TCL_TSD_INIT(&dataKey);

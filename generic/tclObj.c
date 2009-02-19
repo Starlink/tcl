@@ -7,11 +7,12 @@
  * Copyright (c) 1995-1997 Sun Microsystems, Inc.
  * Copyright (c) 1999 by Scriptics Corporation.
  * Copyright (c) 2001 by ActiveState Corporation.
+ * Copyright (c) 2007 Daniel A. Steffen <das@users.sourceforge.net>
  *
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclObj.c,v 1.42.2.10 2005/04/20 16:06:17 dgp Exp $
+ * RCS: @(#) $Id: tclObj.c,v 1.42.2.16 2007/10/03 12:53:12 msofer Exp $
  */
 
 #include "tclInt.h"
@@ -272,23 +273,22 @@ TclInitObjSubsystem()
 /*
  *----------------------------------------------------------------------
  *
- * TclFinalizeCompExecEnv --
+ * TclFinalizeObjects --
  *
- *	This procedure is called by Tcl_Finalize to clean up the Tcl
- *	compilation and execution environment so it can later be properly
- *	reinitialized.
+ *	This procedure is called by Tcl_Finalize to clean up all
+ *	registered Tcl_ObjType's and to reset the tclFreeObjList.
  *
  * Results:
  *	None.
  *
  * Side effects:
- *	Cleans up the compilation and execution environment
+ *	None.
  *
  *----------------------------------------------------------------------
  */
 
 void
-TclFinalizeCompExecEnv()
+TclFinalizeObjects()
 {
     Tcl_MutexLock(&tableMutex);
     if (typeTableInitialized) {
@@ -296,12 +296,15 @@ TclFinalizeCompExecEnv()
         typeTableInitialized = 0;
     }
     Tcl_MutexUnlock(&tableMutex);
+
+    /* 
+     * All we do here is reset the head pointer of the linked list of
+     * free Tcl_Obj's to NULL;  the memory finalization will take care
+     * of releasing memory for us.
+     */
     Tcl_MutexLock(&tclObjMutex);
     tclFreeObjList = NULL;
     Tcl_MutexUnlock(&tclObjMutex);
-
-    TclFinalizeCompilation();
-    TclFinalizeExecution();
 }
 
 /*
@@ -329,26 +332,10 @@ Tcl_RegisterObjType(typePtr)
 				 * storage must be statically
 				 * allocated (must live forever). */
 {
-    register Tcl_HashEntry *hPtr;
     int new;
-
-    /*
-     * If there's already an object type with the given name, remove it.
-     */
     Tcl_MutexLock(&tableMutex);
-    hPtr = Tcl_FindHashEntry(&typeTable, typePtr->name);
-    if (hPtr != (Tcl_HashEntry *) NULL) {
-        Tcl_DeleteHashEntry(hPtr);
-    }
-
-    /*
-     * Now insert the new object type.
-     */
-
-    hPtr = Tcl_CreateHashEntry(&typeTable, typePtr->name, &new);
-    if (new) {
-	Tcl_SetHashValue(hPtr, typePtr);
-    }
+    Tcl_SetHashValue(
+	    Tcl_CreateHashEntry(&typeTable, typePtr->name, &new), typePtr);
     Tcl_MutexUnlock(&tableMutex);
 }
 
@@ -386,23 +373,27 @@ Tcl_AppendAllObjTypes(interp, objPtr)
 {
     register Tcl_HashEntry *hPtr;
     Tcl_HashSearch search;
-    Tcl_ObjType *typePtr;
-    int result;
- 
+    int objc;
+    Tcl_Obj **objv;
+
     /*
-     * This code assumes that types names do not contain embedded NULLs.
+     * Get the test for a valid list out of the way first.
+     */
+
+    if (Tcl_ListObjGetElements(interp, objPtr, &objc, &objv) != TCL_OK) {
+	return TCL_ERROR;
+    }
+
+    /*
+     * Type names are NUL-terminated, not counted strings.
+     * This code relies on that.
      */
 
     Tcl_MutexLock(&tableMutex);
     for (hPtr = Tcl_FirstHashEntry(&typeTable, &search);
 	    hPtr != NULL;  hPtr = Tcl_NextHashEntry(&search)) {
-        typePtr = (Tcl_ObjType *) Tcl_GetHashValue(hPtr);
-	result = Tcl_ListObjAppendElement(interp, objPtr,
-	        Tcl_NewStringObj(typePtr->name, -1));
-	if (result == TCL_ERROR) {
-	    Tcl_MutexUnlock(&tableMutex);
-	    return result;
-	}
+	Tcl_ListObjAppendElement(NULL, objPtr,
+	        Tcl_NewStringObj(Tcl_GetHashKey(&typeTable, hPtr), -1));
     }
     Tcl_MutexUnlock(&tableMutex);
     return TCL_OK;
@@ -431,17 +422,15 @@ Tcl_GetObjType(typeName)
     CONST char *typeName;	/* Name of Tcl object type to look up. */
 {
     register Tcl_HashEntry *hPtr;
-    Tcl_ObjType *typePtr;
+    Tcl_ObjType *typePtr = NULL;
 
     Tcl_MutexLock(&tableMutex);
     hPtr = Tcl_FindHashEntry(&typeTable, typeName);
     if (hPtr != (Tcl_HashEntry *) NULL) {
         typePtr = (Tcl_ObjType *) Tcl_GetHashValue(hPtr);
-	Tcl_MutexUnlock(&tableMutex);
-	return typePtr;
     }
     Tcl_MutexUnlock(&tableMutex);
-    return NULL;
+    return typePtr;
 }
 
 /*
@@ -629,7 +618,10 @@ TclAllocateFreeObjects()
      * This has been noted by Purify to be a potential leak.  The problem is
      * that Tcl, when not TCL_MEM_DEBUG compiled, keeps around all allocated
      * Tcl_Obj's, pointed to by tclFreeObjList, when freed instead of
-     * actually freeing the memory.  These never do get freed properly.
+     * actually freeing the memory.  TclFinalizeObjects() does not ckfree()
+     * this memory, but leaves it to Tcl's memory subsystem finalziation to
+     * release it.  Purify apparently can't figure that out, and fires a
+     * false alarm.
      */
 
     basePtr = (char *) ckalloc(bytesToAlloc);
@@ -683,6 +675,7 @@ TclFreeObj(objPtr)
     }
 #endif /* TCL_MEM_DEBUG */
 
+    TCL_DTRACE_OBJ_FREE(objPtr);
     if ((typePtr != NULL) && (typePtr->freeIntRepProc != NULL)) {
 	typePtr->freeIntRepProc(objPtr);
     }
@@ -707,9 +700,7 @@ TclFreeObj(objPtr)
     Tcl_MutexUnlock(&tclObjMutex);
 #endif /* TCL_MEM_DEBUG */
 
-#ifdef TCL_COMPILE_STATS
-    tclObjsFreed++;
-#endif /* TCL_COMPILE_STATS */
+    TclIncrObjsFreed();
 }
 
 /*
@@ -887,7 +878,7 @@ Tcl_InvalidateStringRep(objPtr)
  * Tcl_NewBooleanObj --
  *
  *	This procedure is normally called when not debugging: i.e., when
- *	TCL_MEM_DEBUG is not defined. It creates a new boolean object and
+ *	TCL_MEM_DEBUG is not defined. It creates a new Tcl_Obj and
  *	initializes it from the argument boolean value. A nonzero
  *	"boolValue" is coerced to 1.
  *
@@ -2583,8 +2574,19 @@ Tcl_GetWideIntFromObj(interp, objPtr, wideIntPtr)
     register int result;
 
     if (objPtr->typePtr == &tclWideIntType) {
+    gotWide:
 	*wideIntPtr = objPtr->internalRep.wideValue;
 	return TCL_OK;
+    }
+    if (objPtr->typePtr == &tclIntType) {
+	/*
+	 * This cast is safe; all valid ints/longs are wides.
+	 */
+
+	objPtr->internalRep.wideValue =
+		Tcl_LongAsWide(objPtr->internalRep.longValue);
+	objPtr->typePtr = &tclWideIntType;
+	goto gotWide;
     }
     result = SetWideIntFromAny(interp, objPtr);
     if (result == TCL_OK) {
@@ -3013,7 +3015,8 @@ Tcl_GetCommandFromObj(interp, objPtr)
 	    && (resPtr->refNsId == currNsPtr->nsId)
 	    && (resPtr->refNsCmdEpoch == currNsPtr->cmdRefEpoch)) {
         cmdPtr = resPtr->cmdPtr;
-        if (cmdPtr->cmdEpoch != resPtr->cmdEpoch) {
+        if (cmdPtr->cmdEpoch != resPtr->cmdEpoch
+		|| (cmdPtr->flags & CMD_IS_DELETED)) {
             cmdPtr = NULL;
         }
     }

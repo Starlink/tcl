@@ -10,7 +10,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclFileName.c,v 1.40.2.11 2005/06/21 19:07:41 kennykb Exp $
+ * RCS: @(#) $Id: tclFileName.c,v 1.40.2.15 2006/10/03 18:20:33 dgp Exp $
  */
 
 #include "tclInt.h"
@@ -2130,6 +2130,10 @@ TclGlob(interp, pattern, unquotedPrefix, globFlags, types)
 	     */
 	    if (globFlags & TCL_GLOBMODE_DIR) {
 		Tcl_DStringAppend(&buffer,separators,1);
+		/* Try to borrow that separator from the tail */
+		if (*tail == *separators) {
+		    tail++;
+		}
 	    }
 	    prefixLen++;
 	}
@@ -2346,6 +2350,13 @@ TclDoGlob(interp, separators, headPtr, tail, types)
 	} else if (strchr(separators, *tail) == NULL) {
 	    break;
 	}
+	if (tclPlatform != TCL_PLATFORM_MAC) {
+	    if (*tail == '\\') {
+		Tcl_DStringAppend(headPtr, separators, 1);
+	    } else {
+		Tcl_DStringAppend(headPtr, tail, 1);
+	    }
+	}
 	count++;
     }
 
@@ -2387,7 +2398,6 @@ TclDoGlob(interp, separators, headPtr, tail, types)
 	     * trailing slash if needed.  Otherwise add the slash if
 	     * this is the first absolute element, or a later relative
 	     * element.  Add an extra slash if this is a UNC path.
-	     */
 
 	    if (*name == ':') {
 		Tcl_DStringAppend(headPtr, ":", 1);
@@ -2403,13 +2413,13 @@ TclDoGlob(interp, separators, headPtr, tail, types)
 		    Tcl_DStringAppend(headPtr, "/", 1);
 		}
 	    }
+	     */
 	    
 	    break;
-	case TCL_PLATFORM_UNIX:
+	case TCL_PLATFORM_UNIX: {
 	    /*
 	     * Add a separator if this is the first absolute element, or
 	     * a later relative element.
-	     */
 
 	    if ((*tail != '\0')
 		    && (((length > 0)
@@ -2417,7 +2427,9 @@ TclDoGlob(interp, separators, headPtr, tail, types)
 			    || ((length == 0) && (count > 0)))) {
 		Tcl_DStringAppend(headPtr, "/", 1);
 	    }
+	     */
 	    break;
+	}
     }
 
     /*
@@ -2529,17 +2541,17 @@ TclDoGlob(interp, separators, headPtr, tail, types)
 	    ret = Tcl_FSMatchInDirectory(interp, Tcl_GetObjResult(interp), 
 					 head, tail, types);
 	} else {
-	    Tcl_Obj* resultPtr;
-
 	    /* 
 	     * We do the recursion ourselves.  This makes implementing
 	     * Tcl_FSMatchInDirectory for each filesystem much easier.
 	     */
 	    Tcl_GlobTypeData dirOnly = { TCL_GLOB_TYPE_DIR, 0, NULL, NULL };
 	    char save = *p;
-	    
-	    *p = '\0';
+	    Tcl_Obj *resultPtr;
+
 	    resultPtr = Tcl_NewListObj(0, NULL);
+	    Tcl_IncrRefCount(resultPtr);
+	    *p = '\0';
 	    ret = Tcl_FSMatchInDirectory(interp, resultPtr, 
 					 head, tail, &dirOnly);
 	    *p = save;
@@ -2556,7 +2568,7 @@ TclDoGlob(interp, separators, headPtr, tail, types)
 			Tcl_DStringAppend(&ds, Tcl_GetString(elt), -1);
 			if(tclPlatform == TCL_PLATFORM_MAC) {
 			    Tcl_DStringAppend(&ds, ":",1);
-			} else {			
+			} else {
 			    Tcl_DStringAppend(&ds, "/",1);
 			}
 			ret = TclDoGlob(interp, separators, &ds, p+1, types);

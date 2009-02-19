@@ -10,7 +10,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclMain.c,v 1.20 2002/05/29 22:59:33 dgp Exp $
+ * RCS: @(#) $Id: tclMain.c,v 1.20.2.3 2006/05/05 18:08:58 dgp Exp $
  */
 
 #include "tcl.h"
@@ -204,15 +204,13 @@ Tcl_Main(argc, argv, appInitProc)
 				 * initialization but before starting to
 				 * execute commands. */
 {
-    Tcl_Obj *resultPtr;
-    Tcl_Obj *commandPtr = NULL;
-    char buffer[TCL_INTEGER_SPACE + 5], *args;
+    Tcl_Obj *resultPtr, *argvPtr, *commandPtr = NULL;
     PromptType prompt = PROMPT_START;
-    int code, length, tty;
-    int exitCode = 0;
+    int code, length, tty, exitCode = 0;
     Tcl_Channel inChannel, outChannel, errChannel;
     Tcl_Interp *interp;
-    Tcl_DString argString;
+    Tcl_DString appName;
+    Tcl_Obj *objPtr;
 
     Tcl_FindExecutable(argv[0]);
 
@@ -233,28 +231,33 @@ Tcl_Main(argc, argv, appInitProc)
 	}
     }
 
-    /*
-     * The CONST casting is safe, and better we do it here than force
-     * all callers of Tcl_Main to do it.  (Those callers are likely
-     * in a main() that can't easily change its signature.)
-     */
-    
-    args = Tcl_Merge(argc-1, (CONST char **)argv+1);
-    Tcl_ExternalToUtfDString(NULL, args, -1, &argString);
-    Tcl_SetVar(interp, "argv", Tcl_DStringValue(&argString), TCL_GLOBAL_ONLY);
-    Tcl_DStringFree(&argString);
-    ckfree(args);
-
     if (TclGetStartupScriptPath() == NULL) {
-	Tcl_ExternalToUtfDString(NULL, argv[0], -1, &argString);
+	Tcl_ExternalToUtfDString(NULL, argv[0], -1, &appName);
     } else {
 	TclSetStartupScriptFileName(Tcl_ExternalToUtfDString(NULL,
-		TclGetStartupScriptFileName(), -1, &argString));
+		TclGetStartupScriptFileName(), -1, &appName));
     }
+    Tcl_SetVar(interp, "argv0", Tcl_DStringValue(&appName), TCL_GLOBAL_ONLY);
+    Tcl_DStringFree(&appName);
+    argc--;
+    argv++;
 
-    TclFormatInt(buffer, (long) argc-1);
-    Tcl_SetVar(interp, "argc", buffer, TCL_GLOBAL_ONLY);
-    Tcl_SetVar(interp, "argv0", Tcl_DStringValue(&argString), TCL_GLOBAL_ONLY);
+    objPtr = Tcl_NewIntObj(argc);
+    Tcl_IncrRefCount(objPtr);
+    Tcl_SetVar2Ex(interp, "argc", NULL, objPtr, TCL_GLOBAL_ONLY);
+    Tcl_DecrRefCount(objPtr);
+    
+    argvPtr = Tcl_NewListObj(0, NULL);
+    while (argc--) {
+	Tcl_DString ds;
+	Tcl_ExternalToUtfDString(NULL, *argv++, -1, &ds);
+	Tcl_ListObjAppendElement(NULL, argvPtr, Tcl_NewStringObj(
+		Tcl_DStringValue(&ds), Tcl_DStringLength(&ds)));
+	Tcl_DStringFree(&ds);
+    }
+    Tcl_IncrRefCount(argvPtr);
+    Tcl_SetVar2Ex(interp, "argv", NULL, argvPtr, TCL_GLOBAL_ONLY);
+    Tcl_DecrRefCount(argvPtr);
 
     /*
      * Set the "tcl_interactive" variable.
@@ -308,7 +311,6 @@ Tcl_Main(argc, argv, appInitProc)
 	}
 	goto done;
     }
-    Tcl_DStringFree(&argString);
 
     /*
      * We're running interactively.  Source a user-specific startup
@@ -333,84 +335,84 @@ Tcl_Main(argc, argv, appInitProc)
     inChannel = Tcl_GetStdChannel(TCL_STDIN);
     outChannel = Tcl_GetStdChannel(TCL_STDOUT);
     while ((inChannel != (Tcl_Channel) NULL) && !Tcl_InterpDeleted(interp)) {
-	if (tty) {
-	    Prompt(interp, &prompt);
-	    if (Tcl_InterpDeleted(interp)) {
-		break;
+	if (mainLoopProc == NULL) {
+	    if (tty) {
+		Prompt(interp, &prompt);
+		if (Tcl_InterpDeleted(interp)) {
+		    break;
+		}
+		inChannel = Tcl_GetStdChannel(TCL_STDIN);
+		if (inChannel == (Tcl_Channel) NULL) {
+	            break;
+		}
 	    }
-	    inChannel = Tcl_GetStdChannel(TCL_STDIN);
-	    if (inChannel == (Tcl_Channel) NULL) {
-	        break;
+	    if (Tcl_IsShared(commandPtr)) {
+		Tcl_DecrRefCount(commandPtr);
+		commandPtr = Tcl_DuplicateObj(commandPtr);
+		Tcl_IncrRefCount(commandPtr);
 	    }
-	}
-	if (Tcl_IsShared(commandPtr)) {
-	    Tcl_DecrRefCount(commandPtr);
-	    commandPtr = Tcl_DuplicateObj(commandPtr);
-	    Tcl_IncrRefCount(commandPtr);
-	}
-        length = Tcl_GetsObj(inChannel, commandPtr);
-	if (length < 0) {
-	    if (Tcl_InputBlocked(inChannel)) {
+            length = Tcl_GetsObj(inChannel, commandPtr);
+	    if (length < 0) {
+		if (Tcl_InputBlocked(inChannel)) {
 
-		/*
-		 * This can only happen if stdin has been set to
-		 * non-blocking.  In that case cycle back and try
-		 * again.  This sets up a tight polling loop (since
-		 * we have no event loop running).  If this causes
-		 * bad CPU hogging, we might try toggling the blocking
-		 * on stdin instead.
+		    /*
+		     * This can only happen if stdin has been set to
+		     * non-blocking.  In that case cycle back and try
+		     * again.  This sets up a tight polling loop (since
+		     * we have no event loop running).  If this causes
+		     * bad CPU hogging, we might try toggling the blocking
+		     * on stdin instead.
+		     */
+
+		    continue;
+		}
+
+		/* 
+		 * Either EOF, or an error on stdin; we're done
 		 */
 
+		break;
+	    }
+
+            /*
+             * Add the newline removed by Tcl_GetsObj back to the string.
+             */
+
+	    if (Tcl_IsShared(commandPtr)) {
+		Tcl_DecrRefCount(commandPtr);
+		commandPtr = Tcl_DuplicateObj(commandPtr);
+		Tcl_IncrRefCount(commandPtr);
+	    }
+	    Tcl_AppendToObj(commandPtr, "\n", 1);
+	    if (!TclObjCommandComplete(commandPtr)) {
+		prompt = PROMPT_CONTINUE;
 		continue;
 	    }
 
-	    /* 
-	     * Either EOF, or an error on stdin; we're done
-	     */
-
-	    break;
-	}
-
-        /*
-         * Add the newline removed by Tcl_GetsObj back to the string.
-         */
-
-	if (Tcl_IsShared(commandPtr)) {
+	    prompt = PROMPT_START;
+	    code = Tcl_RecordAndEvalObj(interp, commandPtr, TCL_EVAL_GLOBAL);
+	    inChannel = Tcl_GetStdChannel(TCL_STDIN);
+	    outChannel = Tcl_GetStdChannel(TCL_STDOUT);
+	    errChannel = Tcl_GetStdChannel(TCL_STDERR);
 	    Tcl_DecrRefCount(commandPtr);
-	    commandPtr = Tcl_DuplicateObj(commandPtr);
+	    commandPtr = Tcl_NewObj();
 	    Tcl_IncrRefCount(commandPtr);
-	}
-	Tcl_AppendToObj(commandPtr, "\n", 1);
-	if (!TclObjCommandComplete(commandPtr)) {
-	    prompt = PROMPT_CONTINUE;
-	    continue;
-	}
-
-	prompt = PROMPT_START;
-	code = Tcl_RecordAndEvalObj(interp, commandPtr, TCL_EVAL_GLOBAL);
-	inChannel = Tcl_GetStdChannel(TCL_STDIN);
-	outChannel = Tcl_GetStdChannel(TCL_STDOUT);
-	errChannel = Tcl_GetStdChannel(TCL_STDERR);
-	Tcl_DecrRefCount(commandPtr);
-	commandPtr = Tcl_NewObj();
-	Tcl_IncrRefCount(commandPtr);
-	if (code != TCL_OK) {
-	    if (errChannel) {
-		Tcl_WriteObj(errChannel, Tcl_GetObjResult(interp));
-		Tcl_WriteChars(errChannel, "\n", 1);
+	    if (code != TCL_OK) {
+		if (errChannel) {
+		    Tcl_WriteObj(errChannel, Tcl_GetObjResult(interp));
+		    Tcl_WriteChars(errChannel, "\n", 1);
+		}
+	    } else if (tty) {
+		resultPtr = Tcl_GetObjResult(interp);
+		Tcl_IncrRefCount(resultPtr);
+		Tcl_GetStringFromObj(resultPtr, &length);
+		if ((length > 0) && outChannel) {
+		    Tcl_WriteObj(outChannel, resultPtr);
+		    Tcl_WriteChars(outChannel, "\n", 1);
+		}
+		Tcl_DecrRefCount(resultPtr);
 	    }
-	} else if (tty) {
-	    resultPtr = Tcl_GetObjResult(interp);
-	    Tcl_IncrRefCount(resultPtr);
-	    Tcl_GetStringFromObj(resultPtr, &length);
-	    if ((length > 0) && outChannel) {
-		Tcl_WriteObj(outChannel, resultPtr);
-		Tcl_WriteChars(outChannel, "\n", 1);
-	    }
-	    Tcl_DecrRefCount(resultPtr);
-	}
-	if (mainLoopProc != NULL) {
-
+	} else {	/* (mainLoopProc != NULL) */
 	    /*
 	     * If a main loop has been defined while running interactively,
 	     * we want to start a fileevent based prompt by establishing a
@@ -496,6 +498,7 @@ Tcl_Main(argc, argv, appInitProc)
      */
 
     if (!Tcl_InterpDeleted(interp)) {
+	char buffer[TCL_INTEGER_SPACE + 5];
         sprintf(buffer, "exit %d", exitCode);
         Tcl_Eval(interp, buffer);
 

@@ -16,7 +16,7 @@ ac_help="$ac_help
 ac_help="$ac_help
   --enable-shared         build and link with shared libraries [--enable-shared]"
 ac_help="$ac_help
-  --enable-64bit          enable 64bit support (where applicable)"
+  --enable-64bit          enable 64bit support (where applicable = amd64|ia64)"
 ac_help="$ac_help
   --enable-symbols        build with debugging symbols [--disable-symbols]"
 
@@ -534,7 +534,7 @@ fi
 TCL_VERSION=8.4
 TCL_MAJOR_VERSION=8
 TCL_MINOR_VERSION=4
-TCL_PATCH_LEVEL=".11"
+TCL_PATCH_LEVEL=".19"
 VER=$TCL_MAJOR_VERSION$TCL_MINOR_VERSION
 
 TCL_DDE_VERSION=1.2
@@ -1482,6 +1482,10 @@ fi
 
     SHLIB_SUFFIX=".dll"
 
+    # MACHINE is IX86 for LINK, but this is used by the manifest,
+    # which requires x86|amd64|ia64.
+    MACHINE="X86"
+
     # Check for a bug in gcc's windres that causes the
     # compile to fail when a Windows native path is
     # passed into windres. The mingw toolchain requires
@@ -1496,9 +1500,9 @@ fi
 	echo "END" >> $conftest
 
 	echo $ac_n "checking for Windows native path bug in windres""... $ac_c" 1>&6
-echo "configure:1500: checking for Windows native path bug in windres" >&5
+echo "configure:1504: checking for Windows native path bug in windres" >&5
 	cyg_conftest=`$CYGPATH $conftest`
-	if { ac_try='$RC -o conftest.res.o $cyg_conftest'; { (eval echo configure:1502: \"$ac_try\") 1>&5; (eval $ac_try) 2>&5; }; } ; then
+	if { ac_try='$RC -o conftest.res.o $cyg_conftest'; { (eval echo configure:1506: \"$ac_try\") 1>&5; (eval $ac_try) 2>&5; }; } ; then
 	    echo "$ac_t""no" 1>&6
 	else
 	    echo "$ac_t""yes" 1>&6
@@ -1517,9 +1521,9 @@ echo "configure:1500: checking for Windows native path bug in windres" >&5
     # set various compiler flags depending on whether we are using gcc or cl
 
     echo $ac_n "checking compiler flags""... $ac_c" 1>&6
-echo "configure:1521: checking compiler flags" >&5
+echo "configure:1525: checking compiler flags" >&5
     if test "${GCC}" = "yes" ; then
-	if test "$do64bit" = "yes" ; then
+	if test "$do64bit" != "no" ; then
 	    echo "configure: warning: "64bit mode not supported with GCC on Windows"" 1>&2
 	fi
 	SHLIB_LD=""
@@ -1659,34 +1663,46 @@ echo "configure:1521: checking compiler flags" >&5
 
 	# This is a 2-stage check to make sure we have the 64-bit SDK
 	# We have to know where the SDK is installed.
-	if test "$do64bit" = "yes" ; then
+	# This magic is based on MS Platform SDK for Win2003 SP1 - hobbs
+	if test "$do64bit" != "no" ; then
 	    if test "x${MSSDK}x" = "xx" ; then
-		MSSDK="C:/Progra~1/Microsoft SDK"
+		MSSDK="C:/Progra~1/Microsoft Platform SDK"
 	    fi
 	    MSSDK=`echo "$MSSDK" | sed -e 's!\\\!/!g'`
-	    if test ! -d "${MSSDK}/bin/win64" ; then
-		echo "configure: warning: "could not find 64-bit SDK to enable 64bit mode"" 1>&2
+	    PATH64=""
+	    case "$do64bit" in
+		amd64|x64|yes)
+		    MACHINE="AMD64" ; # default to AMD64 64-bit build
+		    PATH64="${MSSDK}/Bin/Win64/x86/AMD64"
+		    ;;
+		ia64)
+		    MACHINE="IA64"
+		    PATH64="${MSSDK}/Bin/Win64"
+		    ;;
+	    esac
+	    if test ! -d "${PATH64}" ; then
+		echo "configure: warning: Could not find 64-bit $MACHINE SDK to enable 64bit mode" 1>&2
+		echo "configure: warning: Ensure latest Platform SDK is installed" 1>&2
 		do64bit="no"
+	    else
+		echo "$ac_t""   Using 64-bit $MACHINE mode" 1>&6
 	    fi
 	fi
 
-	if test "$do64bit" = "yes" ; then
-	    # All this magic is necessary for the Win64 SDK RC1 - hobbs
+	if test "$do64bit" != "no" ; then
 	    # The space-based-path will work for the Makefile, but will
-	    # not work if AC_TRY_COMPILE is called.  TEA has the
-	    # TEA_PATH_NOSPACE to avoid this issue.
-	    CC="\"${MSSDK}/Bin/Win64/cl.exe\" \
-		-I\"${MSSDK}/Include/prerelease\" \
-		-I\"${MSSDK}/Include/Win64/crt\" \
-		-I\"${MSSDK}/Include/Win64/crt/sys\" \
-		-I\"${MSSDK}/Include\""
+	    # not work if AC_TRY_COMPILE is called.
+	    CC="\"${PATH64}/cl.exe\" -I\"${MSSDK}/Include\" \
+		-I\"${MSSDK}/Include/crt\" -I\"${MSSDK}/Include/crt/sys\""
 	    RC="\"${MSSDK}/bin/rc.exe\""
 	    CFLAGS_DEBUG="-nologo -Zi -Od ${runtime}d"
 	    # Do not use -O2 for Win64 - this has proved buggy in code gen.
 	    CFLAGS_OPTIMIZE="-nologo -O1 ${runtime}"
-	    lflags="-MACHINE:IA64 -LIBPATH:\"${MSSDK}/Lib/IA64\" \
-		-LIBPATH:\"${MSSDK}/Lib/Prerelease/IA64\" -nologo"
-	    LINKBIN="\"${MSSDK}/bin/win64/link.exe\""
+	    lflags="-nologo -MACHINE:${MACHINE} -LIBPATH:\"${MSSDK}/Lib/${MACHINE}\""
+	    LINKBIN="\"${PATH64}/link.exe\""
+	    # Avoid 'unresolved external symbol __security_cookie' errors.
+	    # c.f. http://support.microsoft.com/?id=894573
+	    LIBS="user32.lib advapi32.lib bufferoverflowU.lib"
 	else
 	    RC="rc"
 	    # -Od - no optimization
@@ -1696,9 +1712,9 @@ echo "configure:1521: checking compiler flags" >&5
 	    CFLAGS_OPTIMIZE="-nologo -O2 ${runtime}"
 	    lflags="-nologo"
 	    LINKBIN="link"
+	    LIBS="user32.lib advapi32.lib"
 	fi
 
-	LIBS="user32.lib advapi32.lib"
 	LIBS_GUI="gdi32.lib comdlg32.lib imm32.lib comctl32.lib shell32.lib"
 	SHLIB_LD="${LINKBIN} -dll -incremental:no ${lflags}"
 	# link -lib only works when -lib is the first arg
@@ -1743,7 +1759,7 @@ echo "configure:1521: checking compiler flags" >&5
 
 
     echo $ac_n "checking for build with symbols""... $ac_c" 1>&6
-echo "configure:1747: checking for build with symbols" >&5
+echo "configure:1763: checking for build with symbols" >&5
     # Check whether --enable-symbols or --disable-symbols was given.
 if test "${enable_symbols+set}" = set; then
   enableval="$enable_symbols"
@@ -1803,7 +1819,7 @@ TCL_DBGX=${DBGX}
 #--------------------------------------------------------------------
 
 echo $ac_n "checking how to run the C preprocessor""... $ac_c" 1>&6
-echo "configure:1807: checking how to run the C preprocessor" >&5
+echo "configure:1823: checking how to run the C preprocessor" >&5
 # On Suns, sometimes $CPP names a directory.
 if test -n "$CPP" && test -d "$CPP"; then
   CPP=
@@ -1818,13 +1834,13 @@ else
   # On the NeXT, cc -E runs the code through the compiler's parser,
   # not just through cpp.
   cat > conftest.$ac_ext <<EOF
-#line 1822 "configure"
+#line 1838 "configure"
 #include "confdefs.h"
 #include <assert.h>
 Syntax Error
 EOF
 ac_try="$ac_cpp conftest.$ac_ext >/dev/null 2>conftest.out"
-{ (eval echo configure:1828: \"$ac_try\") 1>&5; (eval $ac_try) 2>&5; }
+{ (eval echo configure:1844: \"$ac_try\") 1>&5; (eval $ac_try) 2>&5; }
 ac_err=`grep -v '^ *+' conftest.out | grep -v "^conftest.${ac_ext}\$"`
 if test -z "$ac_err"; then
   :
@@ -1835,13 +1851,13 @@ else
   rm -rf conftest*
   CPP="${CC-cc} -E -traditional-cpp"
   cat > conftest.$ac_ext <<EOF
-#line 1839 "configure"
+#line 1855 "configure"
 #include "confdefs.h"
 #include <assert.h>
 Syntax Error
 EOF
 ac_try="$ac_cpp conftest.$ac_ext >/dev/null 2>conftest.out"
-{ (eval echo configure:1845: \"$ac_try\") 1>&5; (eval $ac_try) 2>&5; }
+{ (eval echo configure:1861: \"$ac_try\") 1>&5; (eval $ac_try) 2>&5; }
 ac_err=`grep -v '^ *+' conftest.out | grep -v "^conftest.${ac_ext}\$"`
 if test -z "$ac_err"; then
   :
@@ -1852,13 +1868,13 @@ else
   rm -rf conftest*
   CPP="${CC-cc} -nologo -E"
   cat > conftest.$ac_ext <<EOF
-#line 1856 "configure"
+#line 1872 "configure"
 #include "confdefs.h"
 #include <assert.h>
 Syntax Error
 EOF
 ac_try="$ac_cpp conftest.$ac_ext >/dev/null 2>conftest.out"
-{ (eval echo configure:1862: \"$ac_try\") 1>&5; (eval $ac_try) 2>&5; }
+{ (eval echo configure:1878: \"$ac_try\") 1>&5; (eval $ac_try) 2>&5; }
 ac_err=`grep -v '^ *+' conftest.out | grep -v "^conftest.${ac_ext}\$"`
 if test -z "$ac_err"; then
   :
@@ -1884,17 +1900,17 @@ echo "$ac_t""$CPP" 1>&6
 
 ac_safe=`echo "errno.h" | sed 'y%./+-%__p_%'`
 echo $ac_n "checking for errno.h""... $ac_c" 1>&6
-echo "configure:1888: checking for errno.h" >&5
+echo "configure:1904: checking for errno.h" >&5
 if eval "test \"`echo '$''{'ac_cv_header_$ac_safe'+set}'`\" = set"; then
   echo $ac_n "(cached) $ac_c" 1>&6
 else
   cat > conftest.$ac_ext <<EOF
-#line 1893 "configure"
+#line 1909 "configure"
 #include "confdefs.h"
 #include <errno.h>
 EOF
 ac_try="$ac_cpp conftest.$ac_ext >/dev/null 2>conftest.out"
-{ (eval echo configure:1898: \"$ac_try\") 1>&5; (eval $ac_try) 2>&5; }
+{ (eval echo configure:1914: \"$ac_try\") 1>&5; (eval $ac_try) 2>&5; }
 ac_err=`grep -v '^ *+' conftest.out | grep -v "^conftest.${ac_ext}\$"`
 if test -z "$ac_err"; then
   rm -rf conftest*
@@ -2148,15 +2164,34 @@ trap 'rm -f $CONFIG_STATUS conftest*; exit 1' 1 2 15
 # Transform confdefs.h into DEFS.
 # Protect against shell expansion while executing Makefile rules.
 # Protect against Makefile macro expansion.
-cat > conftest.defs <<\EOF
-s%#define \([A-Za-z_][A-Za-z0-9_]*\) *\(.*\)%-D\1=\2%g
-s%[ 	`~#$^&*(){}\\|;'"<>?]%\\&%g
-s%\[%\\&%g
-s%\]%\\&%g
-s%\$%$$%g
-EOF
-DEFS=`sed -f conftest.defs confdefs.h | tr '\012' ' '`
-rm -f conftest.defs
+#
+# If the first sed substitution is executed (which looks for macros that
+# take arguments), then we branch to the quote section.  Otherwise,
+# look for a macro that doesn't take arguments.
+cat >confdef2opt.sed <<\_ACEOF
+t clear
+: clear
+s,^[ 	]*#[ 	]*define[ 	][ 	]*\([^ 	(][^ 	(]*([^)]*)\)[ 	]*\(.*\),-D\1=\2,g
+t quote
+s,^[ 	]*#[ 	]*define[ 	][ 	]*\([^ 	][^ 	]*\)[ 	]*\(.*\),-D\1=\2,g
+t quote
+d
+: quote
+s,[ 	`~#$^&*(){}\\|;'"<>?],\\&,g
+s,\[,\\&,g
+s,\],\\&,g
+s,\$,$$,g
+p
+_ACEOF
+# We use echo to avoid assuming a particular line-breaking character.
+# The extra dot is to prevent the shell from consuming trailing
+# line-breaks from the sub-command output.  A line-break within
+# single-quotes doesn't work because, if this script is created in a
+# platform that uses two characters for line-breaks (e.g., DOS), tr
+# would break.
+ac_LF_and_DOT=`echo; echo .`
+DEFS=`sed -n -f confdef2opt.sed confdefs.h | tr "$ac_LF_and_DOT" ' .'`
+rm -f confdef2opt.sed
 
 
 # Without the "./", some shells look in PATH for config.status.

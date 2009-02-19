@@ -6,32 +6,32 @@
 	See the file "license.terms" for information on usage and redistribution of
 	this file, and for a DISCLAIMER OF ALL WARRANTIES.
 
-	RCS: @(#) $Id: Tcl-Info.plist.in,v 1.1.2.3 2007/04/29 02:21:33 das Exp $
+	RCS: @(#) $Id: Tclsh-Info.plist.in,v 1.1.2.2 2007/06/06 09:54:33 das Exp $
 -->
 <plist version="1.0">
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>English</string>
 	<key>CFBundleExecutable</key>
-	<string>@TCL_LIB_FILE@</string>
+	<string>tclsh@TCL_VERSION@</string>
 	<key>CFBundleGetInfoString</key>
-	<string>Tcl @TCL_VERSION@@TCL_PATCH_LEVEL@,
+	<string>Tcl Shell @TCL_VERSION@@TCL_PATCH_LEVEL@,
 Copyright © @TCL_YEAR@ Tcl Core Team,
 Copyright © 2001-@TCL_YEAR@ Daniel A. Steffen,
 Initial MacOS X Port by Jim Ingham &amp; Ian Reid,
 Copyright © 2001-2002, Apple Computer, Inc.</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.tcltk.tcllibrary</string>
+	<string>com.tcltk.tclsh</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Tcl @TCL_VERSION@</string>
+	<string>tclsh</string>
 	<key>CFBundlePackageType</key>
-	<string>FMWK</string>
+	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>@TCL_VERSION@@TCL_PATCH_LEVEL@</string>
 	<key>CFBundleSignature</key>
-	<string>Tcl </string>
+	<string>TclS</string>
 	<key>CFBundleVersion</key>
 	<string>@TCL_VERSION@@TCL_PATCH_LEVEL@</string>
 </dict>

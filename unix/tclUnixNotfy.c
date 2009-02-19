@@ -11,13 +11,13 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclUnixNotfy.c,v 1.11.2.12 2005/06/07 10:26:58 dkf Exp $
+ * RCS: @(#) $Id: tclUnixNotfy.c,v 1.11.2.16 2006/08/22 17:45:02 andreas_kupries Exp $
  */
 
-#ifndef HAVE_COREFOUNDATION /* Darwin/Mac OS X CoreFoundation notifier
-                             * is in tclMacOSXNotify.c */
 #include "tclInt.h"
 #include "tclPort.h"
+#ifndef HAVE_COREFOUNDATION /* Darwin/Mac OS X CoreFoundation notifier
+                             * is in tclMacOSXNotify.c */
 #include <signal.h> 
 
 extern TclStubs tclStubs;
@@ -275,7 +275,7 @@ Tcl_FinalizeNotifier(clientData)
      */
 
     if (notifierCount == 0) {
-	int result, dummy;
+	int result;
 	if (triggerPipe < 0) {
 	    panic("Tcl_FinalizeNotifier: notifier pipe not initialized");
 	}
@@ -288,13 +288,15 @@ Tcl_FinalizeNotifier(clientData)
 	 * not just close the pipe and check for EOF in the notifier
 	 * thread because if a background child process was created with
 	 * exec, select() would not register the EOF on the pipe until the
-	 * child processes had terminated. [Bug: 4139]
+	 * child processes had terminated. [Bug: 4139] [Bug: 1222872]
 	 */
+
 	write(triggerPipe, "q", 1);
 	close(triggerPipe);
-
-	Tcl_ConditionWait(&notifierCV, &notifierMutex, NULL);
-	result = Tcl_JoinThread(notifierThread, &dummy);
+	while(triggerPipe >= 0) {
+	    Tcl_ConditionWait(&notifierCV, &notifierMutex, NULL);
+	}
+	result = Tcl_JoinThread(notifierThread, NULL);
 	if (result) {
 	    Tcl_Panic("Tcl_FinalizeNotifier: unable to join notifier thread");
 	}
@@ -712,7 +714,17 @@ Tcl_WaitForEvent(timePtr)
     Tcl_MutexLock(&notifierMutex);
 
     waitForFiles = (tsdPtr->numFdBits > 0);
-    if (timePtr != NULL && timePtr->sec == 0 && timePtr->usec == 0) {
+    if (timePtr != NULL && timePtr->sec == 0 && (timePtr->usec == 0
+#if defined(__APPLE__) && defined(__LP64__)
+	    /*
+	     * On 64-bit Darwin, pthread_cond_timedwait() appears to have a bug
+	     * that causes it to wait forever when passed an absolute time which
+	     * has already been exceeded by the system time; as a workaround,
+	     * when given a very brief timeout, just do a poll. [Bug 1457797]
+	     */
+	    || timePtr->usec < 10
+#endif
+	    )) {
 	/*
 	 * Cannot emulate a polling select with a polling condition variable.
 	 * Instead, pretend to wait for files and tell the notifier

@@ -9,11 +9,12 @@
  * Copyright (c) 1994-1997 Sun Microsystems, Inc.
  * Copyright (c) 1998-1999 by Scriptics Corporation.
  * Copyright (c) 2001, 2002 by Kevin B. Kenny.  All rights reserved.
+ * Copyright (c) 2007 Daniel A. Steffen <das@users.sourceforge.net>
  *
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclBasic.c,v 1.75.2.16 2005/06/21 17:19:40 dgp Exp $
+ * RCS: @(#) $Id: tclBasic.c,v 1.75.2.28 2007/09/13 16:13:19 das Exp $
  */
 
 #include "tclInt.h"
@@ -40,6 +41,22 @@ static int	        StringTraceProc _ANSI_ARGS_((ClientData clientData,
 						    int objc,
 						    Tcl_Obj *CONST objv[]));
 static void           StringTraceDeleteProc _ANSI_ARGS_((ClientData clientData));
+
+#ifdef TCL_TIP280
+/* TIP #280 - Modified token based evulation, with line information */
+static int            EvalEx _ANSI_ARGS_((Tcl_Interp *interp, CONST char *script,
+					  int numBytes, int flags, int line));
+
+static int            EvalTokensStandard _ANSI_ARGS_((Tcl_Interp *interp,
+						      Tcl_Token *tokenPtr,
+						      int count, int line));
+
+#endif
+
+#ifdef USE_DTRACE
+static int	DTraceObjCmd(ClientData dummy, Tcl_Interp *interp, int objc,
+		    Tcl_Obj *CONST objv[]);
+#endif
 
 extern TclStubs tclStubs;
 
@@ -334,6 +351,19 @@ Tcl_CreateInterp()
     iPtr->maxNestingDepth = MAX_NESTING_DEPTH;
     iPtr->framePtr = NULL;
     iPtr->varFramePtr = NULL;
+
+#ifdef TCL_TIP280
+    /*
+     * TIP #280 - Initialize the arrays used to extend the ByteCode and
+     * Proc structures.
+     */
+    iPtr->cmdFramePtr  = NULL;
+    iPtr->linePBodyPtr = (Tcl_HashTable*) ckalloc (sizeof (Tcl_HashTable));
+    iPtr->lineBCPtr    = (Tcl_HashTable*) ckalloc (sizeof (Tcl_HashTable));
+    Tcl_InitHashTable(iPtr->linePBodyPtr, TCL_ONE_WORD_KEYS);
+    Tcl_InitHashTable(iPtr->lineBCPtr,    TCL_ONE_WORD_KEYS);
+#endif
+
     iPtr->activeVarTracePtr = NULL;
     iPtr->returnCode = TCL_OK;
     iPtr->errorInfo = NULL;
@@ -345,6 +375,12 @@ Tcl_CreateInterp()
 
     Tcl_InitHashTable(&iPtr->packageTable, TCL_STRING_KEYS);
     iPtr->packageUnknown = NULL;
+#ifdef TCL_TIP268
+    /* TIP #268 */
+    iPtr->packagePrefer = (getenv ("TCL_PKG_PREFER_LATEST") == NULL ? 
+			   PKG_PREFER_STABLE   :
+			   PKG_PREFER_LATEST);
+#endif
     iPtr->cmdCount = 0;
     iPtr->termOffset = 0;
     TclInitLiteralTable(&(iPtr->literalTable));
@@ -363,6 +399,7 @@ Tcl_CreateInterp()
     iPtr->emptyObjPtr = Tcl_NewObj(); /* another empty object */
     Tcl_IncrRefCount(iPtr->emptyObjPtr);
     iPtr->resultSpace[0] = 0;
+    iPtr->threadId = Tcl_GetCurrentThread();
 
     iPtr->globalNsPtr = NULL;	/* force creation of global ns below */
     iPtr->globalNsPtr = (Namespace *) Tcl_CreateNamespace(interp, "",
@@ -477,6 +514,14 @@ Tcl_CreateInterp()
 	}
     }
 
+#ifdef USE_DTRACE
+    /*
+     * Register the tcl::dtrace command.
+     */
+
+    Tcl_CreateObjCommand(interp, "::tcl::dtrace", DTraceObjCmd, NULL, NULL);
+#endif /* USE_DTRACE */
+
     /*
      * Register the builtin math functions.
      */
@@ -571,10 +616,21 @@ Tcl_CreateInterp()
 
     /*
      * Register Tcl's version number.
+     * TIP#268: Expose information about its status,
+     *          for runtime switches in the core library
+     *          and tests.
      */
 
     Tcl_PkgProvideEx(interp, "Tcl", TCL_VERSION, (ClientData) &tclStubs);
-    
+
+#ifdef TCL_TIP268
+    Tcl_SetVar2(interp, "tcl_platform", "tip,268", "1",
+	    TCL_GLOBAL_ONLY);
+#endif
+#ifdef TCL_TIP280
+    Tcl_SetVar2(interp, "tcl_platform", "tip,280", "1",
+	    TCL_GLOBAL_ONLY);
+#endif
 #ifdef Tcl_InitStubs
 #undef Tcl_InitStubs
 #endif
@@ -648,19 +704,16 @@ Tcl_CallWhenDeleted(interp, proc, clientData)
     ClientData clientData;	/* One-word value to pass to proc. */
 {
     Interp *iPtr = (Interp *) interp;
-    static int assocDataCounter = 0;
-#ifdef TCL_THREADS
-    static Tcl_Mutex assocMutex;
-#endif
+    static Tcl_ThreadDataKey assocDataCounterKey;
+    int *assocDataCounterPtr =
+	    Tcl_GetThreadData(&assocDataCounterKey, (int)sizeof(int));
     int new;
     char buffer[32 + TCL_INTEGER_SPACE];
     AssocData *dPtr = (AssocData *) ckalloc(sizeof(AssocData));
     Tcl_HashEntry *hPtr;
 
-    Tcl_MutexLock(&assocMutex);
-    sprintf(buffer, "Assoc Data Key #%d", assocDataCounter);
-    assocDataCounter++;
-    Tcl_MutexUnlock(&assocMutex);
+    sprintf(buffer, "Assoc Data Key #%d", *assocDataCounterPtr);
+    (*assocDataCounterPtr)++;
 
     if (iPtr->assocData == (Tcl_HashTable *) NULL) {
         iPtr->assocData = (Tcl_HashTable *) ckalloc(sizeof(Tcl_HashTable));
@@ -1097,6 +1150,62 @@ DeleteInterpProc(interp)
      */
 
     TclDeleteLiteralTable(interp, &(iPtr->literalTable));
+
+#ifdef TCL_TIP280
+    /* TIP #280 - Release the arrays for ByteCode/Proc extension, and contents.
+     */
+    {
+        Tcl_HashEntry *hPtr;
+	Tcl_HashSearch hSearch;
+	CmdFrame*      cfPtr;
+	ExtCmdLoc*     eclPtr;
+	int            i;
+
+	for (hPtr = Tcl_FirstHashEntry(iPtr->linePBodyPtr, &hSearch);
+	     hPtr != NULL;
+	     hPtr = Tcl_NextHashEntry(&hSearch)) {
+
+	    cfPtr = (CmdFrame*) Tcl_GetHashValue (hPtr);
+
+	    if (cfPtr->type == TCL_LOCATION_SOURCE) {
+	        Tcl_DecrRefCount (cfPtr->data.eval.path);
+	    }
+	    ckfree ((char*) cfPtr->line);
+	    ckfree ((char*) cfPtr);
+	    Tcl_DeleteHashEntry (hPtr);
+
+	}
+	Tcl_DeleteHashTable (iPtr->linePBodyPtr);
+	ckfree ((char*) iPtr->linePBodyPtr);
+	iPtr->linePBodyPtr = NULL;
+
+	/* See also tclCompile.c, TclCleanupByteCode */
+
+	for (hPtr = Tcl_FirstHashEntry(iPtr->lineBCPtr, &hSearch);
+	     hPtr != NULL;
+	     hPtr = Tcl_NextHashEntry(&hSearch)) {
+
+	    eclPtr = (ExtCmdLoc*) Tcl_GetHashValue (hPtr);
+
+	    if (eclPtr->type == TCL_LOCATION_SOURCE) {
+	        Tcl_DecrRefCount (eclPtr->path);
+	    }
+	    for (i=0; i< eclPtr->nuloc; i++) {
+	        ckfree ((char*) eclPtr->loc[i].line);
+	    }
+
+            if (eclPtr->loc != NULL) {
+		ckfree ((char*) eclPtr->loc);
+	    }
+
+	    ckfree ((char*) eclPtr);
+	    Tcl_DeleteHashEntry (hPtr);
+	}
+	Tcl_DeleteHashTable (iPtr->lineBCPtr);
+	ckfree((char*) iPtr->lineBCPtr);
+	iPtr->lineBCPtr = NULL;
+    }
+#endif
     ckfree((char *) iPtr);
 }
 
@@ -2434,6 +2543,13 @@ Tcl_DeleteCommandFromToken(interp, cmd)
     cmdPtr->flags |= CMD_IS_DELETED;
 
     /*
+     * Bump the command epoch counter. This will invalidate all cached
+     * references that point to this command.
+     */
+    
+    cmdPtr->cmdEpoch++;
+
+    /*
      * Call trace procedures for the command being deleted. Then delete
      * its traces. 
      */
@@ -2486,13 +2602,6 @@ Tcl_DeleteCommandFromToken(interp, cmd)
 
 	(*cmdPtr->deleteProc)(cmdPtr->deleteData);
     }
-
-    /*
-     * Bump the command epoch counter. This will invalidate all cached
-     * references that point to this command.
-     */
-    
-    cmdPtr->cmdEpoch++;
 
     /*
      * If this command was imported into other namespaces, then imported
@@ -2987,6 +3096,7 @@ TclEvalObjvInternal(interp, objc, objv, command, length, flags)
     int code = TCL_OK;
     int traceCode = TCL_OK;
     int checkTraces = 1;
+    Namespace *savedNsPtr = NULL;
 
     if (TclInterpReady(interp) == TCL_ERROR) {
 	return TCL_ERROR;
@@ -2996,31 +3106,31 @@ TclEvalObjvInternal(interp, objc, objv, command, length, flags)
 	return TCL_OK;
     }
 
+
     /*
      * If any execution traces rename or delete the current command,
      * we may need (at most) two passes here.
      */
+
+    savedVarFramePtr = iPtr->varFramePtr;
     while (1) {
     
+	/* Configure evaluation context to match the requested flags */
+	if (flags & TCL_EVAL_GLOBAL) {
+	    iPtr->varFramePtr = NULL;
+	} else if ((flags & TCL_EVAL_INVOKE) && iPtr->varFramePtr) {
+	    savedNsPtr = iPtr->varFramePtr->nsPtr;
+	    iPtr->varFramePtr->nsPtr = iPtr->globalNsPtr;
+	}
+	
         /*
          * Find the procedure to execute this command. If there isn't one,
          * then see if there is a command "unknown".  If so, create a new
          * word array with "unknown" as the first word and the original
          * command words as arguments.  Then call ourselves recursively
          * to execute it.
-	 *
-	 * If caller requests, or if we're resolving the target end of
-	 * an interpeter alias (TCL_EVAL_INVOKE), be sure to do command
-	 * name resolution in the global namespace.
          */
-
-	savedVarFramePtr = iPtr->varFramePtr;
-	if (flags & (TCL_EVAL_INVOKE | TCL_EVAL_GLOBAL)) {
-	    iPtr->varFramePtr = NULL;
-	}
         cmdPtr = (Command *) Tcl_GetCommandFromObj(interp, objv[0]);
-	iPtr->varFramePtr = savedVarFramePtr;
-
         if (cmdPtr == NULL) {
 	    newObjv = (Tcl_Obj **) ckalloc((unsigned)
 		((objc + 1) * sizeof (Tcl_Obj *)));
@@ -3037,20 +3147,29 @@ TclEvalObjvInternal(interp, objc, objv, command, length, flags)
 	        code = TCL_ERROR;
 	    } else {
 	        iPtr->numLevels++;
-	        code = TclEvalObjvInternal(interp, objc+1, newObjv, command, length, 0);
+	        code = TclEvalObjvInternal(interp, objc+1, newObjv,
+			command, length, 0);
 	        iPtr->numLevels--;
 	    }
 	    Tcl_DecrRefCount(newObjv[0]);
 	    ckfree((char *) newObjv);
+	    if (savedNsPtr) {
+		iPtr->varFramePtr->nsPtr = savedNsPtr;
+	    }
 	    goto done;
         }
+	if (savedNsPtr) {
+	    iPtr->varFramePtr->nsPtr = savedNsPtr;
+	}
     
         /*
          * Call trace procedures if needed.
          */
         if ((checkTraces) && (command != NULL)) {
             int cmdEpoch = cmdPtr->cmdEpoch;
-            cmdPtr->refCount++;
+	    int newEpoch;
+	    
+	    cmdPtr->refCount++;
             /* 
              * If the first set of traces modifies/deletes the command or
              * any existing traces, then the set checkTraces to 0 and
@@ -3065,8 +3184,9 @@ TclEvalObjvInternal(interp, objc, objv, command, length, flags)
                 traceCode = TclCheckExecutionTraces(interp, command, length,
                                cmdPtr, code, TCL_TRACE_ENTER_EXEC, objc, objv);
             }
-            cmdPtr->refCount--;
-            if (cmdEpoch != cmdPtr->cmdEpoch) {
+	    newEpoch = cmdPtr->cmdEpoch;
+	    TclCleanupCommand(cmdPtr);
+            if (cmdEpoch != newEpoch) {
                 /* The command has been modified in some way */
                 checkTraces = 0;
                 continue;
@@ -3075,18 +3195,31 @@ TclEvalObjvInternal(interp, objc, objv, command, length, flags)
         break;
     }
 
+    if (TCL_DTRACE_CMD_ARGS_ENABLED()) {
+	char *a[10];
+	int i = 0;
+
+	while (i < 10) {
+	    a[i] = i < objc ? TclGetString(objv[i]) : NULL; i++;
+	}
+	TCL_DTRACE_CMD_ARGS(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7],
+		a[8], a[9]);
+    }
+
     /*
      * Finally, invoke the command's Tcl_ObjCmdProc.
      */
     cmdPtr->refCount++;
     iPtr->cmdCount++;
     if ( code == TCL_OK && traceCode == TCL_OK) {
-	savedVarFramePtr = iPtr->varFramePtr;
-	if (flags & TCL_EVAL_GLOBAL) {
-	    iPtr->varFramePtr = NULL;
+	if (TCL_DTRACE_CMD_ENTRY_ENABLED()) {
+	    TCL_DTRACE_CMD_ENTRY(TclGetString(objv[0]), objc - 1,
+		    (Tcl_Obj **)(objv + 1));
 	}
 	code = (*cmdPtr->objProc)(cmdPtr->objClientData, interp, objc, objv);
-	iPtr->varFramePtr = savedVarFramePtr;
+	if (TCL_DTRACE_CMD_RETURN_ENABLED()) {
+	    TCL_DTRACE_CMD_RETURN(TclGetString(objv[0]), code);
+	}
     }
     if (Tcl_AsyncReady()) {
 	code = Tcl_AsyncInvoke(interp, code);
@@ -3134,7 +3267,15 @@ TclEvalObjvInternal(interp, objc, objv, command, length, flags)
 	(void) Tcl_GetObjResult(interp);
     }
 
+    if (TCL_DTRACE_CMD_RESULT_ENABLED()) {
+	Tcl_Obj *r;
+
+	r = Tcl_GetObjResult(interp);
+	TCL_DTRACE_CMD_RESULT(TclGetString(objv[0]), code, TclGetString(r), r);
+    }
+
     done:
+    iPtr->varFramePtr = savedVarFramePtr;
     return code;
 }
 
@@ -3335,7 +3476,7 @@ Tcl_LogCommandInfo(interp, script, command, length)
 /*
  *----------------------------------------------------------------------
  *
- * Tcl_EvalTokensStandard --
+ * Tcl_EvalTokensStandard, EvalTokensStandard --
  *
  *	Given an array of tokens parsed from a Tcl command (e.g., the
  *	tokens that make up a word or the index for an array variable)
@@ -3349,7 +3490,8 @@ Tcl_LogCommandInfo(interp, script, command, length)
  *
  * Side effects:
  *	Depends on the array of tokens being evaled.
-  *
+ *
+ * TIP #280 : Keep public API, internally extended API.
  *----------------------------------------------------------------------
  */
 
@@ -3363,6 +3505,22 @@ Tcl_EvalTokensStandard(interp, tokenPtr, count)
     int count;			/* Number of tokens to consider at tokenPtr.
 				 * Must be at least 1. */
 {
+#ifdef TCL_TIP280
+  return EvalTokensStandard (interp, tokenPtr, count, 1);
+}
+
+static int
+EvalTokensStandard(interp, tokenPtr, count, line)
+    Tcl_Interp *interp;		/* Interpreter in which to lookup
+				 * variables, execute nested commands,
+				 * and report errors. */
+    Tcl_Token *tokenPtr;	/* Pointer to first in an array of tokens
+				 * to evaluate and concatenate. */
+    int count;			/* Number of tokens to consider at tokenPtr.
+				 * Must be at least 1. */
+    int line;                   /* The line the script starts on. */
+{
+#endif
     Tcl_Obj *resultPtr, *indexPtr, *valuePtr;
     char buffer[TCL_UTF_MAX];
 #ifdef TCL_MEM_DEBUG
@@ -3411,8 +3569,14 @@ Tcl_EvalTokensStandard(interp, tokenPtr, count)
 		iPtr->numLevels++;
 		code = TclInterpReady(interp);
 		if (code == TCL_OK) {
+#ifndef TCL_TIP280
 		    code = Tcl_EvalEx(interp,
 			    tokenPtr->start+1, tokenPtr->size-2, 0);
+#else
+		    /* TIP #280: Transfer line information to nested command */
+		    code = EvalEx(interp,
+			    tokenPtr->start+1, tokenPtr->size-2, 0, line);
+#endif
 		}
 		iPtr->numLevels--;
 		if (code != TCL_OK) {
@@ -3427,8 +3591,14 @@ Tcl_EvalTokensStandard(interp, tokenPtr, count)
 		    indexPtr = NULL;
 		    index = NULL;
 		} else {
+#ifndef TCL_TIP280
 		    code = Tcl_EvalTokensStandard(interp, tokenPtr+2,
 			    tokenPtr->numComponents - 1);
+#else
+		    /* TIP #280: Transfer line information to nested command */
+		    code = EvalTokensStandard(interp, tokenPtr+2,
+			    tokenPtr->numComponents - 1, line);
+#endif
 		    if (code != TCL_OK) {
 			goto done;
 		    }
@@ -3508,8 +3678,7 @@ Tcl_EvalTokensStandard(interp, tokenPtr, count)
     }
     return code;
 }
-
-
+
 /*
  *----------------------------------------------------------------------
  *
@@ -3565,7 +3734,7 @@ Tcl_EvalTokens(interp, tokenPtr, count)
 /*
  *----------------------------------------------------------------------
  *
- * Tcl_EvalEx --
+ * Tcl_EvalEx, EvalEx --
  *
  *	This procedure evaluates a Tcl script without using the compiler
  *	or byte-code interpreter.  It just parses the script, creates
@@ -3580,6 +3749,7 @@ Tcl_EvalTokens(interp, tokenPtr, count)
  * Side effects:
  *	Depends on the script.
  *
+ * TIP #280 : Keep public API, internally extended API.
  *----------------------------------------------------------------------
  */
 
@@ -3596,13 +3766,33 @@ Tcl_EvalEx(interp, script, numBytes, flags)
 				 * TCL_EVAL_GLOBAL is currently
 				 * supported. */
 {
+#ifdef TCL_TIP280
+  return EvalEx (interp, script, numBytes, flags, 1);
+}
+
+static int
+EvalEx(interp, script, numBytes, flags, line)
+    Tcl_Interp *interp;		/* Interpreter in which to evaluate the
+				 * script.  Also used for error reporting. */
+    CONST char *script;		/* First character of script to evaluate. */
+    int numBytes;		/* Number of bytes in script.  If < 0, the
+				 * script consists of all bytes up to the
+				 * first null character. */
+    int flags;			/* Collection of OR-ed bits that control
+				 * the evaluation of the script.  Only
+				 * TCL_EVAL_GLOBAL is currently
+				 * supported. */
+    int line;                   /* The line the script starts on. */
+{
+#endif
     Interp *iPtr = (Interp *) interp;
     CONST char *p, *next;
     Tcl_Parse parse;
 #define NUM_STATIC_OBJS 20
     Tcl_Obj *staticObjArray[NUM_STATIC_OBJS], **objv;
     Tcl_Token *tokenPtr;
-    int i, code, commandLength, bytesLeft, nested;
+    int code = TCL_OK;
+    int i, commandLength, bytesLeft, nested;
     CallFrame *savedVarFramePtr;   /* Saves old copy of iPtr->varFramePtr
 				    * in case TCL_EVAL_GLOBAL was set. */
     int allowExceptions = (iPtr->evalFlags & TCL_ALLOW_EXCEPTIONS);
@@ -3614,6 +3804,11 @@ Tcl_EvalEx(interp, script, numBytes, flags)
      */
 
     int gotParse = 0, objectsUsed = 0;
+
+#ifdef TCL_TIP280
+    /* TIP #280 Structures for tracking of command locations. */
+    CmdFrame eeFrame;
+#endif
 
     if (numBytes < 0) {
 	numBytes = strlen(script);
@@ -3638,6 +3833,62 @@ Tcl_EvalEx(interp, script, numBytes, flags)
     } else {
 	nested = 0;
     }
+
+#ifdef TCL_TIP280
+    /* TIP #280 Initialize tracking. Do not push on the frame stack yet. */
+    /*
+     * We may cont. counting based on a specific context (CTX), or open a new
+     * context, either for a sourced script, or 'eval'. For sourced files we
+     * always have a path object, even if nothing was specified in the interp
+     * itself. That makes code using it simpler as NULL checks can be left
+     * out. Sourced file without path in the 'scriptFile' is possible during
+     * Tcl initialization.
+     */
+
+    if (iPtr->evalFlags & TCL_EVAL_CTX) {
+        /* Path information comes out of the context. */
+
+        eeFrame.type           = TCL_LOCATION_SOURCE;
+	eeFrame.data.eval.path = iPtr->invokeCmdFramePtr->data.eval.path;
+	Tcl_IncrRefCount (eeFrame.data.eval.path);
+    } else if (iPtr->evalFlags & TCL_EVAL_FILE) {
+	/* Set up for a sourced file */
+
+        eeFrame.type = TCL_LOCATION_SOURCE;
+
+	if (iPtr->scriptFile) {
+	    /* Normalization here, to have the correct pwd. Should have
+	     * negligible impact on performance, as the norm should have been
+	     * done already by the 'source' invoking us, and it caches the
+	     * result
+	     */
+
+	    Tcl_Obj* norm = Tcl_FSGetNormalizedPath (interp, iPtr->scriptFile);
+	    if (!norm) {
+		/* Error message in the interp result */
+		return TCL_ERROR;
+	    }
+	    eeFrame.data.eval.path = norm;
+	    Tcl_IncrRefCount (eeFrame.data.eval.path);
+	} else {
+	    eeFrame.data.eval.path = Tcl_NewStringObj ("",-1);
+	}
+    } else {
+	/* Set up for plain eval */
+
+        eeFrame.type           = TCL_LOCATION_EVAL;
+	eeFrame.data.eval.path = NULL;
+    }
+
+    eeFrame.level     = (iPtr->cmdFramePtr == NULL
+			 ? 1
+			 : iPtr->cmdFramePtr->level + 1);
+    eeFrame.framePtr  = iPtr->framePtr;
+    eeFrame.nextPtr   = iPtr->cmdFramePtr;
+    eeFrame.nline     = 0;
+    eeFrame.line      = NULL;
+#endif
+
     iPtr->evalFlags = 0;
     do {
 	if (Tcl_ParseCommand(interp, p, bytesLeft, nested, &parse)
@@ -3658,7 +3909,27 @@ Tcl_EvalEx(interp, script, numBytes, flags)
 	    goto error;
 	}
 
+#ifdef TCL_TIP280
+	/*
+	 * TIP #280 Track lines. The parser may have skipped text till it
+	 * found the command we are now at. We have count the lines in this
+	 * block.
+	 */
+
+	TclAdvanceLines (&line, p, parse.commandStart);
+#endif
+
 	if (parse.numWords > 0) {
+#ifdef TCL_TIP280
+	    /*
+	     * TIP #280. Track lines within the words of the current
+	     * command.
+	     */
+
+	    int         wordLine  = line;
+	    CONST char* wordStart = parse.commandStart;
+#endif
+
 	    /*
 	     * Generate an array of objects for the words of the command.
 	     */
@@ -3669,11 +3940,45 @@ Tcl_EvalEx(interp, script, numBytes, flags)
 		objv = (Tcl_Obj **) ckalloc((unsigned)
 		    (parse.numWords * sizeof (Tcl_Obj *)));
 	    }
+
+#ifdef TCL_TIP280
+	    eeFrame.nline = parse.numWords;
+	    eeFrame.line  = (int*) ckalloc((unsigned)
+		  (parse.numWords * sizeof (int)));
+#endif
+
 	    for (objectsUsed = 0, tokenPtr = parse.tokenPtr;
-		    objectsUsed < parse.numWords;
-		    objectsUsed++, tokenPtr += (tokenPtr->numComponents + 1)) {
+		 objectsUsed < parse.numWords;
+		 objectsUsed++, tokenPtr += (tokenPtr->numComponents + 1)) {
+#ifndef TCL_TIP280
 		code = Tcl_EvalTokensStandard(interp, tokenPtr+1, 
 		            tokenPtr->numComponents);
+#else
+	        /*
+		 * TIP #280. Track lines to current word. Save the
+		 * information on a per-word basis, signaling dynamic words as
+		 * needed. Make the information available to the recursively
+		 * called evaluator as well, including the type of context
+		 * (source vs. eval).
+		 */
+
+		TclAdvanceLines (&wordLine, wordStart, tokenPtr->start);
+		wordStart = tokenPtr->start;
+
+                eeFrame.line [objectsUsed] = (TclWordKnownAtCompileTime (tokenPtr)
+					      ? wordLine
+					      : -1);
+
+	        if (eeFrame.type == TCL_LOCATION_SOURCE) {
+		    iPtr->evalFlags |= TCL_EVAL_FILE;
+		}
+
+		code = EvalTokensStandard(interp, tokenPtr+1, 
+		            tokenPtr->numComponents, wordLine);
+
+		iPtr->evalFlags = 0;
+#endif
+
 		if (code == TCL_OK) {
 		    objv[objectsUsed] = Tcl_GetObjResult(interp);
 		    Tcl_IncrRefCount(objv[objectsUsed]);
@@ -3684,12 +3989,36 @@ Tcl_EvalEx(interp, script, numBytes, flags)
     
 	    /*
 	     * Execute the command and free the objects for its words.
+	     *
+	     * TIP #280: Remember the command itself for 'info frame'. We
+	     * shorten the visible command by one char to exclude the
+	     * termination character, if necessary. Here is where we put our
+	     * frame on the stack of frames too. _After_ the nested commands
+	     * have been executed.
 	     */
 
+#ifdef TCL_TIP280
+	    eeFrame.cmd.str.cmd = parse.commandStart;
+	    eeFrame.cmd.str.len = parse.commandSize;
+
+	    if (parse.term == parse.commandStart + parse.commandSize - 1) {
+		eeFrame.cmd.str.len --;
+	    }
+
+	    iPtr->cmdFramePtr = &eeFrame;
+#endif
 	    iPtr->numLevels++;    
 	    code = TclEvalObjvInternal(interp, objectsUsed, objv, 
 	            parse.commandStart, parse.commandSize, 0);
 	    iPtr->numLevels--;
+#ifdef TCL_TIP280
+	    iPtr->cmdFramePtr = iPtr->cmdFramePtr->nextPtr;
+
+	    ckfree ((char*) eeFrame.line);
+	    eeFrame.line  = NULL;
+	    eeFrame.nline = 0;
+#endif
+
 	    if (code != TCL_OK) {
 		goto error;
 	    }
@@ -3705,11 +4034,17 @@ Tcl_EvalEx(interp, script, numBytes, flags)
 
 	/*
 	 * Advance to the next command in the script.
+	 *
+	 * TIP #280 Track Lines. Now we track how many lines were in the
+	 * executed command.
 	 */
 
 	next = parse.commandStart + parse.commandSize;
 	bytesLeft -= next - p;
 	p = next;
+#ifdef TCL_TIP280
+	TclAdvanceLines (&line, parse.commandStart, p);
+#endif
 	Tcl_FreeParse(&parse);
 	gotParse = 0;
 	if (nested && (*parse.term == ']')) {
@@ -3722,7 +4057,12 @@ Tcl_EvalEx(interp, script, numBytes, flags)
 
 	    iPtr->termOffset = (p - 1) - script;
 	    iPtr->varFramePtr = savedVarFramePtr;
+#ifndef TCL_TIP280
 	    return TCL_OK;
+#else
+	    code = TCL_OK;
+	    goto cleanup_return;
+#endif
 	}
     } while (bytesLeft > 0);
 
@@ -3737,7 +4077,12 @@ Tcl_EvalEx(interp, script, numBytes, flags)
     
     iPtr->termOffset = p - script;
     iPtr->varFramePtr = savedVarFramePtr;
+#ifndef TCL_TIP280
     return TCL_OK;
+#else
+    code = TCL_OK;
+    goto cleanup_return;
+#endif
 
     error:
     /*
@@ -3794,7 +4139,11 @@ Tcl_EvalEx(interp, script, numBytes, flags)
 
     if (!nested) {
 	iPtr->termOffset = p - script;
+#ifndef TCL_TIP280
 	return code;
+#else
+	goto cleanup_return;
+#endif
     }
 
     /*
@@ -3822,7 +4171,11 @@ Tcl_EvalEx(interp, script, numBytes, flags)
 	    } else {
 	        iPtr->termOffset = (next - 1) - script;
 	    }
+#ifndef TCL_TIP280
 	    return code;
+#else
+	    goto cleanup_return;
+#endif
 	}
 	next = parse.commandStart + parse.commandSize;
 	bytesLeft -= next - p;
@@ -3845,7 +4198,12 @@ Tcl_EvalEx(interp, script, numBytes, flags)
 	iPtr->termOffset = parse.term - script;
 	Tcl_SetObjResult(interp,
 		Tcl_NewStringObj("missing close-bracket", -1));
+#ifndef TCL_TIP280
 	return TCL_ERROR;
+#else
+	code = TCL_ERROR;
+	goto cleanup_return;
+#endif
     } else if (*parse.term != ']') {
 	/*
 	 * There was no close-bracket.  Syntax error.
@@ -3854,15 +4212,66 @@ Tcl_EvalEx(interp, script, numBytes, flags)
 	iPtr->termOffset = (parse.term + 1) - script;
 	Tcl_SetObjResult(interp,
 		Tcl_NewStringObj("missing close-bracket", -1));
+#ifndef TCL_TIP280
 	return TCL_ERROR;
+#else
+	code = TCL_ERROR;
+	goto cleanup_return;
+#endif
     } else {
 	/* 
 	 * parse.term points to the close-bracket.
 	 */
 	iPtr->termOffset = parse.term - script;
     }
+
+#ifdef TCL_TIP280
+ cleanup_return:
+    /* TIP #280. Release the local CmdFrame, and its contents. */
+
+    if (eeFrame.line != NULL) {
+        ckfree ((char*) eeFrame.line);
+    }
+    if (eeFrame.type == TCL_LOCATION_SOURCE) {
+        Tcl_DecrRefCount (eeFrame.data.eval.path);
+    }
+#endif
     return code;
 }
+
+#ifdef TCL_TIP280
+/*
+ *----------------------------------------------------------------------
+ *
+ * TclAdvanceLines --
+ *
+ *	This procedure is a helper which counts the number of lines
+ *	in a block of text and advances an external counter.
+ *
+ * Results:
+ *	None.
+ *
+ * Side effects:
+ *	The specified counter is advanced per the number of lines found.
+ *
+ * TIP #280
+ *----------------------------------------------------------------------
+ */
+
+void
+TclAdvanceLines (line,start,end)
+     int*        line;
+     CONST char* start;
+     CONST char* end;
+{
+    CONST char* p;
+    for (p = start; p < end; p++) {
+        if (*p == '\n') {
+	  (*line) ++;
+	}
+    }
+}
+#endif
 
 /*
  *----------------------------------------------------------------------
@@ -3945,7 +4354,7 @@ Tcl_GlobalEvalObj(interp, objPtr)
 /*
  *----------------------------------------------------------------------
  *
- * Tcl_EvalObjEx --
+ * Tcl_EvalObjEx, TclEvalObjEx --
  *
  *	Execute Tcl commands stored in a Tcl object. These commands are
  *	compiled into bytecodes if necessary, unless TCL_EVAL_DIRECT
@@ -3965,6 +4374,7 @@ Tcl_GlobalEvalObj(interp, objPtr)
  *	Just as in Tcl_Eval, interp->termOffset is set to the offset of the
  *	last character executed in the objPtr's string.
  *
+ * TIP #280 : Keep public API, internally extended API.
  *----------------------------------------------------------------------
  */
 
@@ -3981,6 +4391,26 @@ Tcl_EvalObjEx(interp, objPtr, flags)
 					 * TCL_EVAL_GLOBAL and
 					 * TCL_EVAL_DIRECT. */
 {
+#ifdef TCL_TIP280
+  return TclEvalObjEx (interp, objPtr, flags, NULL, 0);
+}
+
+int
+TclEvalObjEx(interp, objPtr, flags, invoker, word)
+    Tcl_Interp *interp;			/* Token for command interpreter
+					 * (returned by a previous call to
+					 * Tcl_CreateInterp). */
+    register Tcl_Obj *objPtr;		/* Pointer to object containing
+					 * commands to execute. */
+    int flags;				/* Collection of OR-ed bits that
+					 * control the evaluation of the
+					 * script.  Supported values are
+					 * TCL_EVAL_GLOBAL and
+					 * TCL_EVAL_DIRECT. */
+    CONST CmdFrame* invoker; /* Frame of the command doing the eval  */
+    int             word;    /* Index of the word which is in objPtr */
+{
+#endif
     register Interp *iPtr = (Interp *) interp;
     char *script;
     int numSrcBytes;
@@ -4012,36 +4442,171 @@ Tcl_EvalObjEx(interp, objPtr, flags)
 	    register List *listRepPtr =
 		(List *) objPtr->internalRep.twoPtrValue.ptr1;
 	    int i, objc = listRepPtr->elemCount;
+
 #define TEOE_PREALLOC 10
 	    Tcl_Obj *staticObjv[TEOE_PREALLOC], **objv = staticObjv;
 
+#ifdef TCL_TIP280
+	    /* TIP #280 Structures for tracking lines.
+	     * As we know that this is dynamic execution we ignore the
+	     * invoker, even if known.
+	     */
+	    int      line;
+	    CmdFrame eoFrame;
+
+	    eoFrame.type     = TCL_LOCATION_EVAL_LIST;
+	    eoFrame.level    = (iPtr->cmdFramePtr == NULL ?
+				1 :
+				iPtr->cmdFramePtr->level + 1);
+	    eoFrame.framePtr = iPtr->framePtr;
+	    eoFrame.nextPtr  = iPtr->cmdFramePtr;
+	    eoFrame.nline    = objc;
+	    eoFrame.line     = (int*) ckalloc (objc * sizeof (int));
+
+	    /* NOTE: Getting the string rep of the list to eval to fill the
+	     * command information required by 'info frame' implies that
+	     * further calls for the same list would not be optimized, as it
+	     * would not be 'pure' anymore. It would also be a waste of time
+	     * as most of the time this information is not needed at all. What
+	     * we do instead is to keep the list obj itself around and have
+	     * 'info frame' sort it out.
+	     */
+
+	    eoFrame.cmd.listPtr  = objPtr;
+	    Tcl_IncrRefCount (eoFrame.cmd.listPtr);
+	    eoFrame.data.eval.path = NULL;
+#endif
 	    if (objc > TEOE_PREALLOC) {
 		objv = (Tcl_Obj **) ckalloc(objc*sizeof(Tcl_Obj *));
 	    }
 #undef TEOE_PREALLOC
 	    /*
-	     * Copy the list elements here, to avoid a segfault if objPtr
-	     * loses its List internal rep [Bug 1119369]
+	     * Copy the list elements here, to avoid a segfault if
+	     * objPtr loses its List internal rep [Bug 1119369].
+	     *
+	     * TIP #280 Computes all the line numbers for the
+	     * words in the command.
 	     */
-	    
+
+#ifdef TCL_TIP280
+	    line = 1;
+#endif
 	    for (i=0; i < objc; i++) {
 		objv[i] = listRepPtr->elements[i];
 		Tcl_IncrRefCount(objv[i]);
+#ifdef TCL_TIP280
+		eoFrame.line [i] = line;
+		{
+		    char* w = Tcl_GetString (objv [i]);
+		    TclAdvanceLines (&line, w, w+ strlen(w));
+		}
+#endif
 	    }
+
+#ifdef TCL_TIP280
+	    iPtr->cmdFramePtr = &eoFrame;
+#endif
 	    result = Tcl_EvalObjv(interp, objc, objv, flags);
+#ifdef TCL_TIP280
+	    iPtr->cmdFramePtr = iPtr->cmdFramePtr->nextPtr;
+	    Tcl_DecrRefCount (eoFrame.cmd.listPtr);
+#endif
+
 	    for (i=0; i < objc; i++) {
 		TclDecrRefCount(objv[i]);
 	    }
 	    if (objv != staticObjv) {
 		ckfree((char *) objv);
 	    }
+#ifdef TCL_TIP280
+	    ckfree ((char*) eoFrame.line);
+	    eoFrame.line  = NULL;
+	    eoFrame.nline = 0;
+#endif
 	} else {
+#ifndef TCL_TIP280
 	    script = Tcl_GetStringFromObj(objPtr, &numSrcBytes);
 	    result = Tcl_EvalEx(interp, script, numSrcBytes, flags);
+#else
+	    /*
+	     * TIP #280. Propagate context as much as we can. Especially if
+	     * the script to evaluate is a single literal it makes sense to
+	     * look if our context is one with absolute line numbers we can
+	     * then track into the literal itself too.
+	     *
+	     * See also tclCompile.c, TclInitCompileEnv, for the equivalent
+	     * code in the bytecode compiler.
+	     */
+
+	    if (invoker == NULL) {
+	        /* No context, force opening of our own */
+	        script = Tcl_GetStringFromObj(objPtr, &numSrcBytes);
+		result = Tcl_EvalEx(interp, script, numSrcBytes, flags);
+	    } else {
+		/* We have an invoker, describing the command asking for the
+		 * evaluation of a subordinate script. This script may
+		 * originate in a literal word, or from a variable, etc. Using
+		 * the line array we now check if we have good line
+		 * information for the relevant word. The type of context is
+		 * relevant as well. In a non-'source' context we don't have
+		 * to try tracking lines.
+		 *
+		 * First see if the word exists and is a literal. If not we go
+		 * through the easy dynamic branch. No need to perform more
+		 * complex invokations.
+		 */
+
+		if ((invoker->nline <= word) || (invoker->line[word] < 0)) {
+		    /* Dynamic script, or dynamic context, force our own
+		     * context */
+
+		    script = Tcl_GetStringFromObj(objPtr, &numSrcBytes);
+		    result = Tcl_EvalEx(interp, script,    numSrcBytes, flags);
+
+		} else {
+		    /*  Try to get an absolute context for the evaluation
+		     */
+
+		    CmdFrame ctx = *invoker;
+		    int pc       = 0;
+
+		    if (invoker->type == TCL_LOCATION_BC) {
+			/* Note: Type BC => ctx.data.eval.path    is not used.
+			 *                  ctx.data.tebc.codePtr is used instead.
+			 */
+			TclGetSrcInfoForPc (&ctx);
+			pc = 1;
+		    }
+
+		    if (ctx.type == TCL_LOCATION_SOURCE) {
+			/* Absolute context to reuse. */
+
+			iPtr->invokeCmdFramePtr = &ctx;
+			iPtr->evalFlags |= TCL_EVAL_CTX;
+
+			script = Tcl_GetStringFromObj(objPtr, &numSrcBytes);
+			result = EvalEx(interp, script, numSrcBytes, flags, ctx.line [word]);
+
+			if (pc) {
+			    /* Death of SrcInfo reference */
+			    Tcl_DecrRefCount (ctx.data.eval.path);
+			}
+		    } else {
+			/* Dynamic context or script, easier to make our own as
+			 * well */
+			script = Tcl_GetStringFromObj(objPtr, &numSrcBytes);
+			result = Tcl_EvalEx(interp, script, numSrcBytes, flags);
+		    }
+		}
+	    }
+#endif
 	}
     } else {
 	/*
 	 * Let the compiler/engine subsystem do the evaluation.
+	 *
+	 * TIP #280 The invoker provides us with the context for the
+	 * script. We transfer this to the byte code compiler.
 	 */
 
 	savedVarFramePtr = iPtr->varFramePtr;
@@ -4049,7 +4614,11 @@ Tcl_EvalObjEx(interp, objPtr, flags)
 	    iPtr->varFramePtr = NULL;
 	}
 
+#ifndef TCL_TIP280
 	result = TclCompEvalObj(interp, objPtr);
+#else
+	result = TclCompEvalObj(interp, objPtr, invoker, word);
+#endif
 
 	/*
 	 * If we are again at the top level, process any unusual 
@@ -5287,7 +5856,7 @@ Tcl_AddObjErrorInfo(interp, message, length)
 				 * NULL byte. */
 {
     register Interp *iPtr = (Interp *) interp;
-    Tcl_Obj *messagePtr;
+    Tcl_Obj *objPtr;
     
     /*
      * If we are just starting to log an error, errorInfo is initialized
@@ -5301,8 +5870,11 @@ Tcl_AddObjErrorInfo(interp, message, length)
 	    Tcl_ObjSetVar2(interp, iPtr->execEnvPtr->errorInfo, NULL, 
 	            iPtr->objResultPtr, TCL_GLOBAL_ONLY);
 	} else {		/* use the string result */
+	    objPtr = Tcl_NewStringObj(interp->result, -1);
+	    Tcl_IncrRefCount(objPtr);
 	    Tcl_ObjSetVar2(interp, iPtr->execEnvPtr->errorInfo, NULL, 
-	            Tcl_NewStringObj(interp->result, -1), TCL_GLOBAL_ONLY);
+	            objPtr, TCL_GLOBAL_ONLY);
+	    Tcl_DecrRefCount(objPtr);
 	}
 
 	/*
@@ -5311,8 +5883,11 @@ Tcl_AddObjErrorInfo(interp, message, length)
 	 */
 
 	if (!(iPtr->flags & ERROR_CODE_SET)) {
+	    objPtr = Tcl_NewStringObj("NONE", -1);
+	    Tcl_IncrRefCount(objPtr);
 	    Tcl_ObjSetVar2(interp, iPtr->execEnvPtr->errorCode, NULL, 
-	            Tcl_NewStringObj("NONE", -1), TCL_GLOBAL_ONLY);
+	            objPtr, TCL_GLOBAL_ONLY);
+	    Tcl_DecrRefCount(objPtr);
 	}
     }
 
@@ -5321,11 +5896,11 @@ Tcl_AddObjErrorInfo(interp, message, length)
      */
 
     if (length != 0) {
-	messagePtr = Tcl_NewStringObj(message, length);
-	Tcl_IncrRefCount(messagePtr);
+	objPtr = Tcl_NewStringObj(message, length);
+	Tcl_IncrRefCount(objPtr);
 	Tcl_ObjSetVar2(interp, iPtr->execEnvPtr->errorInfo, NULL, 
-	        messagePtr, (TCL_GLOBAL_ONLY | TCL_APPEND_VALUE));
-	Tcl_DecrRefCount(messagePtr); /* free msg object appended above */
+	        objPtr, (TCL_GLOBAL_ONLY | TCL_APPEND_VALUE));
+	Tcl_DecrRefCount(objPtr); /* free msg object appended above */
     }
 }
 
@@ -5546,4 +6121,50 @@ Tcl_GetVersion(majorV, minorV, patchLevelV, type)
         *type = TCL_RELEASE_LEVEL;
     }
 }
- 
+#ifdef USE_DTRACE
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * DTraceObjCmd --
+ *
+ *	This function is invoked to process the "::tcl::dtrace" Tcl command.
+ *
+ * Results:
+ *	A standard Tcl object result.
+ *
+ * Side effects:
+ *	The 'tcl-probe' DTrace probe is triggered (if it is enabled).
+ *
+ *----------------------------------------------------------------------
+ */
+
+static int
+DTraceObjCmd(
+    ClientData dummy,		/* Not used. */
+    Tcl_Interp *interp,		/* Current interpreter. */
+    int objc,			/* Number of arguments. */
+    Tcl_Obj *CONST objv[])	/* Argument objects. */
+{
+    if (TCL_DTRACE_TCL_PROBE_ENABLED()) {
+	char *a[10];
+	int i = 0;
+
+	while (i++ < 10) {
+	    a[i-1] = i < objc ? TclGetString(objv[i]) : NULL;
+	}
+	TCL_DTRACE_TCL_PROBE(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7],
+		a[8], a[9]);
+    }
+    return TCL_OK;
+}
+#endif /* USE_DTRACE */
+
+/*
+ * Local Variables:
+ * mode: c
+ * c-basic-offset: 4
+ * fill-column: 78
+ * End:
+ */
+

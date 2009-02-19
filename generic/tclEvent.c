@@ -11,7 +11,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclEvent.c,v 1.28.2.11 2005/06/24 18:21:39 kennykb Exp $
+ * RCS: @(#) $Id: tclEvent.c,v 1.28.2.15 2007/03/19 17:06:25 dgp Exp $
  */
 
 #include "tclInt.h"
@@ -833,14 +833,28 @@ Tcl_Finalize()
 	 * order dependencies.
 	 */
 
-	TclFinalizeCompExecEnv();
+	TclFinalizeCompilation();
+	TclFinalizeExecution();
 	TclFinalizeEnvironment();
 
 	/* 
 	 * Finalizing the filesystem must come after anything which
 	 * might conceivably interact with the 'Tcl_FS' API. 
 	 */
+
 	TclFinalizeFilesystem();
+
+	/*
+	 * Undo all the Tcl_ObjType registrations, and reset the master list
+	 * of free Tcl_Obj's.  After this returns, no more Tcl_Obj's should
+	 * be allocated or freed.
+	 *
+	 * Note in particular that TclFinalizeObjects() must follow
+	 * TclFinalizeFilesystem() because TclFinalizeFilesystem free's
+	 * the Tcl_Obj that holds the path of the current working directory.
+	 */
+
+	TclFinalizeObjects();
 
 	/* 
 	 * We must be sure the encoding finalization doesn't need
@@ -870,11 +884,33 @@ Tcl_Finalize()
 	Tcl_SetPanicProc(NULL);
 
 	/*
+	 * There have been several bugs in the past that cause
+	 * exit handlers to be established during Tcl_Finalize
+	 * processing.  Such exit handlers leave malloc'ed memory,
+	 * and Tcl_FinalizeThreadAlloc or Tcl_FinalizeMemorySubsystem
+	 * will result in a corrupted heap.  The result can be a
+	 * mysterious crash on process exit.  Check here that
+	 * nobody's done this.
+	 */
+
+#ifdef TCL_MEM_DEBUG
+	if ( firstExitPtr != NULL ) {
+	    Tcl_Panic( "exit handlers were created during Tcl_Finalize" );
+	}
+#endif
+
+	TclFinalizePreserve();
+
+	/*
 	 * Free synchronization objects.  There really should only be one
 	 * thread alive at this moment.
 	 */
 
 	TclFinalizeSynchronization();
+
+#if defined(TCL_THREADS) && defined(USE_THREAD_ALLOC) && !defined(TCL_MEM_DEBUG) && !defined(PURIFY)
+	TclFinalizeThreadAlloc();
+#endif
 
 	/*
 	 * We defer unloading of packages until very late 
@@ -895,28 +931,8 @@ Tcl_Finalize()
 	TclResetFilesystem();
 	
 	/*
-	 * There have been several bugs in the past that cause
-	 * exit handlers to be established during Tcl_Finalize
-	 * processing.  Such exit handlers leave malloc'ed memory,
-	 * and Tcl_FinalizeThreadAlloc or Tcl_FinalizeMemorySubsystem
-	 * will result in a corrupted heap.  The result can be a
-	 * mysterious crash on process exit.  Check here that
-	 * nobody's done this.
+	 * At this point, there should no longer be any ckalloc'ed memory.
 	 */
-
-#ifdef TCL_MEM_DEBUG
-	if ( firstExitPtr != NULL ) {
-	    Tcl_Panic( "exit handlers were created during Tcl_Finalize" );
-	}
-#endif
-
-	/*
-	 * There shouldn't be any malloc'ed memory after this.
-	 */
-	TclFinalizePreserve();
-#if defined(TCL_THREADS) && defined(USE_THREAD_ALLOC) && !defined(TCL_MEM_DEBUG) && !defined(PURIFY)
-	TclFinalizeThreadAlloc();
-#endif
 
 	TclFinalizeMemorySubsystem();
 	inFinalize = 0;
@@ -945,9 +961,9 @@ void
 Tcl_FinalizeThread()
 {
     ExitHandler *exitPtr;
-    ThreadSpecificData *tsdPtr =
-	    (ThreadSpecificData *)TclThreadDataKeyGet(&dataKey);
+    ThreadSpecificData *tsdPtr;
 
+    tsdPtr = (ThreadSpecificData *)TclThreadDataKeyGet(&dataKey);
     if (tsdPtr != NULL) {
 	tsdPtr->inExit = 1;
 
@@ -978,17 +994,17 @@ Tcl_FinalizeThread()
 	TclFinalizeAsync();
     }
 
-	/*
-	 * Blow away all thread local storage blocks.
+    /*
+     * Blow away all thread local storage blocks.
      *
      * Note that Tcl API allows creation of threads which do not use any
      * Tcl interp or other Tcl subsytems. Those threads might, however,
      * use thread local storage, so we must unconditionally finalize it.
      *
      * Fix [Bug #571002]
-	 */
+     */
 
-	TclFinalizeThreadData();
+    TclFinalizeThreadData();
 }
 
 /*
@@ -1208,7 +1224,7 @@ NewThreadProc(ClientData clientData)
     cdPtr = (ThreadClientData*)clientData;
     threadProc = cdPtr->proc;
     threadClientData = cdPtr->clientData;
-    Tcl_Free((char*)clientData); /* Allocated in Tcl_CreateThread() */
+    ckfree((char*)clientData); /* Allocated in Tcl_CreateThread() */
 
     (*threadProc)(threadClientData);
 
@@ -1246,7 +1262,7 @@ Tcl_CreateThread(idPtr, proc, clientData, stackSize, flags)
 #ifdef TCL_THREADS
     ThreadClientData *cdPtr;
 
-    cdPtr = (ThreadClientData*)Tcl_Alloc(sizeof(ThreadClientData));
+    cdPtr = (ThreadClientData*)ckalloc(sizeof(ThreadClientData));
     cdPtr->proc = proc;
     cdPtr->clientData = clientData;
 

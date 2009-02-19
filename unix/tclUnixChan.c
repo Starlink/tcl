@@ -10,7 +10,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclUnixChan.c,v 1.42.2.5 2005/01/27 22:53:35 andreas_kupries Exp $
+ * RCS: @(#) $Id: tclUnixChan.c,v 1.42.2.11 2008/03/03 15:01:14 rmax Exp $
  */
 
 #include "tclInt.h"	/* Internal definitions for Tcl. */
@@ -96,6 +96,9 @@
 #   if !defined(CRTSCTS) && defined(CNEW_RTSCTS)
 #	define CRTSCTS CNEW_RTSCTS
 #   endif /* !CRTSCTS&CNEW_RTSCTS */
+#   if !defined(PAREXT) && defined(CMSPAR)
+#	define PAREXT CMSPAR
+#   endif /* !PAREXT&&CMSPAR */
 #else	/* !USE_TERMIOS */
 
 #ifdef USE_TERMIO
@@ -2306,10 +2309,10 @@ TcpGetOptionProc(instanceData, interp, optionName, dsPtr)
 		Tcl_DStringStartSublist(dsPtr);
 	    }
 	    Tcl_DStringAppendElement(dsPtr, inet_ntoa(peername.sin_addr));
-	    hostEntPtr = gethostbyaddr(			/* INTL: Native. */
+	    hostEntPtr = TclpGetHostByAddr(			/* INTL: Native. */
 		    (char *) &peername.sin_addr,
 		    sizeof(peername.sin_addr), AF_INET);
-	    if (hostEntPtr != NULL) {
+	    if (hostEntPtr != (struct hostent *) NULL) {
 		Tcl_DString ds;
 
 		Tcl_ExternalToUtfDString(NULL, hostEntPtr->h_name, -1, &ds);
@@ -2353,7 +2356,7 @@ TcpGetOptionProc(instanceData, interp, optionName, dsPtr)
 		Tcl_DStringStartSublist(dsPtr);
 	    }
 	    Tcl_DStringAppendElement(dsPtr, inet_ntoa(sockname.sin_addr));
-	    hostEntPtr = gethostbyaddr(			/* INTL: Native. */
+	    hostEntPtr = TclpGetHostByAddr(			/* INTL: Native. */
 		    (char *) &sockname.sin_addr,
 		    sizeof(sockname.sin_addr), AF_INET);
 	    if (hostEntPtr != (struct hostent *) NULL) {
@@ -2686,8 +2689,8 @@ CreateSocketAddress(sockaddrPtr, host, port)
 	 * on either 32 or 64 bits systems.
 	 */
 	if (addr.s_addr == 0xFFFFFFFF) {
-	    hostent = gethostbyname(native);		/* INTL: Native. */
-	    if (hostent != NULL) {
+	    hostent = TclpGetHostByName(native);		/* INTL: Native. */
+	    if (hostent != (struct hostent *) NULL) {
 		memcpy((VOID *) &addr,
 			(VOID *) hostent->h_addr_list[0],
 			(size_t) hostent->h_length);
@@ -3183,9 +3186,10 @@ TclUnixWaitForFile(fd, mask, timeout)
 				 * wait at all, and a value of -1 means
 				 * wait forever. */
 {
-    Tcl_Time abortTime, now;
+    Tcl_Time abortTime = {0, 0}, now; /* silence gcc 4 warning */
     struct timeval blockTime, *timeoutPtr;
-    int index, bit, numFound, result = 0;
+    int index, numFound, result = 0;
+    fd_mask bit;
     fd_mask readyMasks[3*MASK_SIZE];
 				/* This array reflects the readable/writable
 				 * conditions that were found to exist by the
@@ -3222,7 +3226,7 @@ TclUnixWaitForFile(fd, mask, timeout)
     }
     memset((VOID *) readyMasks, 0, 3*MASK_SIZE*sizeof(fd_mask));
     index = fd/(NBBY*sizeof(fd_mask));
-    bit = 1 << (fd%(NBBY*sizeof(fd_mask)));
+    bit = ((fd_mask) 1) << (fd%(NBBY*sizeof(fd_mask)));
 
     /*
      * Loop in a mini-event loop of our own, waiting for either the
@@ -3281,6 +3285,9 @@ TclUnixWaitForFile(fd, mask, timeout)
 	}
 	if (timeout == 0) {
 	    break;
+	}
+	if (timeout < 0) {
+	    continue;
 	}
 
 	/*

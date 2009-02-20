@@ -225,6 +225,7 @@ AC_DEFUN([SC_PATH_TKCONFIG], [
 		done
 	    fi
 	])
+
 	if test x"${ac_cv_c_tkconfig}" = x ; then
 	    TK_BIN_DIR="# no Tk configs found"
 	    AC_MSG_WARN([Can't find Tk configuration definitions])
@@ -235,7 +236,6 @@ AC_DEFUN([SC_PATH_TKCONFIG], [
 	    AC_MSG_RESULT([found ${TK_BIN_DIR}/tkConfig.sh])
 	fi
     fi
-
 ])
 
 #------------------------------------------------------------------------
@@ -396,6 +396,7 @@ AC_DEFUN([SC_LOAD_TKCONFIG], [
     AC_SUBST(TK_VERSION)
     AC_SUBST(TK_BIN_DIR)
     AC_SUBST(TK_SRC_DIR)
+
     AC_SUBST(TK_LIB_FILE)
     AC_SUBST(TK_LIB_FLAG)
     AC_SUBST(TK_LIB_SPEC)
@@ -540,29 +541,29 @@ AC_DEFUN([SC_ENABLE_SHARED], [
 
 AC_DEFUN([SC_ENABLE_FRAMEWORK], [
     if test "`uname -s`" = "Darwin" ; then
-    AC_MSG_CHECKING([how to package libraries])
-    AC_ARG_ENABLE(framework,
-	[  --enable-framework      package shared libraries in MacOSX frameworks [--disable-framework]],
+	AC_MSG_CHECKING([how to package libraries])
+	AC_ARG_ENABLE(framework,
+	    [  --enable-framework      package shared libraries in MacOSX frameworks [--disable-framework]],
 	    [enable_framework=$enableval], [enable_framework=no])
 	if test $enable_framework = yes; then
 	    if test $SHARED_BUILD = 0; then
 		AC_MSG_WARN([Frameworks can only be built if --enable-shared is yes])
-
-    fi
+		enable_framework=no
+	    fi
 	    if test $tcl_corefoundation = no; then
 		AC_MSG_WARN([Frameworks can only be used when CoreFoundation is available])
 		enable_framework=no
 	    fi
 	fi
 	if test $enable_framework = yes; then
-	AC_MSG_RESULT([framework])
-	FRAMEWORK_BUILD=1
+	    AC_MSG_RESULT([framework])
+	    FRAMEWORK_BUILD=1
 	else
 	    if test $SHARED_BUILD = 1; then
 		AC_MSG_RESULT([shared library])
 	    else
 		AC_MSG_RESULT([static library])
-	fi
+	    fi
 	    FRAMEWORK_BUILD=0
 	fi
     fi
@@ -593,13 +594,13 @@ AC_DEFUN([SC_ENABLE_FRAMEWORK], [
 #
 #------------------------------------------------------------------------
 
-
+AC_DEFUN([SC_ENABLE_THREADS], [
     AC_ARG_ENABLE(threads, [  --enable-threads        build with threads],
 	[tcl_ok=$enableval], [tcl_ok=no])
 
-	if test "${TCL_THREADS}" = 1; then
-
-	fi
+    if test "${TCL_THREADS}" = 1; then
+	tcl_threaded_core=1;
+    fi
 
     if test "$tcl_ok" = "yes" -o "${TCL_THREADS}" = 1; then
 	TCL_THREADS=1
@@ -634,7 +635,7 @@ AC_DEFUN([SC_ENABLE_FRAMEWORK], [
 	    else
 		AC_CHECK_LIB(c, pthread_mutex_init,
 		    tcl_ok=yes, tcl_ok=no)
-	    	if test "$tcl_ok" = "no"; then
+		if test "$tcl_ok" = "no"; then
 		    AC_CHECK_LIB(c_r, pthread_mutex_init,
 			tcl_ok=yes, tcl_ok=no)
 		    if test "$tcl_ok" = "yes"; then
@@ -644,7 +645,7 @@ AC_DEFUN([SC_ENABLE_FRAMEWORK], [
 			TCL_THREADS=0
 			AC_MSG_WARN([Don't know how to find pthread lib on your system - you must disable thread support or edit the LIBS in the Makefile...])
 		    fi
-	    	fi
+		fi
 	    fi
 	fi
 
@@ -656,9 +657,9 @@ AC_DEFUN([SC_ENABLE_FRAMEWORK], [
 	AC_CHECK_FUNCS(pthread_attr_setstacksize)
 	AC_CHECK_FUNCS(pthread_atfork)
 	LIBS=$ac_saved_libs
-	    else
+    else
 	TCL_THREADS=0
-	    fi
+    fi
     # Do checking message here to not mess up interleaved configure output
     AC_MSG_CHECKING([for building with threads])
     if test "${TCL_THREADS}" = 1; then
@@ -671,6 +672,7 @@ AC_DEFUN([SC_ENABLE_FRAMEWORK], [
     else
 	AC_MSG_RESULT([no (default)])
     fi
+
     AC_SUBST(TCL_THREADS)
 ])
 
@@ -769,19 +771,19 @@ AC_DEFUN([SC_ENABLE_LANGINFO], [
 
     HAVE_LANGINFO=0
     if test "$langinfo_ok" = "yes"; then
-	    AC_CHECK_HEADER(langinfo.h,[langinfo_ok=yes],[langinfo_ok=no])
-	fi
+	AC_CHECK_HEADER(langinfo.h,[langinfo_ok=yes],[langinfo_ok=no])
+    fi
     AC_MSG_CHECKING([whether to use nl_langinfo])
     if test "$langinfo_ok" = "yes"; then
 	AC_CACHE_VAL(tcl_cv_langinfo_h, [
 	    AC_TRY_COMPILE([#include <langinfo.h>], [nl_langinfo(CODESET);],
 		    [tcl_cv_langinfo_h=yes],[tcl_cv_langinfo_h=no])])
-
 	AC_MSG_RESULT([$tcl_cv_langinfo_h])
+	if test $tcl_cv_langinfo_h = yes; then
 	    AC_DEFINE(HAVE_LANGINFO)
 	fi
     else 
-    AC_MSG_RESULT([$langinfo_ok])
+	AC_MSG_RESULT([$langinfo_ok])
     fi
 ])
 
@@ -813,48 +815,48 @@ AC_DEFUN([SC_ENABLE_LANGINFO], [
 #--------------------------------------------------------------------
 
 AC_DEFUN([SC_CONFIG_MANPAGES], [
-	AC_MSG_CHECKING([whether to use symlinks for manpages])
-	AC_ARG_ENABLE(man-symlinks,
-		[  --enable-man-symlinks   use symlinks for the manpages],
-		test "$enableval" != "no" && MAN_FLAGS="$MAN_FLAGS --symlinks",
-		enableval="no")
-	AC_MSG_RESULT([$enableval])
+    AC_MSG_CHECKING([whether to use symlinks for manpages])
+    AC_ARG_ENABLE(man-symlinks,
+	    [  --enable-man-symlinks   use symlinks for the manpages],
+	test "$enableval" != "no" && MAN_FLAGS="$MAN_FLAGS --symlinks",
+	enableval="no")
+    AC_MSG_RESULT([$enableval])
 
-	AC_MSG_CHECKING([whether to compress the manpages])
-	AC_ARG_ENABLE(man-compression,
-		[  --enable-man-compression=PROG
-                          compress the manpages with PROG],
+    AC_MSG_CHECKING([whether to compress the manpages])
+    AC_ARG_ENABLE(man-compression,
+	    [  --enable-man-compression=PROG
+		      compress the manpages with PROG],
 	[case $enableval in
 	    yes) AC_MSG_ERROR([missing argument to --enable-man-compression]);;
 	    no)  ;;
 	    *)   MAN_FLAGS="$MAN_FLAGS --compress $enableval";;
 	esac],
-		enableval="no")
-	AC_MSG_RESULT([$enableval])
-	if test "$enableval" != "no"; then
-		AC_MSG_CHECKING([for compressed file suffix])
-		touch TeST
-		$enableval TeST
-		Z=`ls TeST* | sed 's/^....//'`
-		rm -f TeST*
-		MAN_FLAGS="$MAN_FLAGS --extension $Z"
-		AC_MSG_RESULT([$Z])
-	fi
+	enableval="no")
+    AC_MSG_RESULT([$enableval])
+    if test "$enableval" != "no"; then
+	AC_MSG_CHECKING([for compressed file suffix])
+	touch TeST
+	$enableval TeST
+	Z=`ls TeST* | sed 's/^....//'`
+	rm -f TeST*
+	MAN_FLAGS="$MAN_FLAGS --extension $Z"
+	AC_MSG_RESULT([$Z])
+    fi
 
-	AC_MSG_CHECKING([whether to add a package name suffix for the manpages])
-	AC_ARG_ENABLE(man-suffix,
-		[  --enable-man-suffix=STRING
-                          use STRING as a suffix to manpage file names
-                          (default: $1)],
+    AC_MSG_CHECKING([whether to add a package name suffix for the manpages])
+    AC_ARG_ENABLE(man-suffix,
+	    [  --enable-man-suffix=STRING
+		      use STRING as a suffix to manpage file names
+		      (default: $1)],
 	[case $enableval in
 	    yes) enableval="$1" MAN_FLAGS="$MAN_FLAGS --suffix $enableval";;
 	    no)  ;;
 	    *)   MAN_FLAGS="$MAN_FLAGS --suffix $enableval";;
 	esac],
-		enableval="no")
-	AC_MSG_RESULT([$enableval])
+	enableval="no")
+    AC_MSG_RESULT([$enableval])
 
-	AC_SUBST(MAN_FLAGS)
+    AC_SUBST(MAN_FLAGS)
 ])
 
 #--------------------------------------------------------------------
@@ -999,8 +1001,8 @@ AC_DEFUN([SC_CONFIG_CFLAGS], [
 
     AC_MSG_CHECKING([if 64bit support is requested])
     AC_ARG_ENABLE(64bit,[  --enable-64bit          enable 64bit support (where applicable)],
-
-
+	[do64bit=$enableval], [do64bit=no])
+    AC_MSG_RESULT([$do64bit])
 
     # Step 0.b: Enable Solaris 64 bit VIS support?
 
@@ -1015,9 +1017,9 @@ AC_DEFUN([SC_CONFIG_CFLAGS], [
     fi
 
     # Step 1: set the variable "system" to hold the name and version number
+    # for the system.
 
-	
-
+    SC_CONFIG_SYSTEM
 
     # Step 2: check for existence of -ldl library.  This is needed because
     # Linux can use either -ldl or -ldld for dynamic loading.
@@ -1066,7 +1068,7 @@ dnl AC_CHECK_TOOL(AR, ar)
 			# ok ...
 			;;
 		    *)
-		    CC=${CC}_r
+			CC=${CC}_r
 			;;
 		esac
 		AC_MSG_RESULT([Using $CC for compiling with threads])
@@ -1085,7 +1087,7 @@ dnl AC_CHECK_TOOL(AR, ar)
 	    if test "$do64bit" = "yes" -a "`uname -v`" -gt "3" ; then
 		if test "$GCC" = "yes" ; then
 		    AC_MSG_WARN([64bit mode not supported with GCC on $system])
-		else
+		else 
 		    do64bit_ok=yes
 		    CFLAGS="$CFLAGS -q64"
 		    LDFLAGS="$LDFLAGS -q64"
@@ -1199,7 +1201,7 @@ dnl AC_CHECK_TOOL(AR, ar)
 	    if test "`uname -m`" = "ia64" ; then
 		SHLIB_SUFFIX=".so"
 	    else
-	    SHLIB_SUFFIX=".sl"
+		SHLIB_SUFFIX=".sl"
 	    fi
 	    AC_CHECK_LIB(dld, shl_load, tcl_ok=yes, tcl_ok=no)
 	    if test "$tcl_ok" = yes; then
@@ -1457,7 +1459,7 @@ dnl AC_CHECK_TOOL(AR, ar)
 		CC_SEARCH_FLAGS='-Wl,-rpath,${LIB_RUNTIME_DIR}'
 		LD_SEARCH_FLAGS='-rpath ${LIB_RUNTIME_DIR}'
 		AC_CACHE_CHECK([for ELF], tcl_cv_ld_elf, [
-		AC_EGREP_CPP(yes, [
+		    AC_EGREP_CPP(yes, [
 #ifdef __ELF__
 	yes
 #endif
@@ -1515,7 +1517,7 @@ dnl AC_CHECK_TOOL(AR, ar)
 		LD_SEARCH_FLAGS=${CC_SEARCH_FLAGS}
 		SHARED_LIB_SUFFIX='${TCL_TRIM_DOTS}\$\{DBGX\}.so.1.0'
 		AC_CACHE_CHECK([for ELF], tcl_cv_ld_elf, [
-		AC_EGREP_CPP(yes, [
+		    AC_EGREP_CPP(yes, [
 #ifdef __ELF__
 	yes
 #endif
@@ -1607,12 +1609,12 @@ dnl AC_CHECK_TOOL(AR, ar)
 	    fi
 	    SHLIB_LD='${CC} -dynamiclib ${CFLAGS} ${LDFLAGS}'
 	    AC_CACHE_CHECK([if ld accepts -single_module flag], tcl_cv_ld_single_module, [
-	        hold_ldflags=$LDFLAGS
-	        LDFLAGS="$LDFLAGS -dynamiclib -Wl,-single_module"
-	        AC_TRY_LINK(, [int i;], tcl_cv_ld_single_module=yes, tcl_cv_ld_single_module=no)
-	        LDFLAGS=$hold_ldflags])
+		hold_ldflags=$LDFLAGS
+		LDFLAGS="$LDFLAGS -dynamiclib -Wl,-single_module"
+		AC_TRY_LINK(, [int i;], tcl_cv_ld_single_module=yes, tcl_cv_ld_single_module=no)
+		LDFLAGS=$hold_ldflags])
 	    if test $tcl_cv_ld_single_module = yes; then
-	        SHLIB_LD="${SHLIB_LD} -Wl,-single_module"
+		SHLIB_LD="${SHLIB_LD} -Wl,-single_module"
 	    fi
 	    SHLIB_LD_LIBS='${LIBS}'
 	    SHLIB_SUFFIX=".dylib"
@@ -1624,41 +1626,41 @@ dnl AC_CHECK_TOOL(AR, ar)
 		LDFLAGS="$LDFLAGS -prebind"
 	    LDFLAGS="$LDFLAGS -headerpad_max_install_names"
 	    AC_CACHE_CHECK([if ld accepts -search_paths_first flag], tcl_cv_ld_search_paths_first, [
-	        hold_ldflags=$LDFLAGS
-	        LDFLAGS="$LDFLAGS -Wl,-search_paths_first"
-	        AC_TRY_LINK(, [int i;], tcl_cv_ld_search_paths_first=yes, tcl_cv_ld_search_paths_first=no)
-	        LDFLAGS=$hold_ldflags])
+		hold_ldflags=$LDFLAGS
+		LDFLAGS="$LDFLAGS -Wl,-search_paths_first"
+		AC_TRY_LINK(, [int i;], tcl_cv_ld_search_paths_first=yes, tcl_cv_ld_search_paths_first=no)
+		LDFLAGS=$hold_ldflags])
 	    if test $tcl_cv_ld_search_paths_first = yes; then
-	        LDFLAGS="$LDFLAGS -Wl,-search_paths_first"
+		LDFLAGS="$LDFLAGS -Wl,-search_paths_first"
 	    fi
 	    CC_SEARCH_FLAGS=""
 	    LD_SEARCH_FLAGS=""
 	    LD_LIBRARY_PATH_VAR="DYLD_LIBRARY_PATH"
 	    PLAT_OBJS=\$\(MAC\_OSX_OBJS\)
 	    PLAT_SRCS=\$\(MAC\_OSX_SRCS\)
-            AC_MSG_CHECKING([whether to use CoreFoundation])
-            AC_ARG_ENABLE(corefoundation, [  --enable-corefoundation use CoreFoundation API [--enable-corefoundation]],
-                [tcl_corefoundation=$enableval], [tcl_corefoundation=yes])
-            AC_MSG_RESULT([$tcl_corefoundation])
-            if test $tcl_corefoundation = yes; then
-                AC_CACHE_CHECK([for CoreFoundation.framework], tcl_cv_lib_corefoundation, [
-                    hold_libs=$LIBS
+	    AC_MSG_CHECKING([whether to use CoreFoundation])
+	    AC_ARG_ENABLE(corefoundation, [  --enable-corefoundation use CoreFoundation API [--enable-corefoundation]],
+		[tcl_corefoundation=$enableval], [tcl_corefoundation=yes])
+	    AC_MSG_RESULT([$tcl_corefoundation])
+	    if test $tcl_corefoundation = yes; then
+		AC_CACHE_CHECK([for CoreFoundation.framework], tcl_cv_lib_corefoundation, [
+		    hold_libs=$LIBS
 		    if test "$fat_32_64" = yes; then for v in CFLAGS CPPFLAGS LDFLAGS; do
 			# On Tiger there is no 64-bit CF, so remove 64-bit archs
 			# from CFLAGS et al. while testing for presence of CF.
 			# 64-bit CF is disabled in tclUnixPort.h if necessary.
 			eval 'hold_'$v'="$'$v'";'$v'="`echo "$'$v' "|sed -e "s/-arch ppc64 / /g" -e "s/-arch x86_64 / /g"`"'
 		    done; fi
-                    LIBS="$LIBS -framework CoreFoundation"
-                    AC_TRY_LINK([#include <CoreFoundation/CoreFoundation.h>], 
-                        [CFBundleRef b = CFBundleGetMainBundle();], 
-                        tcl_cv_lib_corefoundation=yes, tcl_cv_lib_corefoundation=no)
+		    LIBS="$LIBS -framework CoreFoundation"
+		    AC_TRY_LINK([#include <CoreFoundation/CoreFoundation.h>], 
+			[CFBundleRef b = CFBundleGetMainBundle();], 
+			tcl_cv_lib_corefoundation=yes, tcl_cv_lib_corefoundation=no)
 		    if test "$fat_32_64" = yes; then for v in CFLAGS CPPFLAGS LDFLAGS; do
 			eval $v'="$hold_'$v'"'
 		    done; fi; LIBS=$hold_libs])
-                if test $tcl_cv_lib_corefoundation = yes; then
-                    LIBS="$LIBS -framework CoreFoundation"
-                    AC_DEFINE(HAVE_COREFOUNDATION)
+		if test $tcl_cv_lib_corefoundation = yes; then
+		    LIBS="$LIBS -framework CoreFoundation"
+		    AC_DEFINE(HAVE_COREFOUNDATION)
 		else
 		    tcl_corefoundation=no
 		fi
@@ -1675,20 +1677,8 @@ dnl AC_CHECK_TOOL(AR, ar)
 			done])
 		    if test $tcl_cv_lib_corefoundation_64 = no; then
 			AC_DEFINE(NO_COREFOUNDATION_64)
-                fi
-	    fi
-	    AC_CHECK_HEADERS(libkern/OSAtomic.h)
-	    AC_CHECK_FUNCS(OSSpinLockLock)
-	    AC_DEFINE(MAC_OSX_TCL)
-	    AC_DEFINE(USE_VFORK)
-	    AC_DEFINE(TCL_DEFAULT_ENCODING,"utf-8")
-	    AC_DEFINE(TCL_LOAD_FROM_MEMORY)
-	    # prior to Darwin 7, realpath is not threadsafe, so don't
-	    # use it when threads are enabled, c.f. bug # 711232:
-	    AC_CHECK_FUNC(realpath)
-	    if test "$ac_cv_func_realpath" = yes -a "${TCL_THREADS}" = 1 \
-	            -a `uname -r | awk -F. '{print [$]1}'` -lt 7 ; then
-	        ac_cv_func_realpath=no
+		    fi
+		fi
 	    fi
 	    AC_DEFINE(MAC_OSX_TCL)
 	    ;;
@@ -1703,8 +1693,8 @@ dnl AC_CHECK_TOOL(AR, ar)
 	    LD_SEARCH_FLAGS=""
 	    ;;
 	OS/390-*)
-	    CFLAGS_OPTIMIZE=""      # Optimizer is buggy
-	    AC_DEFINE(_OE_SOCKETS)  # needed in sys/socket.h
+	    CFLAGS_OPTIMIZE=""		# Optimizer is buggy
+	    AC_DEFINE(_OE_SOCKETS)	# needed in sys/socket.h
 	    ;;      
 	OSF1-1.0|OSF1-1.1|OSF1-1.2)
 	    # OSF/1 1.[012] from OSF, and derivatives, including Paragon OSF/1
@@ -1967,9 +1957,9 @@ dnl AC_CHECK_TOOL(AR, ar)
 	    DL_LIBS="-ldl"
 	    # Some UNIX_SV* systems (unixware 1.1.2 for example) have linkers
 	    # that don't grok the -Bexport option.  Test that it does.
-
-	    hold_ldflags=$LDFLAGS
-	    LDFLAGS="$LDFLAGS -Wl,-Bexport"
+	    AC_CACHE_CHECK([for ld accepts -Bexport flag], tcl_cv_ld_Bexport, [
+		hold_ldflags=$LDFLAGS
+		LDFLAGS="$LDFLAGS -Wl,-Bexport"
 		AC_TRY_LINK(, [int i;], tcl_cv_ld_Bexport=yes, tcl_cv_ld_Bexport=no)
 	        LDFLAGS=$hold_ldflags])
 	    if test $tcl_cv_ld_Bexport = yes; then
@@ -2022,8 +2012,8 @@ dnl # preprocessing tests use only CPPFLAGS.
 #endif
 	    flag = (foo.a_magic == OMAGIC);
 	    return foo.a_text + foo.a_data + foo.a_bss + foo.a_entry;
-
     ], tcl_cv_sysexec_h=usable, tcl_cv_sysexec_h=unusable)])
+	if test $tcl_cv_sysexec_h = usable; then
 	    AC_DEFINE(USE_SYS_EXEC_H)
 	else
 	    AC_CACHE_CHECK([a.out.h], tcl_cv_aout_h, [
@@ -2038,8 +2028,8 @@ dnl # preprocessing tests use only CPPFLAGS.
 #endif
 		flag = (foo.a_magic == OMAGIC);
 		return foo.a_text + foo.a_data + foo.a_bss + foo.a_entry;
-
 	    ], tcl_cv_aout_h=usable, tcl_cv_aout_h=unusable)])
+	    if test $tcl_cv_aout_h = usable; then
 		AC_DEFINE(USE_A_OUT_H)
 	    else
 		AC_CACHE_CHECK([sys/exec_aout.h], tcl_cv_sysexecaout_h, [
@@ -2054,8 +2044,8 @@ dnl # preprocessing tests use only CPPFLAGS.
 #endif
 		    flag = (foo.a_midmag == OMAGIC);
 		    return foo.a_text + foo.a_data + foo.a_bss + foo.a_entry;
-
 		], tcl_cv_sysexecaout_h=usable, tcl_cv_sysexecaout_h=unusable)])
+		if test $tcl_cv_sysexecaout_h = usable; then
 		    AC_DEFINE(USE_SYS_EXEC_AOUT_H)
 		else
 		    DL_OBJS=""
@@ -2221,7 +2211,7 @@ dnl        esac
 
 AC_DEFUN([SC_SERIAL_PORT], [
     AC_CHECK_HEADERS(sys/modem.h)
-    AC_CHECK_HEADERS(sys/modem.h)
+    AC_CACHE_CHECK([termios vs. termio vs. sgtty], tcl_cv_api_serial, [
     AC_TRY_RUN([
 #include <termios.h>
 
@@ -2346,8 +2336,8 @@ int main() {
 #
 #--------------------------------------------------------------------
 
-
 AC_DEFUN([SC_MISSING_POSIX_HEADERS], [
+    AC_CACHE_CHECK([dirent.h], tcl_cv_dirent_h, [
     AC_TRY_LINK([#include <sys/types.h>
 #include <dirent.h>], [
 #ifndef _POSIX_SOURCE
@@ -2400,9 +2390,7 @@ closedir(d);
     AC_CHECK_HEADER(dlfcn.h, , [AC_DEFINE(NO_DLFCN_H)])
 
     # OS/390 lacks sys/param.h (and doesn't need it, by chance).
-
     AC_HAVE_HEADERS(unistd.h sys/param.h)
-
 ])
 
 #--------------------------------------------------------------------
@@ -2490,6 +2478,7 @@ AC_DEFUN([SC_PATH_X], [
 	XLIBSW=-lX11
     fi
 ])
+
 #--------------------------------------------------------------------
 # SC_BLOCKING_STYLE
 #
@@ -2566,16 +2555,16 @@ AC_DEFUN([SC_TIME_HANDLER], [
 
     AC_CHECK_FUNCS(gmtime_r localtime_r)
 
-
+    AC_CACHE_CHECK([tm_tzadj in struct tm], tcl_cv_member_tm_tzadj, [
 	AC_TRY_COMPILE([#include <time.h>], [struct tm tm; tm.tm_tzadj;],
-
+	    tcl_cv_member_tm_tzadj=yes, tcl_cv_member_tm_tzadj=no)])
     if test $tcl_cv_member_tm_tzadj = yes ; then
 	AC_DEFINE(HAVE_TM_TZADJ)
     fi
 
-
+    AC_CACHE_CHECK([tm_gmtoff in struct tm], tcl_cv_member_tm_gmtoff, [
 	AC_TRY_COMPILE([#include <time.h>], [struct tm tm; tm.tm_gmtoff;],
-
+	    tcl_cv_member_tm_gmtoff=yes, tcl_cv_member_tm_gmtoff=no)])
     if test $tcl_cv_member_tm_gmtoff = yes ; then
 	AC_DEFINE(HAVE_TM_GMTOFF)
     fi
@@ -2584,24 +2573,24 @@ AC_DEFUN([SC_TIME_HANDLER], [
     # Its important to include time.h in this check, as some systems
     # (like convex) have timezone functions, etc.
     #
-
+    AC_CACHE_CHECK([long timezone variable], tcl_cv_timezone_long, [
 	AC_TRY_COMPILE([#include <time.h>],
 	    [extern long timezone;
 	    timezone += 1;
 	    exit (0);],
-
+	    tcl_cv_timezone_long=yes, tcl_cv_timezone_long=no)])
     if test $tcl_cv_timezone_long = yes ; then
 	AC_DEFINE(HAVE_TIMEZONE_VAR)
     else
 	#
 	# On some systems (eg IRIX 6.2), timezone is a time_t and not a long.
 	#
-
+	AC_CACHE_CHECK([time_t timezone variable], tcl_cv_timezone_time, [
 	    AC_TRY_COMPILE([#include <time.h>],
 		[extern time_t timezone;
 		timezone += 1;
 		exit (0);],
-
+		tcl_cv_timezone_time=yes, tcl_cv_timezone_time=no)])
 	if test $tcl_cv_timezone_time = yes ; then
 	    AC_DEFINE(HAVE_TIMEZONE_VAR)
 	fi
@@ -2631,7 +2620,7 @@ AC_DEFUN([SC_TIME_HANDLER], [
 AC_DEFUN([SC_BUGGY_STRTOD], [
     AC_CHECK_FUNC(strtod, tcl_strtod=1, tcl_strtod=0)
     if test "$tcl_strtod" = 1; then
-
+	AC_CACHE_CHECK([for Solaris2.4/Tru64 strtod bugs], tcl_cv_strtod_buggy,[
 	    AC_TRY_RUN([
 		extern double strtod();
 		int main() {
@@ -2654,7 +2643,7 @@ AC_DEFUN([SC_BUGGY_STRTOD], [
 		}], tcl_cv_strtod_buggy=ok, tcl_cv_strtod_buggy=buggy,
 		    tcl_cv_strtod_buggy=buggy)])
 	if test "$tcl_cv_strtod_buggy" = buggy; then
-
+	    AC_LIBOBJ([fixstrtod])
 	    AC_DEFINE(strtod, fixstrtod)
 	fi
     fi
@@ -2833,7 +2822,7 @@ AC_DEFUN([SC_TCL_64BIT_FLAGS], [
 	AC_MSG_RESULT([${tcl_cv_type_64bit}])
 
 	# Now check for auxiliary declarations
-
+	AC_CACHE_CHECK([for struct dirent64], tcl_cv_struct_dirent64,[
 	    AC_TRY_COMPILE([#include <sys/types.h>
 #include <sys/dirent.h>],[struct dirent64 p;],
 		tcl_cv_struct_dirent64=yes,tcl_cv_struct_dirent64=no)])
@@ -2841,7 +2830,7 @@ AC_DEFUN([SC_TCL_64BIT_FLAGS], [
 	    AC_DEFINE(HAVE_STRUCT_DIRENT64)
 	fi
 
-
+	AC_CACHE_CHECK([for struct stat64], tcl_cv_struct_stat64,[
 	    AC_TRY_COMPILE([#include <sys/stat.h>],[struct stat64 p;
 ],
 		tcl_cv_struct_stat64=yes,tcl_cv_struct_stat64=no)])

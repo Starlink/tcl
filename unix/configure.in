@@ -31,6 +31,7 @@ TCL_SRC_DIR=`cd $srcdir/..; pwd`
 #------------------------------------------------------------------------
 # Compress and/or soft link the manpages?
 #------------------------------------------------------------------------
+
 SC_CONFIG_MANPAGES([tcl])
 
 #------------------------------------------------------------------------
@@ -69,7 +70,7 @@ if test -z "$no_pipe" && test -n "$GCC"; then
 	CFLAGS=$hold_cflags])
     if test $tcl_cv_cc_pipe = yes; then
 	CFLAGS="$CFLAGS -pipe"
-
+    fi
 fi
 
 #------------------------------------------------------------------------
@@ -126,7 +127,7 @@ AC_CHECK_FUNCS(getcwd, , [AC_DEFINE(USEGETWD)])
 # Nb: if getcwd uses popen and pwd(1) (like SunOS 4) we should really
 # define USEGETWD even if the posix getcwd exists. Add a test ?
 
-
+AC_REPLACE_FUNCS(opendir strstr strtol strtoll strtoull tmpnam waitpid)
 AC_CHECK_FUNC(strerror, , [AC_DEFINE(NO_STRERROR)])
 AC_CHECK_FUNC(getwd, , [AC_DEFINE(NO_GETWD)])
 AC_CHECK_FUNC(wait3, , [AC_DEFINE(NO_WAIT3)])
@@ -141,7 +142,7 @@ fi
 AC_CHECK_FUNC(realpath, , [AC_DEFINE(NO_REALPATH)])
 
 #--------------------------------------------------------------------
-
+#	Look for thread-safe variants of some library functions.
 #--------------------------------------------------------------------
 
 if test "${TCL_THREADS}" = 1; then
@@ -187,14 +188,14 @@ SC_SERIAL_PORT
 #	special flag.
 #--------------------------------------------------------------------
 
-
+AC_CACHE_CHECK([for fd_set in sys/types], tcl_cv_type_fd_set, [
     AC_TRY_COMPILE([#include <sys/types.h>],[fd_set readMask, writeMask;],
 	tcl_cv_type_fd_set=yes, tcl_cv_type_fd_set=no)])
 tcl_ok=$tcl_cv_type_fd_set
 if test $tcl_ok = no; then
     AC_CACHE_CHECK([for fd_mask in sys/select], tcl_cv_grep_fd_mask, [
 	AC_EGREP_HEADER(fd_mask, sys/select.h,
-
+	     tcl_cv_grep_fd_mask=present, tcl_cv_grep_fd_mask=missing)])
     if test $tcl_cv_grep_fd_mask = present; then
 	AC_DEFINE(HAVE_SYS_SELECT_H)
 	tcl_ok=yes
@@ -237,15 +238,15 @@ AC_CHECK_FUNC(memmove, , [AC_DEFINE(NO_MEMMOVE) AC_DEFINE(NO_STRING_H)])
 dnl only run if AC_REPLACE_FUNCS(strstr) hasn't already added strstr.o
 if test "x${ac_cv_func_strstr}" = "xyes"; then
     AC_CACHE_CHECK([proper strstr implementation], tcl_cv_strstr_unbroken, [
-    AC_TRY_RUN([
-    extern int strstr();
-    int main()
-    {
-        exit(strstr("\0test", "test") ? 1 : 0);
+	AC_TRY_RUN([
+	extern int strstr();
+	int main()
+	{
+	    exit(strstr("\0test", "test") ? 1 : 0);
 	}], tcl_cv_strstr_unbroken=ok, tcl_cv_strstr_unbroken=broken,
 	    tcl_cv_strstr_unbroken=broken)])
     if test $tcl_cv_strstr_unbroken = broken; then
-
+        AC_LIBOBJ([strstr])
     fi
 fi
 
@@ -262,14 +263,14 @@ if test $tcl_ok = 1; then
 	extern int strtoul();
 	int main()
 	{
-    char *string = "0";
-    char *term;
-    int value;
-    value = strtoul(string, &term, 0);
-    if ((value != 0) || (term != (string+1))) {
-        exit(1);
-    }
-    exit(0);
+	    char *string = "0";
+	    char *term;
+	    int value;
+	    value = strtoul(string, &term, 0);
+	    if ((value != 0) || (term != (string+1))) {
+		exit(1);
+	    }
+	    exit(0);
 	}], tcl_cv_strtoul_unbroken=ok , tcl_cv_strtoul_unbroken=broken,
 	    tcl_cv_strtoul_unbroken=broken)])
     if test $tcl_cv_strtoul_unbroken = broken; then
@@ -277,7 +278,7 @@ if test $tcl_ok = 1; then
     fi
 fi
 if test $tcl_ok = 0; then
-    LIBOBJS="$LIBOBJS strtoul.o"
+    AC_LIBOBJ([strtoul])
 fi
 
 #--------------------------------------------------------------------
@@ -292,14 +293,14 @@ if test $tcl_ok = 1; then
 	extern double strtod();
 	int main()
 	{
-    char *string = " +69";
-    char *term;
-    double value;
-    value = strtod(string, &term);
-    if ((value != 69) || (term != (string+4))) {
-	exit(1);
-    }
-    exit(0);
+	    char *string = " +69";
+	    char *term;
+	    double value;
+	    value = strtod(string, &term);
+	    if ((value != 69) || (term != (string+4))) {
+		exit(1);
+	    }
+	    exit(0);
 	}], tcl_cv_strtod_unbroken=ok , tcl_cv_strtod_unbroken=broken,
 	    tcl_cv_strtod_unbroken=broken)])
     if test $tcl_cv_strtod_unbroken = broken; then
@@ -307,7 +308,7 @@ if test $tcl_ok = 1; then
     fi
 fi
 if test $tcl_ok = 0; then
-    LIBOBJS="$LIBOBJS strtod.o"
+    AC_LIBOBJ([strtod])
 fi
 
 #--------------------------------------------------------------------
@@ -361,13 +362,13 @@ AC_CHECK_FUNC(opendir, , [AC_DEFINE(USE_DIRENT2_H)])
 #	the trick.
 #--------------------------------------------------------------------
 
-
+AC_CACHE_CHECK([union wait], tcl_cv_union_wait, [
     AC_TRY_LINK([#include <sys/types.h> 
 #include <sys/wait.h>], [
 union wait x;
 WIFEXITED(x);		/* Generates compiler error if WIFEXITED
 			 * uses an int. */
-
+    ], tcl_cv_union_wait=yes, tcl_cv_union_wait=no)])
 if test $tcl_cv_union_wait = no; then
     AC_DEFINE(NO_UNION_WAIT)
 fi
@@ -386,7 +387,7 @@ if test "$tcl_ok" = 0; then
     AC_CHECK_LIB(inet, strncasecmp, tcl_ok=1, tcl_ok=0)
 fi
 if test "$tcl_ok" = 0; then
-    AC_LIBOBJ([strncasecmp.o])
+    AC_LIBOBJ([strncasecmp])
 fi
 
 #--------------------------------------------------------------------
@@ -404,9 +405,9 @@ AC_CHECK_FUNC(BSDgettimeofday,
     [AC_DEFINE(HAVE_BSDGETTIMEOFDAY)], [
     AC_CHECK_FUNC(gettimeofday, , [AC_DEFINE(NO_GETTOD)])
 ])
-
+AC_CACHE_CHECK([for gettimeofday declaration], tcl_cv_grep_gettimeofday, [
     AC_EGREP_HEADER(gettimeofday, sys/time.h,
-
+	tcl_cv_grep_gettimeofday=present, tcl_cv_grep_gettimeofday=missing)])
 if test $tcl_cv_grep_gettimeofday = missing ; then
     AC_DEFINE(GETTOD_NOT_DECLARED)
 fi
@@ -418,11 +419,11 @@ fi
 #--------------------------------------------------------------------
 
 AC_C_CHAR_UNSIGNED
-
+AC_CACHE_CHECK([signed char declarations], tcl_cv_char_signed, [
     AC_TRY_COMPILE(, [
 	signed char *p;
 	p = 0;
-
+	], tcl_cv_char_signed=yes, tcl_cv_char_signed=no)])
 if test $tcl_cv_char_signed = yes; then
     AC_DEFINE(HAVE_SIGNED_CHAR)
 fi
@@ -431,7 +432,7 @@ fi
 #  Does putenv() copy or not?  We need to know to avoid memory leaks.
 #--------------------------------------------------------------------
 
-
+AC_CACHE_CHECK([for a putenv() that copies the buffer], tcl_cv_putenv_copy, [
     AC_TRY_RUN([
 	#include <stdlib.h>
 	#define OURVAR "havecopy=yes"
@@ -453,7 +454,7 @@ fi
     ],
     tcl_cv_putenv_copy=no,
     tcl_cv_putenv_copy=yes,
-
+    tcl_cv_putenv_copy=no)])
 if test $tcl_cv_putenv_copy = yes; then
     AC_DEFINE(HAVE_PUTENV_THAT_COPIES)
 fi
@@ -667,7 +668,7 @@ VERSION=${TCL_VERSION}
 
 if test "$FRAMEWORK_BUILD" = "1" ; then
     test -z "$TCL_PACKAGE_PATH" && \
-    TCL_PACKAGE_PATH="~/Library/Tcl /Library/Tcl /Network/Library/Tcl /System/Library/Tcl ~/Library/Frameworks /Library/Frameworks /Network/Library/Frameworks /System/Library/Frameworks"
+        TCL_PACKAGE_PATH="~/Library/Tcl /Library/Tcl /Network/Library/Tcl /System/Library/Tcl ~/Library/Frameworks /Library/Frameworks /Network/Library/Frameworks /System/Library/Frameworks"
 elif test "$prefix" != "$exec_prefix"; then
     TCL_PACKAGE_PATH="${libdir} ${prefix}/lib ${TCL_PACKAGE_PATH}"
 else

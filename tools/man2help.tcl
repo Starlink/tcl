@@ -6,14 +6,15 @@
 #
 # Copyright (c) 1996 by Sun Microsystems, Inc.
 #
-# RCS: @(#) $Id: man2help.tcl,v 1.13.2.1 2003/06/04 23:41:15 mistachkin Exp $
+# RCS: @(#) $Id: man2help.tcl,v 1.16 2007/12/13 15:28:40 dgp Exp $
 # 
 
 #
 # PASS 1
 #
 
-set man2tclprog [file join [file dirname [info script]] man2tcl.exe]
+set man2tclprog [file join [file dirname [info script]] \
+	man2tcl[file extension [info nameofexecutable]]]
 
 proc generateContents {basename version files} {
     global curID topics
@@ -29,10 +30,10 @@ proc generateContents {basename version files} {
     foreach package [getPackages] {
 	foreach section [getSections $package] {
             if {![info exists lastSection]} {
-                set lastSection {}
+	        set lastSection {}
             }
             if {[string compare $lastSection $section]} {
-                puts $fd "1 $section"
+	    puts $fd "1 $section"
             }
             set lastSection $section
 	    set lastTopic {}

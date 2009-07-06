@@ -1,16 +1,18 @@
 # genStubs.tcl --
 #
 #	This script generates a set of stub files for a given
-#	interface.  
-#	
+#	interface.
+#
 #
 # Copyright (c) 1998-1999 by Scriptics Corporation.
+# Copyright (c) 2007 Daniel A. Steffen <das@users.sourceforge.net>
+#
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
-# 
-# RCS: @(#) $Id: genStubs.tcl,v 1.13 2002/10/04 08:25:14 dkf Exp $
+#
+# RCS: @(#) $Id: genStubs.tcl,v 1.22.2.2 2008/07/21 19:44:37 andreas_kupries Exp $
 
-package require Tcl 8
+package require Tcl 8.4
 
 namespace eval genStubs {
     # libraryName --
@@ -122,7 +124,7 @@ proc genStubs::hooks {names} {
 # Arguments:
 #	index		The index number of the interface.
 #	platform	The platform the interface belongs to.  Should be one
-#			of generic, win, unix, or mac, or macosx or aqua or x11.
+#			of generic, win, unix, or macosx or aqua or x11.
 #	decl		The C function declaration, or {} for an undefined
 #			entry.
 #
@@ -161,6 +163,30 @@ proc genStubs::declare {args} {
     return
 }
 
+# genStubs::export --
+#
+#	This function is used in the declarations file to declare a symbol
+#	that is exported from the library but is not in the stubs table.
+#
+# Arguments:
+#	decl		The C function declaration, or {} for an undefined
+#			entry.
+#
+# Results:
+#	None.
+
+proc genStubs::export {args} {
+    variable stubs
+    variable curName
+
+    if {[llength $args] != 1} {
+	puts stderr "wrong # args: export $args"
+    }
+    lassign $args decl
+
+    return
+}
+
 # genStubs::rewriteFile --
 #
 #	This function replaces the machine generated portion of the
@@ -184,7 +210,7 @@ proc genStubs::rewriteFile {file text} {
 
     while {![eof $in]} {
 	set line [gets $in]
-	if {[regexp {!BEGIN!} $line]} {
+	if {[string match "*!BEGIN!*" $line]} {
 	    break
 	}
 	puts $out $line
@@ -193,7 +219,7 @@ proc genStubs::rewriteFile {file text} {
     puts $out $text
     while {![eof $in]} {
 	set line [gets $in]
-	if {[regexp {!END!} $line]} {
+	if {[string match "*!END!*" $line]} {
 	    break
 	}
     }
@@ -215,28 +241,51 @@ proc genStubs::rewriteFile {file text} {
 # Results:
 #	Returns the original text inside an appropriate #ifdef.
 
-proc genStubs::addPlatformGuard {plat text} {
+proc genStubs::addPlatformGuard {plat iftxt {eltxt {}}} {
+    set text ""
     switch $plat {
 	win {
-	    return "#ifdef __WIN32__\n${text}#endif /* __WIN32__ */\n"
+	    append text "#ifdef __WIN32__ /* WIN */\n${iftxt}"
+	    if {$eltxt ne ""} {
+		append text "#else /* WIN */\n${eltxt}"
+	    }
+	    append text "#endif /* WIN */\n"
 	}
 	unix {
-	    return "#if !defined(__WIN32__) && !defined(MAC_TCL) /* UNIX */\n${text}#endif /* UNIX */\n"
-	}		    
-	mac {
-	    return "#ifdef MAC_TCL\n${text}#endif /* MAC_TCL */\n"
+	    append text "#if !defined(__WIN32__) && !defined(MAC_OSX_TCL)\
+		    /* UNIX */\n${iftxt}"
+	    if {$eltxt ne ""} {
+		append text "#else /* UNIX */\n${eltxt}"
+	    }
+	    append text "#endif /* UNIX */\n"
 	}
 	macosx {
-	    return "#ifdef MAC_OSX_TCL\n${text}#endif /* MAC_OSX_TCL */\n"
+	    append text "#ifdef MAC_OSX_TCL /* MACOSX */\n${iftxt}"
+	    if {$eltxt ne ""} {
+		append text "#else /* MACOSX */\n${eltxt}"
+	    }
+	    append text "#endif /* MACOSX */\n"
 	}
 	aqua {
-	    return "#ifdef MAC_OSX_TK\n${text}#endif /* MAC_OSX_TK */\n"
+	    append text "#ifdef MAC_OSX_TK /* AQUA */\n${iftxt}"
+	    if {$eltxt ne ""} {
+		append text "#else /* AQUA */\n${eltxt}"
+	    }
+	    append text "#endif /* AQUA */\n"
 	}
 	x11 {
-	    return "#if !(defined(__WIN32__) || defined(MAC_TCL) || defined(MAC_OSX_TK)) /* X11 */\n${text}#endif /* X11 */\n"
+	    append text "#if !(defined(__WIN32__) || defined(MAC_OSX_TK))\
+		    /* X11 */\n${iftxt}"
+	    if {$eltxt ne ""} {
+		append text "#else /* X11 */\n${eltxt}"
+	    }
+	    append text "#endif /* X11 */\n"
+	}
+	default {
+	    append text "${iftxt}${eltxt}"
 	}
     }
-    return "$text"
+    return $text
 }
 
 # genStubs::emitSlots --
@@ -275,8 +324,8 @@ proc genStubs::emitSlots {name textVar} {
 
 proc genStubs::parseDecl {decl} {
     if {![regexp {^(.*)\((.*)\)$} $decl all prefix args]} {
-	puts stderr "Malformed declaration: $decl"
-	return
+	set prefix $decl
+	set args {}
     }
     set prefix [string trim $prefix]
     if {![regexp {^(.+[ ][*]*)([^ *]+)$} $prefix all rtype fname]} {
@@ -284,19 +333,23 @@ proc genStubs::parseDecl {decl} {
 	return
     }
     set rtype [string trim $rtype]
+    if {$args == ""} {
+	return [list $rtype $fname {}]
+    }
     foreach arg [split $args ,] {
 	lappend argList [string trim $arg]
     }
     if {![string compare [lindex $argList end] "..."]} {
-	if {[llength $argList] != 2} {
-	    puts stderr "Only one argument is allowed in varargs form: $decl"
+	set args TCL_VARARGS
+	foreach arg [lrange $argList 0 end-1] {
+	    set argInfo [parseArg $arg]
+	    if {[llength $argInfo] == 2 || [llength $argInfo] == 3} {
+		lappend args $argInfo
+	    } else {
+		puts stderr "Bad argument: '$arg' in '$decl'"
+		return
+	    }
 	}
-	set arg [parseArg [lindex $argList 0]]
-	if {$arg == "" || ([llength $arg] != 2)} {
-	    puts stderr "Bad argument: '[lindex $argList 0]' in '$decl'"
-	    return
-	}
-	set args [list TCL_VARARGS $arg]
     } else {
 	set args {}
 	foreach arg $argList {
@@ -365,7 +418,13 @@ proc genStubs::makeDecl {name decl index} {
 	append line " "
 	set pad 0
     }
-    append line "$fname _ANSI_ARGS_("
+    if {$args == ""} {
+	append line $fname
+	append text $line
+	append text ";\n"
+	return $text
+    }
+    append line "$fname "
 
     set arg1 [lindex $args 0]
     switch -exact $arg1 {
@@ -373,8 +432,22 @@ proc genStubs::makeDecl {name decl index} {
 	    append line "(void)"
 	}
 	TCL_VARARGS {
-	    set arg [lindex $args 1]
-	    append line "TCL_VARARGS([lindex $arg 0],[lindex $arg 1])"
+	    set sep "("
+	    foreach arg [lrange $args 1 end] {
+		append line $sep
+		set next {}
+		append next [lindex $arg 0] " " [lindex $arg 1] \
+			[lindex $arg 2]
+		if {[string length $line] + [string length $next] \
+			+ $pad > 76} {
+		    append text $line \n
+		    set line "\t\t\t\t"
+		    set pad 28
+		}
+		append line $next
+		set sep ", "
+	    }
+	    append line ", ...)"
 	}
 	default {
 	    set sep "("
@@ -395,10 +468,9 @@ proc genStubs::makeDecl {name decl index} {
 	    append line ")"
 	}
     }
-    append text $line
-    
-    append text ");\n"
-    return $text
+    append text $line ";"
+    format "#ifndef %s_TCL_DECLARED\n#define %s_TCL_DECLARED\n%s\n#endif\n" \
+	    $fname $fname $text
 }
 
 # genStubs::makeMacro --
@@ -420,22 +492,10 @@ proc genStubs::makeMacro {name decl index} {
     append lfname [string range $fname 1 end]
 
     set text "#ifndef $fname\n#define $fname"
-    set arg1 [lindex $args 0]
-    set argList ""
-    switch -exact $arg1 {
-	void {
-	    set argList "()"
-	}
-	TCL_VARARGS {
-	}
-	default {
-	    set sep "("
-	    foreach arg $args {
-		append argList $sep [lindex $arg 1]
-		set sep ", "
-	    }
-	    append argList ")"
-	}
+    if {$args == ""} {
+	append text " \\\n\t(*${name}StubsPtr->$lfname)"
+	append text " /* $index */\n#endif\n"
+	return $text
     }
     append text " \\\n\t(${name}StubsPtr->$lfname)"
     append text " /* $index */\n#endif\n"
@@ -465,14 +525,14 @@ proc genStubs::makeStub {name decl index} {
     set arg1 [lindex $args 0]
 
     if {![string compare $arg1 "TCL_VARARGS"]} {
-	lassign [lindex $args 1] type argName 
-	append text " TCL_VARARGS_DEF($type,$argName)\n\{\n"
+	lassign [lindex $args 1] type argName
+	append text " ($type$argName, ...)\n\{\n"
 	append text "    " $type " var;\n    va_list argList;\n"
 	if {[string compare $rtype "void"]} {
 	    append text "    " $rtype " resultValue;\n"
 	}
-	append text "\n    var = (" $type ") TCL_VARARGS_START(" \
-		$type "," $argName ",argList);\n\n    "
+	append text "\n    var = (" $type ") (va_start(argList, " \
+		$argName "), " $argName ");\n\n    "
 	if {[string compare $rtype "void"]} {
 	    append text "resultValue = "
 	}
@@ -526,7 +586,11 @@ proc genStubs::makeSlot {name decl index} {
     append lfname [string range $fname 1 end]
 
     set text "    "
-    append text $rtype " (*" $lfname ") _ANSI_ARGS_("
+    if {$args == ""} {
+	append text $rtype " *" $lfname "; /* $index */\n"
+	return $text
+    }
+    append text $rtype " (*" $lfname ") "
 
     set arg1 [lindex $args 0]
     switch -exact $arg1 {
@@ -534,8 +598,13 @@ proc genStubs::makeSlot {name decl index} {
 	    append text "(void)"
 	}
 	TCL_VARARGS {
-	    set arg [lindex $args 1]
-	    append text "TCL_VARARGS([lindex $arg 0],[lindex $arg 1])"
+	    set sep "("
+	    foreach arg [lrange $args 1 end] {
+		append text $sep [lindex $arg 0] " " [lindex $arg 1] \
+			[lindex $arg 2]
+		set sep ", "
+	    }
+	    append text ", ...)"
 	}
 	default {
 	    set sep "("
@@ -547,8 +616,8 @@ proc genStubs::makeSlot {name decl index} {
 	    append text ")"
 	}
     }
-    
-    append text "); /* $index */\n"
+
+    append text "; /* $index */\n"
     return $text
 }
 
@@ -565,7 +634,11 @@ proc genStubs::makeSlot {name decl index} {
 #	Returns the formatted declaration string.
 
 proc genStubs::makeInit {name decl index} {
-    append text "    " [lindex $decl 1] ", /* " $index " */\n"
+    if {[lindex $decl 2] == ""} {
+	append text "    &" [lindex $decl 1] ", /* " $index " */\n"
+    } else {
+	append text "    " [lindex $decl 1] ", /* " $index " */\n"
+    }
     return $text
 }
 
@@ -609,109 +682,231 @@ proc genStubs::forAllStubs {name slotProc onAll textVar \
 	    set emit 0
 	    if {[info exists stubs($name,generic,$i)]} {
 		if {[llength $slots] > 1} {
-		    puts stderr "platform entry duplicates generic entry: $i"
+		    puts stderr "conflicting generic and platform entries:\
+			    $name $i"
 		}
 		append text [$slotProc $name $stubs($name,generic,$i) $i]
 		set emit 1
 	    } elseif {[llength $slots] > 0} {
-		foreach plat {unix win mac} {
-		    if {[info exists stubs($name,$plat,$i)]} {
-			append text [addPlatformGuard $plat \
-				[$slotProc $name $stubs($name,$plat,$i) $i]]
-			set emit 1
+		array set slot {unix 0 x11 0 win 0 macosx 0 aqua 0}
+		foreach s $slots {
+		    set slot([lindex [split $s ,] 1]) 1
+		}
+		# "aqua", "macosx" and "x11" are special cases:
+		# "macosx" implies "unix", "aqua" implies "macosx" and "x11"
+		# implies "unix", so we need to be careful not to emit
+		# duplicate stubs entries:
+		if {($slot(unix) && $slot(macosx)) || (
+			($slot(unix) || $slot(macosx)) &&
+			($slot(x11)  || $slot(aqua)))} {
+		    puts stderr "conflicting platform entries: $name $i"
+		}
+		## unix ##
+		set temp {}
+		set plat unix
+		if {!$slot(aqua) && !$slot(x11)} {
+		    if {$slot($plat)} {
+			append temp [$slotProc $name $stubs($name,$plat,$i) $i]
 		    } elseif {$onAll} {
-			append text [eval {addPlatformGuard $plat} $skipString]
-			set emit 1
+			eval {append temp} $skipString
 		    }
 		}
-                #
-                # "aqua" and "macosx" and "x11" are special cases, 
-                # since "macosx" always implies "unix" and "aqua", 
-                # "macosx", so we need to be careful not to 
-                # emit duplicate stubs entries for the two.
-                #
-		if {[info exists stubs($name,aqua,$i)]
-                        && ![info exists stubs($name,macosx,$i)]} {
-		    append text [addPlatformGuard aqua \
-			    [$slotProc $name $stubs($name,aqua,$i) $i]]
+		if {$temp ne ""} {
+		    append text [addPlatformGuard $plat $temp]
 		    set emit 1
 		}
-		if {[info exists stubs($name,macosx,$i)]
-                        && ![info exists stubs($name,unix,$i)]} {
-		    append text [addPlatformGuard macosx \
-			    [$slotProc $name $stubs($name,macosx,$i) $i]]
+		## x11 ##
+		set temp {}
+		set plat x11
+		if {!$slot(unix) && !$slot(macosx)} {
+		    if {$slot($plat)} {
+			append temp [$slotProc $name $stubs($name,$plat,$i) $i]
+		    } elseif {$onAll} {
+			eval {append temp} $skipString
+		    }
+		}
+		if {$temp ne ""} {
+		    append text [addPlatformGuard $plat $temp]
 		    set emit 1
 		}
-		if {[info exists stubs($name,x11,$i)]
-                        && ![info exists stubs($name,unix,$i)]} {
-		    append text [addPlatformGuard x11 \
-			    [$slotProc $name $stubs($name,x11,$i) $i]]
+		## win ##
+		set temp {}
+		set plat win
+		if {$slot($plat)} {
+		    append temp [$slotProc $name $stubs($name,$plat,$i) $i]
+		} elseif {$onAll} {
+		    eval {append temp} $skipString
+		}
+		if {$temp ne ""} {
+		    append text [addPlatformGuard $plat $temp]
+		    set emit 1
+		}
+		## macosx ##
+		set temp {}
+		set plat macosx
+		if {!$slot(aqua) && !$slot(x11)} {
+		    if {$slot($plat)} {
+			append temp [$slotProc $name $stubs($name,$plat,$i) $i]
+		    } elseif {$slot(unix)} {
+			append temp [$slotProc $name $stubs($name,unix,$i) $i]
+		    } elseif {$onAll} {
+			eval {append temp} $skipString
+		    }
+		}
+		if {$temp ne ""} {
+		    append text [addPlatformGuard $plat $temp]
+		    set emit 1
+		}
+		## aqua ##
+		set temp {}
+		set plat aqua
+		if {!$slot(unix) && !$slot(macosx)} {
+		    if {[string range $skipString 1 2] ne "/*"} {
+			# genStubs.tcl previously had a bug here causing it to
+			# erroneously generate both a unix entry and an aqua
+			# entry for a given stubs table slot. To preserve
+			# backwards compatibility, generate a dummy stubs entry
+			# before every aqua entry (note that this breaks the
+			# correspondence between emitted entry number and
+			# actual position of the entry in the stubs table, e.g.
+			# TkIntStubs entry 113 for aqua is in fact at position
+			# 114 in the table, entry 114 at position 116 etc).
+			eval {append temp} $skipString
+			set temp "[string range $temp 0 end-1] /*\
+				Dummy entry for stubs table backwards\
+				compatibility */\n"
+		    }
+		    if {$slot($plat)} {
+			append temp [$slotProc $name $stubs($name,$plat,$i) $i]
+		    } elseif {$onAll} {
+			eval {append temp} $skipString
+		    }
+		}
+		if {$temp ne ""} {
+		    append text [addPlatformGuard $plat $temp]
 		    set emit 1
 		}
 	    }
-	    if {$emit == 0} {
+	    if {!$emit} {
 		eval {append text} $skipString
 	    }
 	}
-	
     } else {
 	# Emit separate stubs blocks per platform
-	foreach plat {unix win mac} {
-	    if {[info exists stubs($name,$plat,lastNum)]} {
-		set lastNum $stubs($name,$plat,lastNum)
-		set temp {}
-		for {set i 0} {$i <= $lastNum} {incr i} {
-		    if {![info exists stubs($name,$plat,$i)]} {
-			eval {append temp} $skipString
-		    } else {
-			append temp [$slotProc $name $stubs($name,$plat,$i) $i]
-		    }
-		}
-		append text [addPlatformGuard $plat $temp]
-	    }
+	array set block {unix 0 x11 0 win 0 macosx 0 aqua 0}
+	foreach s [array names stubs $name,*,lastNum] {
+	    set block([lindex [split $s ,] 1]) 1
 	}
-        # Again, make sure you don't duplicate entries for macosx & aqua.
-	if {[info exists stubs($name,aqua,lastNum)]
-                && ![info exists stubs($name,macosx,lastNum)]} {
-	    set lastNum $stubs($name,aqua,lastNum)
+	## unix ##
+	if {$block(unix) && !$block(x11)} {
 	    set temp {}
+	    set plat unix
+	    set lastNum $stubs($name,$plat,lastNum)
 	    for {set i 0} {$i <= $lastNum} {incr i} {
-		if {![info exists stubs($name,aqua,$i)]} {
-		    eval {append temp} $skipString
+		if {[info exists stubs($name,$plat,$i)]} {
+		    append temp [$slotProc $name $stubs($name,$plat,$i) $i]
 		} else {
-			append temp [$slotProc $name $stubs($name,aqua,$i) $i]
+		    eval {append temp} $skipString
+		}
+	    }
+	    append text [addPlatformGuard $plat $temp]
+	}
+	## win ##
+	if {$block(win)} {
+	    set temp {}
+	    set plat win
+	    set lastNum $stubs($name,$plat,lastNum)
+	    for {set i 0} {$i <= $lastNum} {incr i} {
+		if {[info exists stubs($name,$plat,$i)]} {
+		    append temp [$slotProc $name $stubs($name,$plat,$i) $i]
+		} else {
+		    eval {append temp} $skipString
+		}
+	    }
+	    append text [addPlatformGuard $plat $temp]
+	}
+	## macosx ##
+	if {$block(macosx) && !$block(aqua) && !$block(x11)} {
+	    set temp {}
+	    set lastNum -1
+	    foreach plat {unix macosx} {
+		if {$block($plat)} {
+		    set lastNum [expr {$lastNum > $stubs($name,$plat,lastNum)
+			    ? $lastNum : $stubs($name,$plat,lastNum)}]
+		}
+	    }
+	    for {set i 0} {$i <= $lastNum} {incr i} {
+		set emit 0
+		foreach plat {unix macosx} {
+		    if {[info exists stubs($name,$plat,$i)]} {
+			append temp [$slotProc $name $stubs($name,$plat,$i) $i]
+			set emit 1
+			break
 		    }
 		}
-		append text [addPlatformGuard aqua $temp]
-	    }
-        # Again, make sure you don't duplicate entries for macosx & unix.
-	if {[info exists stubs($name,macosx,lastNum)]
-                && ![info exists stubs($name,unix,lastNum)]} {
-	    set lastNum $stubs($name,macosx,lastNum)
-	    set temp {}
-	    for {set i 0} {$i <= $lastNum} {incr i} {
-		if {![info exists stubs($name,macosx,$i)]} {
+		if {!$emit} {
 		    eval {append temp} $skipString
-		} else {
-			append temp [$slotProc $name $stubs($name,macosx,$i) $i]
+		}
+	    }
+	    append text [addPlatformGuard macosx $temp]
+	}
+	## aqua ##
+	if {$block(aqua)} {
+	    set temp {}
+	    set lastNum -1
+	    foreach plat {unix macosx aqua} {
+		if {$block($plat)} {
+		    set lastNum [expr {$lastNum > $stubs($name,$plat,lastNum)
+			    ? $lastNum : $stubs($name,$plat,lastNum)}]
+		}
+	    }
+	    for {set i 0} {$i <= $lastNum} {incr i} {
+		set emit 0
+		foreach plat {unix macosx aqua} {
+		    if {[info exists stubs($name,$plat,$i)]} {
+			append temp [$slotProc $name $stubs($name,$plat,$i) $i]
+			set emit 1
+			break
 		    }
 		}
-		append text [addPlatformGuard macosx $temp]
-	    }
-        # Again, make sure you don't duplicate entries for x11 & unix.
-	if {[info exists stubs($name,x11,lastNum)]
-                && ![info exists stubs($name,unix,lastNum)]} {
-	    set lastNum $stubs($name,x11,lastNum)
-	    set temp {}
-	    for {set i 0} {$i <= $lastNum} {incr i} {
-		if {![info exists stubs($name,x11,$i)]} {
+		if {!$emit} {
 		    eval {append temp} $skipString
-		} else {
-			append temp [$slotProc $name $stubs($name,x11,$i) $i]
+		}
+	    }
+	    append text [addPlatformGuard aqua $temp]
+	}
+	## x11 ##
+	if {$block(x11)} {
+	    set temp {}
+	    set lastNum -1
+	    foreach plat {unix macosx x11} {
+		if {$block($plat)} {
+		    set lastNum [expr {$lastNum > $stubs($name,$plat,lastNum)
+			    ? $lastNum : $stubs($name,$plat,lastNum)}]
+		}
+	    }
+	    for {set i 0} {$i <= $lastNum} {incr i} {
+		set emit 0
+		foreach plat {unix macosx x11} {
+		    if {[info exists stubs($name,$plat,$i)]} {
+			if {$plat ne "macosx"} {
+			    append temp [$slotProc $name \
+				    $stubs($name,$plat,$i) $i]
+			} else {
+			    eval {set etxt} $skipString
+			    append temp [addPlatformGuard $plat [$slotProc \
+				    $name $stubs($name,$plat,$i) $i] $etxt]
+			}
+			set emit 1
+			break
 		    }
 		}
-		append text [addPlatformGuard x11 $temp]
+		if {!$emit} {
+		    eval {append temp} $skipString
+		}
 	    }
+	    append text [addPlatformGuard x11 $temp]
+	}
     }
 }
 
@@ -752,12 +947,14 @@ proc genStubs::emitMacros {name textVar} {
     upvar $textVar text
 
     set upName [string toupper $libraryName]
-    append text "\n#if defined(USE_${upName}_STUBS) && !defined(USE_${upName}_STUB_PROCS)\n"
+    append text "\n#if defined(USE_${upName}_STUBS) &&\
+	    !defined(USE_${upName}_STUB_PROCS)\n"
     append text "\n/*\n * Inline function declarations:\n */\n\n"
-    
+
     forAllStubs $name makeMacro 0 text
 
-    append text "\n#endif /* defined(USE_${upName}_STUBS) && !defined(USE_${upName}_STUB_PROCS) */\n"
+    append text "\n#endif /* defined(USE_${upName}_STUBS) &&\
+	    !defined(USE_${upName}_STUB_PROCS) */\n"
     return
 }
 
@@ -826,7 +1023,7 @@ proc genStubs::emitStubs {name} {
     forAllStubs $name makeStub 0 text
 
     rewriteFile [file join $outDir ${name}Stubs.c] $text
-    return    
+    return
 }
 
 # genStubs::emitInit --
@@ -849,7 +1046,7 @@ proc genStubs::emitInit {name textVar} {
     append capName [string range $name 1 end]
 
     if {[info exists hooks($name)]} {
- 	append text "\nstatic ${capName}StubHooks ${name}StubHooks = \{\n"
+	append text "\nstatic ${capName}StubHooks ${name}StubHooks = \{\n"
 	set sep "    "
 	foreach sub $hooks($name) {
 	    append text $sep "&${sub}Stubs"
@@ -864,7 +1061,7 @@ proc genStubs::emitInit {name textVar} {
     } else {
 	append text "    NULL,\n"
     }
-    
+
     forAllStubs $name makeInit 1 text {"    NULL, /* $i */\n"}
 
     append text "\};\n"
@@ -955,13 +1152,14 @@ proc genStubs::init {} {
 # Results:
 #	Returns any values that were not assigned to variables.
 
-proc lassign {valueList args} {
-  if {[llength $args] == 0} {
-      error "wrong # args: lassign list varname ?varname..?"
-  }
-
-  uplevel [list foreach $args $valueList {break}]
-  return [lrange $valueList [llength $args] end]
+if {[string length [namespace which lassign]] == 0} {
+    proc lassign {valueList args} {
+	if {[llength $args] == 0} {
+	    error "wrong # args: lassign list varname ?varname..?"
+	}
+	uplevel [list foreach $args $valueList {break}]
+	return [lrange $valueList [llength $args] end]
+    }
 }
 
 genStubs::init

@@ -12,20 +12,79 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
-# RCS: @(#) $Id: compExpr-old.test,v 1.7 2001/12/06 10:59:17 dkf Exp $
+# RCS: @(#) $Id: compExpr-old.test,v 1.23 2007/12/13 15:26:06 dgp Exp $
 
 if {[lsearch [namespace children] ::tcltest] == -1} {
-    package require tcltest
+    package require tcltest 2
     namespace import -force ::tcltest::*
 }
 
-if {([catch {expr T1()} msg] == 1) && ($msg == {unknown math function "T1"})} {
-    set gotT1 0
-    puts "This application hasn't been compiled with the \"T1\" and"
-    puts "\"T2\" math functions, so I'll skip some of the expr tests."
+if {[catch {expr T1()} msg] && $msg eq {invalid command name "tcl::mathfunc::T1"}} {
+    testConstraint testmathfunctions 0
 } else {
-    set gotT1 1
+    testConstraint testmathfunctions 1
 }
+
+# Big test for correct ordering of data in [expr]
+
+proc testIEEE {} {
+    variable ieeeValues
+    binary scan [binary format dd -1.0 1.0] c* c
+    switch -exact -- $c {
+	{0 0 0 0 0 0 -16 -65 0 0 0 0 0 0 -16 63} {
+	    # little endian
+	    binary scan \x00\x00\x00\x00\x00\x00\xf0\xff d \
+		ieeeValues(-Infinity)
+	    binary scan \x00\x00\x00\x00\x00\x00\xf0\xbf d \
+		ieeeValues(-Normal)
+	    binary scan \x00\x00\x00\x00\x00\x00\x08\x80 d \
+		ieeeValues(-Subnormal)
+	    binary scan \x00\x00\x00\x00\x00\x00\x00\x80 d \
+		ieeeValues(-0)
+	    binary scan \x00\x00\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(+0)
+	    binary scan \x00\x00\x00\x00\x00\x00\x08\x00 d \
+		ieeeValues(+Subnormal)
+	    binary scan \x00\x00\x00\x00\x00\x00\xf0\x3f d \
+		ieeeValues(+Normal)
+	    binary scan \x00\x00\x00\x00\x00\x00\xf0\x7f d \
+		ieeeValues(+Infinity)
+	    binary scan \x00\x00\x00\x00\x00\x00\xf8\x7f d \
+		ieeeValues(NaN)
+	    set ieeeValues(littleEndian) 1
+	    return 1
+	}
+	{-65 -16 0 0 0 0 0 0 63 -16 0 0 0 0 0 0} {
+	    binary scan \xff\xf0\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(-Infinity)
+	    binary scan \xbf\xf0\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(-Normal)
+	    binary scan \x80\x08\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(-Subnormal)
+	    binary scan \x80\x00\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(-0)
+	    binary scan \x00\x00\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(+0)
+	    binary scan \x00\x08\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(+Subnormal)
+	    binary scan \x3f\xf0\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(+Normal)
+	    binary scan \x7f\xf0\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(+Infinity)
+	    binary scan \x7f\xf8\x00\x00\x00\x00\x00\x00 d \
+		ieeeValues(NaN)
+	    set ieeeValues(littleEndian) 0
+	    return 1
+	}
+	default {
+	    return 0
+	}
+    }
+}
+testConstraint ieeeFloatingPoint [testIEEE]
+
+testConstraint longIs32bit [expr {int(0x80000000) < 0}]
+testConstraint longIs64bit [expr {int(0x8000000000000000) < 0}]
 
 # procedures used below
 
@@ -69,7 +128,9 @@ proc do_twelve_days {} {
     global xxx
     set xxx ""
     12days 1 1 1
-    string length $xxx
+    set result [string length $xxx]
+    unset xxx
+    return $result
 }
 
 # start of tests
@@ -132,60 +193,49 @@ test compExpr-old-1.14 {TclCompileExprCmd: second level of substitutions in expr
 test compExpr-old-2.1 {TclCompileExpr: are builtin functions registered?} {
     expr double(5*[llength "6 2"])
 } 10.0
-test compExpr-old-2.2 {TclCompileExpr: error in expr} {
-    catch {expr 2**3} msg
-    set msg
-} {syntax error in expression "2**3": unexpected operator *}
-test compExpr-old-2.3 {TclCompileExpr: junk after legal expr} {
-    catch {expr 7*[llength "a b"]foo} msg
-    set msg
-} {syntax error in expression "7*2foo": extra tokens at end of expression}
+test compExpr-old-2.2 {TclCompileExpr: error in expr} -body {
+    expr 2***3
+} -returnCodes error -match glob -result *
+test compExpr-old-2.3 {TclCompileExpr: junk after legal expr} -body {
+    expr 7*[llength "a b"]foo
+} -returnCodes error -match glob -result *
 test compExpr-old-2.4 {TclCompileExpr: numeric expr string rep == formatted int rep} {
     expr {0001}
 } 1
 
 test compExpr-old-3.1 {CompileCondExpr: just lor expr} {expr 3||0} 1
-test compExpr-old-3.2 {CompileCondExpr: error in lor expr} {
-    catch {expr x||3} msg
-    set msg
-} {syntax error in expression "x||3": variable references require preceding $} 
+test compExpr-old-3.2 {CompileCondExpr: error in lor expr} -body {
+    expr x||3
+} -returnCodes error -match glob -result *
 test compExpr-old-3.3 {CompileCondExpr: test true arm} {expr 3>2?44:66} 44
-test compExpr-old-3.4 {CompileCondExpr: error compiling true arm} {
-    catch {expr 3>2?2**3:66} msg
-    set msg
-} {syntax error in expression "3>2?2**3:66": unexpected operator *}
+test compExpr-old-3.4 {CompileCondExpr: error compiling true arm} -body {
+    expr 3>2?2***3:66
+} -returnCodes error -match glob -result *
 test compExpr-old-3.5 {CompileCondExpr: test false arm} {expr 2>3?44:66} 66
-test compExpr-old-3.6 {CompileCondExpr: error compiling false arm} {
-    catch {expr 2>3?44:2**3} msg
-    set msg
-} {syntax error in expression "2>3?44:2**3": unexpected operator *}
-test compExpr-old-3.7 {CompileCondExpr: long arms & nested cond exprs} {nonPortable} {
-    puts "Note: doing test compExpr-old-3.7 which can take several minutes to run"
+test compExpr-old-3.6 {CompileCondExpr: error compiling false arm} -body {
+    expr 2>3?44:2***3
+} -returnCodes error -match glob -result *
+test compExpr-old-3.7 {CompileCondExpr: long arms & nested cond exprs} {
     hello_world
 } {Hello world}
-catch {unset xxx}
-test compExpr-old-3.8 {CompileCondExpr: long arms & nested cond exprs} {nonPortable} {
-    puts "Note: doing test compExpr-old-3.8 which can take several minutes to run"
+test compExpr-old-3.8 {CompileCondExpr: long arms & nested cond exprs} unix {
+    # Fails with a stack overflow on threaded Windows builds
     do_twelve_days
 } 2358
-catch {unset xxx}
 
 test compExpr-old-4.1 {CompileLorExpr: just land expr} {expr 1.3&&3.3} 1
-test compExpr-old-4.2 {CompileLorExpr: error in land expr} {
-    catch {expr x&&3} msg
-    set msg
-} {syntax error in expression "x&&3": variable references require preceding $} 
+test compExpr-old-4.2 {CompileLorExpr: error in land expr} -body {
+    expr x&&3
+} -returnCodes error -match glob -result *
 test compExpr-old-4.3 {CompileLorExpr: simple lor exprs} {expr 0||1.0} 1
 test compExpr-old-4.4 {CompileLorExpr: simple lor exprs} {expr 3.0||0.0} 1
 test compExpr-old-4.5 {CompileLorExpr: simple lor exprs} {expr 0||0||1} 1
-test compExpr-old-4.6 {CompileLorExpr: error compiling lor arm} {
-    catch {expr 2**3||4.0} msg
-    set msg
-} {syntax error in expression "2**3||4.0": unexpected operator *}
-test compExpr-old-4.7 {CompileLorExpr: error compiling lor arm} {
-    catch {expr 1.3||2**3} msg
-    set msg
-} {syntax error in expression "1.3||2**3": unexpected operator *}
+test compExpr-old-4.6 {CompileLorExpr: error compiling lor arm} -body {
+    expr 2***3||4.0
+} -returnCodes error -match glob -result *
+test compExpr-old-4.7 {CompileLorExpr: error compiling lor arm} -body {
+    expr 1.3||2***3
+} -returnCodes error -match glob -result *
 test compExpr-old-4.8 {CompileLorExpr: error compiling lor arms} {
     list [catch {expr {"a"||"b"}} msg] $msg
 } {1 {expected boolean value but got "a"}}
@@ -196,22 +246,19 @@ test compExpr-old-4.9 {CompileLorExpr: long lor arm} {
 } 1
 
 test compExpr-old-5.1 {CompileLandExpr: just bitor expr} {expr 7|0x13} 23
-test compExpr-old-5.2 {CompileLandExpr: error in bitor expr} {
-    catch {expr x|3} msg
-    set msg
-} {syntax error in expression "x|3": variable references require preceding $} 
+test compExpr-old-5.2 {CompileLandExpr: error in bitor expr} -body {
+    expr x|3
+} -returnCodes error -match glob -result *
 test compExpr-old-5.3 {CompileLandExpr: simple land exprs} {expr 0&&1.0} 0
 test compExpr-old-5.4 {CompileLandExpr: simple land exprs} {expr 0&&0} 0
 test compExpr-old-5.5 {CompileLandExpr: simple land exprs} {expr 3.0&&1.2} 1
 test compExpr-old-5.6 {CompileLandExpr: simple land exprs} {expr 1&&1&&2} 1
-test compExpr-old-5.7 {CompileLandExpr: error compiling land arm} {
-    catch {expr 2**3&&4.0} msg
-    set msg
-} {syntax error in expression "2**3&&4.0": unexpected operator *}
-test compExpr-old-5.8 {CompileLandExpr: error compiling land arm} {
-    catch {expr 1.3&&2**3} msg
-    set msg
-} {syntax error in expression "1.3&&2**3": unexpected operator *}
+test compExpr-old-5.7 {CompileLandExpr: error compiling land arm} -body {
+    expr 2***3&&4.0
+} -returnCodes error -match glob -result *
+test compExpr-old-5.8 {CompileLandExpr: error compiling land arm} -body {
+    expr 1.3&&2***3
+} -returnCodes error -match glob -result *
 test compExpr-old-5.9 {CompileLandExpr: error compiling land arm} {
     list [catch {expr {"a"&&"b"}} msg] $msg
 } {1 {expected boolean value but got "a"}}
@@ -222,22 +269,19 @@ test compExpr-old-5.10 {CompileLandExpr: long land arms} {
 } 1
 
 test compExpr-old-6.1 {CompileBitXorExpr: just bitand expr} {expr 7&0x13} 3
-test compExpr-old-6.2 {CompileBitXorExpr: error in bitand expr} {
-    catch {expr x|3} msg
-    set msg
-} {syntax error in expression "x|3": variable references require preceding $} 
+test compExpr-old-6.2 {CompileBitXorExpr: error in bitand expr} -body {
+    expr x|3
+} -returnCodes error -match glob -result *
 test compExpr-old-6.3 {CompileBitXorExpr: simple bitxor exprs} {expr 7^0x13} 20
 test compExpr-old-6.4 {CompileBitXorExpr: simple bitxor exprs} {expr 3^0x10} 19
 test compExpr-old-6.5 {CompileBitXorExpr: simple bitxor exprs} {expr 0^7} 7
 test compExpr-old-6.6 {CompileBitXorExpr: simple bitxor exprs} {expr -1^7} -8
-test compExpr-old-6.7 {CompileBitXorExpr: error compiling bitxor arm} {
-    catch {expr 2**3|6} msg
-    set msg
-} {syntax error in expression "2**3|6": unexpected operator *}
-test compExpr-old-6.8 {CompileBitXorExpr: error compiling bitxor arm} {
-    catch {expr 2^x} msg
-    set msg
-} {syntax error in expression "2^x": variable references require preceding $}
+test compExpr-old-6.7 {CompileBitXorExpr: error compiling bitxor arm} -body {
+    expr 2***3|6
+} -returnCodes error -match glob -result *
+test compExpr-old-6.8 {CompileBitXorExpr: error compiling bitxor arm} -body {
+    expr 2^x
+} -returnCodes error -match glob -result *
 test compExpr-old-6.9 {CompileBitXorExpr: runtime error in bitxor arm} {
     list [catch {expr {24.0^3}} msg] $msg
 } {1 {can't use floating-point value as operand of "^"}}
@@ -249,22 +293,19 @@ test compExpr-old-7.1 {CompileBitAndExpr: just equality expr} {expr 3==2} 0
 test compExpr-old-7.2 {CompileBitAndExpr: just equality expr} {expr 2.0==2} 1
 test compExpr-old-7.3 {CompileBitAndExpr: just equality expr} {expr 3.2!=2.2} 1
 test compExpr-old-7.4 {CompileBitAndExpr: just equality expr} {expr {"abc" == "abd"}} 0
-test compExpr-old-7.5 {CompileBitAndExpr: error in equality expr} {
-    catch {expr x==3} msg
-    set msg
-} {syntax error in expression "x==3": variable references require preceding $} 
+test compExpr-old-7.5 {CompileBitAndExpr: error in equality expr} -body {
+    expr x==3
+} -returnCodes error -match glob -result *
 test compExpr-old-7.6 {CompileBitAndExpr: simple bitand exprs} {expr 7&0x13} 3
 test compExpr-old-7.7 {CompileBitAndExpr: simple bitand exprs} {expr 0xf2&0x53} 82
 test compExpr-old-7.8 {CompileBitAndExpr: simple bitand exprs} {expr 3&6} 2
 test compExpr-old-7.9 {CompileBitAndExpr: simple bitand exprs} {expr -1&-7} -7
-test compExpr-old-7.10 {CompileBitAndExpr: error compiling bitand arm} {
-    catch {expr 2**3&6} msg
-    set msg
-} {syntax error in expression "2**3&6": unexpected operator *}
-test compExpr-old-7.11 {CompileBitAndExpr: error compiling bitand arm} {
-    catch {expr 2&x} msg
-    set msg
-} {syntax error in expression "2&x": variable references require preceding $}
+test compExpr-old-7.10 {CompileBitAndExpr: error compiling bitand arm} -body {
+    expr 2***3&6
+} -returnCodes error -match glob -result *
+test compExpr-old-7.11 {CompileBitAndExpr: error compiling bitand arm} -body {
+    expr 2&x
+} -returnCodes error -match glob -result *
 test compExpr-old-7.12 {CompileBitAndExpr: runtime error in bitand arm} {
     list [catch {expr {24.0&3}} msg] $msg
 } {1 {can't use floating-point value as operand of "&"}}
@@ -276,22 +317,19 @@ test compExpr-old-8.1 {CompileEqualityExpr: just relational expr} {expr 3>=2} 1
 test compExpr-old-8.2 {CompileEqualityExpr: just relational expr} {expr 2<=2.1} 1
 test compExpr-old-8.3 {CompileEqualityExpr: just relational expr} {expr 3.2>"2.2"} 1
 test compExpr-old-8.4 {CompileEqualityExpr: just relational expr} {expr {"0y"<"0x12"}} 0
-test compExpr-old-8.5 {CompileEqualityExpr: error in relational expr} {
-    catch {expr x>3} msg
-    set msg
-} {syntax error in expression "x>3": variable references require preceding $} 
+test compExpr-old-8.5 {CompileEqualityExpr: error in relational expr} -body {
+    expr x>3
+} -returnCodes error -match glob -result *
 test compExpr-old-8.6 {CompileEqualityExpr: simple equality exprs} {expr 7==0x13} 0
 test compExpr-old-8.7 {CompileEqualityExpr: simple equality exprs} {expr -0xf2!=0x53} 1
 test compExpr-old-8.8 {CompileEqualityExpr: simple equality exprs} {expr {"12398712938788234-1298379" != ""}} 1
 test compExpr-old-8.9 {CompileEqualityExpr: simple equality exprs} {expr -1!="abc"} 1
-test compExpr-old-8.10 {CompileEqualityExpr: error compiling equality arm} {
-    catch {expr 2**3==6} msg
-    set msg
-} {syntax error in expression "2**3==6": unexpected operator *}
-test compExpr-old-8.11 {CompileEqualityExpr: error compiling equality arm} {
-    catch {expr 2!=x} msg
-    set msg
-} {syntax error in expression "2!=x": variable references require preceding $}
+test compExpr-old-8.10 {CompileEqualityExpr: error compiling equality arm} -body {
+    expr 2***3==6
+} -returnCodes error -match glob -result *
+test compExpr-old-8.11 {CompileEqualityExpr: error compiling equality arm} -body {
+    expr 2!=x
+} -returnCodes error -match glob -result *
 
 
 test compExpr-old-9.1 {CompileRelationalExpr: just shift expr} {expr 3<<2} 12
@@ -302,48 +340,40 @@ test compExpr-old-9.4 {CompileRelationalExpr: just shift expr} {expr {1<<3}} 8
 # The following test is different for 32-bit versus 64-bit
 # architectures because LONG_MIN is different
 
-if {0x80000000 > 0} {
-    test compExpr-old-9.5 {CompileRelationalExpr: shift expr producing LONG_MIN} {nonPortable} {
-	expr {1<<63}
-    } -9223372036854775808
-} else {
-    test compExpr-old-9.5 {CompileRelationalExpr: shift expr producing LONG_MIN} {nonPortable} {
-	expr {1<<31}
-    } -2147483648
-}
-test compExpr-old-9.6 {CompileRelationalExpr: error in shift expr} {
-    catch {expr x>>3} msg
-    set msg
-} {syntax error in expression "x>>3": variable references require preceding $} 
+test compExpr-old-9.5a {CompileRelationalExpr: shift expr producing LONG_MIN} longIs64bit {
+    expr {int(1<<63)}
+} -9223372036854775808
+test compExpr-old-9.5b {CompileRelationalExpr: shift expr producing LONG_MIN} longIs32bit {
+    expr {int(1<<31)}
+} -2147483648
+
+test compExpr-old-9.6 {CompileRelationalExpr: error in shift expr} -body {
+    expr x>>3
+} -returnCodes error -match glob -result *
 test compExpr-old-9.7 {CompileRelationalExpr: simple relational exprs} {expr 0xff>=+0x3} 1
 test compExpr-old-9.8 {CompileRelationalExpr: simple relational exprs} {expr -0xf2<0x3} 1
-test compExpr-old-9.9 {CompileRelationalExpr: error compiling relational arm} {
-    catch {expr 2**3>6} msg
-    set msg
-} {syntax error in expression "2**3>6": unexpected operator *}
-test compExpr-old-9.10 {CompileRelationalExpr: error compiling relational arm} {
-    catch {expr 2<x} msg
-    set msg
-} {syntax error in expression "2<x": variable references require preceding $}
+test compExpr-old-9.9 {CompileRelationalExpr: error compiling relational arm} -body {
+    expr 2***3>6
+} -returnCodes error -match glob -result *
+test compExpr-old-9.10 {CompileRelationalExpr: error compiling relational arm} -body {
+    expr 2<x
+} -returnCodes error -match glob -result *
 
 test compExpr-old-10.1 {CompileShiftExpr: just add expr} {expr 4+-2} 2
 test compExpr-old-10.2 {CompileShiftExpr: just add expr} {expr 0xff-2} 253
 test compExpr-old-10.3 {CompileShiftExpr: just add expr} {expr -1--2} 1
-test compExpr-old-10.4 {CompileShiftExpr: just add expr} {expr 1-0123} -82
-test compExpr-old-10.5 {CompileShiftExpr: error in add expr} {
-    catch {expr x+3} msg
-    set msg
-} {syntax error in expression "x+3": variable references require preceding $}
+test compExpr-old-10.4 {CompileShiftExpr: just add expr} {expr 1-0o123} -82
+test compExpr-old-10.5 {CompileShiftExpr: error in add expr} -body {
+    expr x+3
+} -returnCodes error -match glob -result *
 test compExpr-old-10.6 {CompileShiftExpr: simple shift exprs} {expr 0xff>>0x3} 31
 test compExpr-old-10.7 {CompileShiftExpr: simple shift exprs} {expr -0xf2<<0x3} -1936
-test compExpr-old-10.8 {CompileShiftExpr: error compiling shift arm} {
-    catch {expr 2**3>>6} msg
-    set msg
-} {syntax error in expression "2**3>>6": unexpected operator *}
-test compExpr-old-10.9 {CompileShiftExpr: error compiling shift arm} {
-    catch {expr 2<<x} msg
-    set msg
-} {syntax error in expression "2<<x": variable references require preceding $}
+test compExpr-old-10.8 {CompileShiftExpr: error compiling shift arm} -body {
+    expr 2***3>>6
+} -returnCodes error -match glob -result *
+test compExpr-old-10.9 {CompileShiftExpr: error compiling shift arm} -body {
+    expr 2<<x
+} -returnCodes error -match glob -result *
 test compExpr-old-10.10 {CompileShiftExpr: runtime error} {
     list [catch {expr {24.0>>43}} msg] $msg
 } {1 {can't use floating-point value as operand of ">>"}}
@@ -354,21 +384,18 @@ test compExpr-old-10.11 {CompileShiftExpr: runtime error} {
 test compExpr-old-11.1 {CompileAddExpr: just multiply expr} {expr 4*-2} -8
 test compExpr-old-11.2 {CompileAddExpr: just multiply expr} {expr 0xff%2} 1
 test compExpr-old-11.3 {CompileAddExpr: just multiply expr} {expr -1/2} -1
-test compExpr-old-11.4 {CompileAddExpr: just multiply expr} {expr 7891%0123} 6
-test compExpr-old-11.5 {CompileAddExpr: error in multiply expr} {
-    catch {expr x*3} msg
-    set msg
-} {syntax error in expression "x*3": variable references require preceding $}
+test compExpr-old-11.4 {CompileAddExpr: just multiply expr} {expr 7891%0o123} 6
+test compExpr-old-11.5 {CompileAddExpr: error in multiply expr} -body {
+    expr x*3
+} -returnCodes error -match glob -result *
 test compExpr-old-11.6 {CompileAddExpr: simple add exprs} {expr 0xff++0x3} 258
 test compExpr-old-11.7 {CompileAddExpr: simple add exprs} {expr -0xf2--0x3} -239
-test compExpr-old-11.8 {CompileAddExpr: error compiling add arm} {
-    catch {expr 2**3+6} msg
-    set msg
-} {syntax error in expression "2**3+6": unexpected operator *}
-test compExpr-old-11.9 {CompileAddExpr: error compiling add arm} {
-    catch {expr 2-x} msg
-    set msg
-} {syntax error in expression "2-x": variable references require preceding $}
+test compExpr-old-11.8 {CompileAddExpr: error compiling add arm} -body {
+    expr 2***3+6
+} -returnCodes error -match glob -result *
+test compExpr-old-11.9 {CompileAddExpr: error compiling add arm} -body {
+    expr 2-x
+} -returnCodes error -match glob -result *
 test compExpr-old-11.10 {CompileAddExpr: runtime error} {
     list [catch {expr {24.0+"xx"}} msg] $msg
 } {1 {can't use non-numeric string as operand of "+"}}
@@ -378,7 +405,10 @@ test compExpr-old-11.11 {CompileAddExpr: runtime error} {
 test compExpr-old-11.12 {CompileAddExpr: runtime error} {
     list [catch {expr {3/0}} msg] $msg
 } {1 {divide by zero}}
-test compExpr-old-11.13 {CompileAddExpr: runtime error} {
+test compExpr-old-11.13a {CompileAddExpr: runtime error} ieeeFloatingPoint {
+    list [catch {expr {2.3/0.0}} msg] $msg
+} {0 Inf}
+test compExpr-old-11.13b {CompileAddExpr: runtime error} !ieeeFloatingPoint {
     list [catch {expr {2.3/0.0}} msg] $msg
 } {1 {divide by zero}}
 
@@ -386,20 +416,17 @@ test compExpr-old-12.1 {CompileMultiplyExpr: just unary expr} {expr ~4} -5
 test compExpr-old-12.2 {CompileMultiplyExpr: just unary expr} {expr --5} 5
 test compExpr-old-12.3 {CompileMultiplyExpr: just unary expr} {expr !27} 0
 test compExpr-old-12.4 {CompileMultiplyExpr: just unary expr} {expr ~0xff00ff} -16711936
-test compExpr-old-12.5 {CompileMultiplyExpr: error in unary expr} {
-    catch {expr ~x} msg
-    set msg
-} {syntax error in expression "~x": variable references require preceding $}
+test compExpr-old-12.5 {CompileMultiplyExpr: error in unary expr} -body {
+    expr ~x
+} -returnCodes error -match glob -result *
 test compExpr-old-12.6 {CompileMultiplyExpr: simple multiply exprs} {expr 0xff*0x3} 765
 test compExpr-old-12.7 {CompileMultiplyExpr: simple multiply exprs} {expr -0xf2%-0x3} -2
-test compExpr-old-12.8 {CompileMultiplyExpr: error compiling multiply arm} {
-    catch {expr 2*3%%6} msg
-    set msg
-} {syntax error in expression "2*3%%6": unexpected operator %}
-test compExpr-old-12.9 {CompileMultiplyExpr: error compiling multiply arm} {
-    catch {expr 2*x} msg
-    set msg
-} {syntax error in expression "2*x": variable references require preceding $}
+test compExpr-old-12.8 {CompileMultiplyExpr: error compiling multiply arm} -body {
+    expr 2*3%%6
+} -returnCodes error -match glob -result *
+test compExpr-old-12.9 {CompileMultiplyExpr: error compiling multiply arm} -body {
+    expr 2*x
+} -returnCodes error -match glob -result *
 test compExpr-old-12.10 {CompileMultiplyExpr: runtime error} {
     list [catch {expr {24.0*"xx"}} msg] $msg
 } {1 {can't use non-numeric string as operand of "*"}}
@@ -408,20 +435,19 @@ test compExpr-old-12.11 {CompileMultiplyExpr: runtime error} {
 } {1 {can't use non-numeric string as operand of "/"}}
 
 test compExpr-old-13.1 {CompileUnaryExpr: unary exprs} {expr -0xff} -255
-test compExpr-old-13.2 {CompileUnaryExpr: unary exprs} {expr +000123} 83
+test compExpr-old-13.2 {CompileUnaryExpr: unary exprs} {expr +0o00123} 83
 test compExpr-old-13.3 {CompileUnaryExpr: unary exprs} {expr +--++36} 36
 test compExpr-old-13.4 {CompileUnaryExpr: unary exprs} {expr !2} 0
 test compExpr-old-13.5 {CompileUnaryExpr: unary exprs} {expr +--+-62.0} -62.0
 test compExpr-old-13.6 {CompileUnaryExpr: unary exprs} {expr !0.0} 1
 test compExpr-old-13.7 {CompileUnaryExpr: unary exprs} {expr !0xef} 0
-test compExpr-old-13.8 {CompileUnaryExpr: error compiling unary expr} {
-    catch {expr ~x} msg
+test compExpr-old-13.8 {CompileUnaryExpr: error compiling unary expr} -body {
+    expr ~x
+} -returnCodes error -match glob -result *
+test compExpr-old-13.9 {CompileUnaryExpr: error compiling unary expr} -body {
+    expr !1.x
     set msg
-} {syntax error in expression "~x": variable references require preceding $}
-test compExpr-old-13.9 {CompileUnaryExpr: error compiling unary expr} {
-    catch {expr !1.x} msg
-    set msg
-} {syntax error in expression "!1.x": extra tokens at end of expression}
+} -returnCodes error -match glob -result *
 test compExpr-old-13.10 {CompileUnaryExpr: runtime error} {
     list [catch {expr {~"xx"}} msg] $msg
 } {1 {can't use non-numeric string as operand of "~"}}
@@ -444,7 +470,7 @@ test compExpr-old-13.16 {CompileUnaryExpr: error in primary expr} {
 test compExpr-old-14.1 {CompilePrimaryExpr: literal primary} {expr 1} 1
 test compExpr-old-14.2 {CompilePrimaryExpr: literal primary} {expr 123} 123
 test compExpr-old-14.3 {CompilePrimaryExpr: literal primary} {expr 0xff} 255
-test compExpr-old-14.4 {CompilePrimaryExpr: literal primary} {expr 00010} 8
+test compExpr-old-14.4 {CompilePrimaryExpr: literal primary} {expr 0o0010} 8
 test compExpr-old-14.5 {CompilePrimaryExpr: literal primary} {expr 62.0} 62.0
 test compExpr-old-14.6 {CompilePrimaryExpr: literal primary} {
     expr 3.1400000
@@ -481,15 +507,12 @@ test compExpr-old-14.15 {CompilePrimaryExpr: var reference primary} {
     catch {expr $i.2} msg
     set msg
 } 123.2
-test compExpr-old-14.16 {CompilePrimaryExpr: error compiling var reference primary} {
-    catch {expr {$a(foo}} msg
-    set errorInfo
-} {missing )
-    while compiling
-"expr {$a(foo}"}
-test compExpr-old-14.17 {CompilePrimaryExpr: string primary that looks like var ref} {
+test compExpr-old-14.16 {CompilePrimaryExpr: error compiling var reference primary} -body {
+    expr {$a(foo}
+} -returnCodes error -match glob -result *
+test compExpr-old-14.17 {CompilePrimaryExpr: string primary that looks like var ref} -body {
     expr $
-} $
+} -returnCodes error -match glob -result *
 test compExpr-old-14.18 {CompilePrimaryExpr: quoted string primary} {
     expr "21"
 } 21
@@ -510,114 +533,89 @@ test compExpr-old-14.21 {CompilePrimaryExpr: error in quoted string primary} {
 test compExpr-old-14.22 {CompilePrimaryExpr: subcommand primary} {
     expr {[set i 123; set i]}
 } 123
-test compExpr-old-14.23 {CompilePrimaryExpr: error in subcommand primary} {
+test compExpr-old-14.23 {CompilePrimaryExpr: error in subcommand primary} -body {
     catch {expr {[set]}} msg
-    set errorInfo
-} {wrong # args: should be "set varName ?newValue?"
-    while compiling
-"set"
-    while compiling
-"expr {[set]}"}
-test compExpr-old-14.24 {CompilePrimaryExpr: error in subcommand primary} {
-    catch {expr {[set i}} msg
-    set errorInfo
-} {missing close-bracket
-    while compiling
-"expr {[set i}"}
+    set ::errorInfo
+} -match glob -result {wrong # args: should be "set varName ?newValue?"
+    while *ing
+"set"*}
+test compExpr-old-14.24 {CompilePrimaryExpr: error in subcommand primary} -body {
+    expr {[set i}
+} -returnCodes error -match glob -result *
 test compExpr-old-14.25 {CompilePrimaryExpr: math function primary} {
     format %.6g [expr exp(1.0)]
 } 2.71828
 test compExpr-old-14.26 {CompilePrimaryExpr: math function primary} {
     format %.6g [expr pow(2.0+0.1,3.0+0.1)]
 } 9.97424
-test compExpr-old-14.27 {CompilePrimaryExpr: error in math function primary} {
-    catch {expr sinh::(2.0)} msg
-    set errorInfo
-} {syntax error in expression "sinh::(2.0)": expected parenthesis enclosing function arguments
-    while compiling
-"expr sinh::(2.0)"}
+test compExpr-old-14.27 {CompilePrimaryExpr: error in math function primary} -body {
+    expr sinh::(2.0)
+} -returnCodes error -match glob -result *
 test compExpr-old-14.28 {CompilePrimaryExpr: subexpression primary} {
     expr 2+(3*4)
 } 14
-test compExpr-old-14.29 {CompilePrimaryExpr: error in subexpression primary} {
+test compExpr-old-14.29 {CompilePrimaryExpr: error in subexpression primary} -body {
     catch {expr 2+(3*[set])} msg
-    set errorInfo
-} {wrong # args: should be "set varName ?newValue?"
-    while compiling
-"set"
-    while compiling
-"expr 2+(3*[set])"}
-test compExpr-old-14.30 {CompilePrimaryExpr: missing paren in subexpression primary} {
-    catch {expr 2+(3*(4+5)} msg
-    set errorInfo
-} {syntax error in expression "2+(3*(4+5)": looking for close parenthesis
-    while compiling
-"expr 2+(3*(4+5)"}
+    set ::errorInfo
+} -match glob -result {wrong # args: should be "set varName ?newValue?"
+    while *ing
+"set"*}
+test compExpr-old-14.30 {CompilePrimaryExpr: missing paren in subexpression primary} -body {
+    expr 2+(3*(4+5)
+} -returnCodes error -match glob -result *
 test compExpr-old-14.31 {CompilePrimaryExpr: just var ref in subexpression primary} {
     set i "5+10"
     list "[expr $i] == 15" "[expr ($i)] == 15" "[eval expr ($i)] == 15"
 } {{15 == 15} {15 == 15} {15 == 15}}
-test compExpr-old-14.32 {CompilePrimaryExpr: unexpected token} {
-    catch {expr @} msg
-    set errorInfo
-} {syntax error in expression "@": character not legal in expressions
-    while compiling
-"expr @"}
+test compExpr-old-14.32 {CompilePrimaryExpr: unexpected token} -body {
+    expr @
+} -returnCodes error -match glob -result *
 
-test compExpr-old-15.1 {CompileMathFuncCall: missing parenthesis} {
-    catch {expr sinh2.0)} msg
-    set errorInfo
-} {syntax error in expression "sinh2.0)": variable references require preceding $
-    while compiling
-"expr sinh2.0)"}
-test compExpr-old-15.2 {CompileMathFuncCall: unknown math function} {
+test compExpr-old-15.1 {CompileMathFuncCall: missing parenthesis} -body {
+    expr sinh2.0)
+} -returnCodes error -match glob -result *
+test compExpr-old-15.2 {CompileMathFuncCall: unknown math function} -body {
     catch {expr whazzathuh(1)} msg
-    set errorInfo
-} {unknown math function "whazzathuh"
-    while compiling
+    set ::errorInfo
+} -match glob -result {* "*whazzathuh"
+    while *ing
 "expr whazzathuh(1)"}
-test compExpr-old-15.3 {CompileMathFuncCall: too many arguments} {
+test compExpr-old-15.3 {CompileMathFuncCall: too many arguments} -body {
     catch {expr sin(1,2,3)} msg
-    set errorInfo
-} {too many arguments for math function
-    while compiling
+    set ::errorInfo
+} -match glob -result {too many arguments for math function*
+    while *ing
 "expr sin(1,2,3)"}
-test compExpr-old-15.4 {CompileMathFuncCall: ')' found before last required arg} {
+test compExpr-old-15.4 {CompileMathFuncCall: ')' found before last required arg} -body {
     catch {expr sin()} msg
-    set errorInfo
-} {too few arguments for math function
-    while compiling
+    set ::errorInfo
+} -match glob -result {too few arguments for math function*
+    while *ing
 "expr sin()"}
-test compExpr-old-15.5 {CompileMathFuncCall: too few arguments} {
+test compExpr-old-15.5 {CompileMathFuncCall: too few arguments} -body {
     catch {expr pow(1)} msg
-    set errorInfo
-} {too few arguments for math function
-    while compiling
+    set ::errorInfo
+} -match glob -result {too few arguments for math function*
+    while *ing
 "expr pow(1)"}
-test compExpr-old-15.6 {CompileMathFuncCall: missing ')'} {
-    catch {expr sin(1} msg
-    set errorInfo
-} {syntax error in expression "sin(1": missing close parenthesis at end of function call
-    while compiling
-"expr sin(1"}
-if $gotT1 {
-    test compExpr-old-15.7 {CompileMathFuncCall: call registered math function} {
-	expr 2*T1()
-    } 246
-    test compExpr-old-15.8 {CompileMathFuncCall: call registered math function} {
-	expr T2()*3
-    } 1035
-
-    test compExpr-old-15.9 {CompileMathFuncCall: call registered math function} {
-	expr T3(21, 37)
-    } 37
-    test compExpr-old-15.10 {CompileMathFuncCall: call registered math function} {
-	expr T3(21.2, 37)
-    } 37.0
-    test compExpr-old-15.11 {CompileMathFuncCall: call registered math function} {
-	expr T3(-21.2, -17.5)
-    } -17.5
-}
+test compExpr-old-15.6 {CompileMathFuncCall: missing ')'} -body {
+    expr sin(1
+} -returnCodes error -match glob -result *
+test compExpr-old-15.7 {CompileMathFuncCall: call registered math function} testmathfunctions {
+    expr 2*T1()
+} 246
+test compExpr-old-15.8 {CompileMathFuncCall: call registered math function} testmathfunctions {
+    expr T2()*3
+} 1035
+test compExpr-old-15.9 {CompileMathFuncCall: call registered math function} testmathfunctions {
+    expr T3(21, 37)
+} 37
+test compExpr-old-15.10 {CompileMathFuncCall: call registered math function} testmathfunctions {
+    expr T3(21.2, 37)
+} 37.0
+test compExpr-old-15.11 {CompileMathFuncCall: call registered math function} testmathfunctions {
+    expr T3(-21.2, -17.5)
+} -17.5
 
 test compExpr-old-16.1 {GetToken: checks whether integer token starting with "0x" (e.g., "0x$") is invalid} {
     catch {unset a}

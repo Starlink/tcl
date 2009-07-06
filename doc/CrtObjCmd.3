@@ -4,7 +4,7 @@
 '\" See the file "license.terms" for information on usage and redistribution
 '\" of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 '\" 
-'\" RCS: @(#) $Id: CrtObjCmd.3,v 1.7.2.1 2004/05/05 20:54:47 dkf Exp $
+'\" RCS: @(#) $Id: CrtObjCmd.3,v 1.17 2007/12/13 15:22:30 dgp Exp $
 '\" 
 .so man.macros
 .TH Tcl_CreateObjCommand 3 8.0 Tcl "Tcl Library Procedures"
@@ -30,17 +30,13 @@ int
 int
 \fBTcl_SetCommandInfo\fR(\fIinterp, cmdName, infoPtr\fR)
 .sp
-.VS 8.4
 int
 \fBTcl_GetCommandInfoFromToken\fR(\fItoken, infoPtr\fR)
 .sp
 int
 \fBTcl_SetCommandInfoFromToken\fR(\fItoken, infoPtr\fR)
-.VE
 .sp
-.VS 8.4
-CONST char *
-.VE
+const char *
 \fBTcl_GetCommandName\fR(\fIinterp, token\fR)
 .sp
 void
@@ -49,12 +45,10 @@ void
 Tcl_Command
 \fBTcl_GetCommandFromObj\fR(\fIinterp, objPtr\fR)
 .SH ARGUMENTS
-.AS Tcl_ObjCmdProc *deleteProc in/out
+.AS Tcl_CmdDeleteProc *deleteProc in/out
 .AP Tcl_Interp *interp in
 Interpreter in which to create a new command or that contains a command.
-.VS 8.4
 .AP char *cmdName in
-.VE
 Name of command.
 .AP Tcl_ObjCmdProc *proc in
 Implementation of the new command: \fIproc\fR will be called whenever
@@ -98,11 +92,10 @@ and it returns NULL.
 \fBTcl_ObjCmdProc\fR:
 .CS
 typedef int Tcl_ObjCmdProc(
-	ClientData \fIclientData\fR,
-	Tcl_Interp *\fIinterp\fR,
-	int \fIobjc\fR,
-.VS
-	Tcl_Obj *CONST \fIobjv\fR[]);
+        ClientData \fIclientData\fR,
+        Tcl_Interp *\fIinterp\fR,
+        int \fIobjc\fR,
+        Tcl_Obj *const \fIobjv\fR[]);
 .CE
 When \fIproc\fR is invoked, the \fIclientData\fR and \fIinterp\fR parameters
 will be copies of the \fIclientData\fR and \fIinterp\fR arguments given to
@@ -119,7 +112,7 @@ Additionally, when \fIproc\fR is invoked, it must not modify the contents
 of the \fIobjv\fR array by assigning new pointer values to any element of the
 array (for example, \fIobjv\fR[\fB2\fR] = \fBNULL\fR) because this will
 cause memory to be lost and the runtime stack to be corrupted.  The
-\fBCONST\fR in the declaration of \fIobjv\fR will cause ANSI-compliant
+\fBconst\fR in the declaration of \fIobjv\fR will cause ANSI-compliant
 compilers to report any such attempted assignment as an error.  However,
 it is acceptable to modify the internal representation of any individual
 object argument.  For instance, the user may call
@@ -127,7 +120,6 @@ object argument.  For instance, the user may call
 representation of that object; that call may change the type of the object
 that \fIobjv\fR[\fB2\fR] points at, but will not change where
 \fIobjv\fR[\fB2\fR] points.
-.VE
 .PP
 \fIproc\fR must return an integer code that is either \fBTCL_OK\fR,
 \fBTCL_ERROR\fR, \fBTCL_RETURN\fR, \fBTCL_BREAK\fR, or \fBTCL_CONTINUE\fR.
@@ -170,7 +162,8 @@ application an opportunity to release any structures associated
 with the command.  \fIDeleteProc\fR should have arguments and
 result that match the type \fBTcl_CmdDeleteProc\fR:
 .CS
-typedef void Tcl_CmdDeleteProc(ClientData \fIclientData\fR);
+typedef void Tcl_CmdDeleteProc(
+        ClientData \fIclientData\fR);
 .CE
 The \fIclientData\fR argument will be the same as the \fIclientData\fR
 argument passed to \fBTcl_CreateObjCommand\fR.
@@ -178,7 +171,7 @@ argument passed to \fBTcl_CreateObjCommand\fR.
 \fBTcl_DeleteCommand\fR deletes a command from a command interpreter.
 Once the call completes, attempts to invoke \fIcmdName\fR in
 \fIinterp\fR will result in errors.
-If \fIcmdName\fR isn't bound as a command in \fIinterp\fR then
+If \fIcmdName\fR is not bound as a command in \fIinterp\fR then
 \fBTcl_DeleteCommand\fR does nothing and returns -1;  otherwise
 it returns 0.
 There are no restrictions on \fIcmdName\fR:  it may refer to
@@ -208,14 +201,14 @@ pointed to by \fIinfoPtr\fR and returns 1.
 A \fBTcl_CmdInfo\fR structure has the following fields:
 .CS
 typedef struct Tcl_CmdInfo {
-    int isNativeObjectProc;
-    Tcl_ObjCmdProc *objProc;
-    ClientData objClientData;
-    Tcl_CmdProc *proc;
-    ClientData clientData;
-    Tcl_CmdDeleteProc *deleteProc;
-    ClientData deleteData;
-    Tcl_Namespace *namespacePtr;
+    int \fIisNativeObjectProc\fR;
+    Tcl_ObjCmdProc *\fIobjProc\fR;
+    ClientData \fIobjClientData\fR;
+    Tcl_CmdProc *\fIproc\fR;
+    ClientData \fIclientData\fR;
+    Tcl_CmdDeleteProc *\fIdeleteProc\fR;
+    ClientData \fIdeleteData\fR;
+    Tcl_Namespace *\fInamespacePtr\fR;
 } Tcl_CmdInfo;
 .CE
 The \fIisNativeObjectProc\fR field has the value 1
@@ -287,16 +280,16 @@ This name does not include any \fB::\fR namespace qualifiers.
 The command corresponding to \fItoken\fR must not have been deleted.
 The string returned by \fBTcl_GetCommandName\fR is in dynamic memory
 owned by Tcl and is only guaranteed to retain its value as long as the
-command isn't deleted or renamed;  callers should copy the string if
+command is not deleted or renamed;  callers should copy the string if
 they need to keep it for a long time.
 .PP
-\fBTcl_GetCommandFullName\fR produces the fully-qualified name
+\fBTcl_GetCommandFullName\fR produces the fully qualified name
 of a command from a command token.  
 The name, including all namespace prefixes,
-is appended to the object specified by \fIobjPtr\fP.
+is appended to the object specified by \fIobjPtr\fR.
 .PP
 \fBTcl_GetCommandFromObj\fR returns a token for the command
-specified by the name in a \fBTcl_Obj\fP.
+specified by the name in a \fBTcl_Obj\fR.
 The command name is resolved relative to the current namespace.
 Returns NULL if the command is not found.
 .SH "SEE ALSO"

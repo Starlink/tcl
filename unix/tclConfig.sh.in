@@ -9,7 +9,7 @@
 #
 # The information in this file is specific to a single platform.
 #
-# RCS: @(#) $Id: tclConfig.sh.in,v 1.17.2.1 2004/07/20 11:13:10 das Exp $
+# RCS: @(#) $Id: tclConfig.sh.in,v 1.21 2005/05/10 18:35:27 kennykb Exp $
 
 # Tcl's version number.
 TCL_VERSION='@TCL_VERSION@'
@@ -23,9 +23,9 @@ TCL_CC='@CC@'
 # -D flags for use with the C compiler.
 TCL_DEFS='@DEFS@'
 
-# If TCL was built with debugging symbols, generated libraries contain
-# this string at the end of the library name (before the extension).
-TCL_DBGX=@TCL_DBGX@
+# TCL_DBGX used to be used to distinguish debug vs. non-debug builds.
+# This was a righteous pain so the core doesn't do that any more.
+TCL_DBGX=
 
 # Default flags used in an optimized and debuggable build, respectively.
 TCL_CFLAGS_DEBUG='@CFLAGS_DEBUG@'
@@ -51,7 +51,7 @@ TCL_NEEDS_EXP_FILE=@TCL_NEEDS_EXP_FILE@
 TCL_EXPORT_FILE_SUFFIX='@CFG_TCL_EXPORT_FILE_SUFFIX@'
 
 # Additional libraries to use when linking Tcl.
-TCL_LIBS='@DL_LIBS@ @LIBS@ @MATH_LIBS@'
+TCL_LIBS='@TCL_LIBS@'
 
 # Top-level directory in which Tcl's platform-independent files are
 # installed.

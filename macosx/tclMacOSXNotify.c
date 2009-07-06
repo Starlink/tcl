@@ -12,11 +12,10 @@
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclMacOSXNotify.c,v 1.1.2.15 2008/03/11 23:52:35 das Exp $
+ * RCS: @(#) $Id: tclMacOSXNotify.c,v 1.18 2008/03/11 22:24:17 das Exp $
  */
 
 #include "tclInt.h"
-#include "tclPort.h"
 #ifdef HAVE_COREFOUNDATION	/* Traditional unix select-based notifier is
 				 * in tclUnixNotfy.c */
 #include <CoreFoundation/CoreFoundation.h>
@@ -238,6 +237,37 @@ static OSSpinLock notifierLock     = SPINLOCK_INIT;
 #define LOCK_NOTIFIER		SpinLockLock(&notifierLock)
 #define UNLOCK_NOTIFIER		SpinLockUnlock(&notifierLock)
 
+#ifdef TCL_MAC_DEBUG_NOTIFIER
+/*
+ * Debug version of SpinLockLock that logs the time spent waiting for the lock
+ */
+
+#define SpinLockLockDbg(p)	if(!SpinLockTry(p)) { \
+				    Tcl_WideInt s = TclpGetWideClicks(), e; \
+				    SpinLockLock(p); e = TclpGetWideClicks(); \
+				    fprintf(notifierLog, "tclMacOSXNotify.c:" \
+				    "%4d: thread %10p waited on %s for " \
+				    "%8llu ns\n", __LINE__, pthread_self(), \
+				    #p, TclpWideClicksToNanoseconds(e-s)); \
+				    fflush(notifierLog); \
+				}
+#undef LOCK_NOTIFIER_INIT
+#define LOCK_NOTIFIER_INIT	SpinLockLockDbg(&notifierInitLock)
+#undef LOCK_NOTIFIER
+#define LOCK_NOTIFIER		SpinLockLockDbg(&notifierLock)
+static FILE *notifierLog = stderr;
+#ifndef NOTIFIER_LOG
+#define NOTIFIER_LOG "/tmp/tclMacOSXNotify.log"
+#endif
+#define OPEN_NOTIFIER_LOG	if (notifierLog == stderr) { \
+				    notifierLog = fopen(NOTIFIER_LOG, "a"); \
+				}
+#define CLOSE_NOTIFIER_LOG	if (notifierLog != stderr) { \
+				    fclose(notifierLog); \
+				    notifierLog = stderr; \
+				}
+#endif /* TCL_MAC_DEBUG_NOTIFIER */
+
 /*
  * The pollState bits
  *	POLL_WANT is set by each thread before it waits on its condition
@@ -412,6 +442,9 @@ Tcl_InitNotifier(void)
 	 */
 
 	notifierThread = 0;
+#ifdef TCL_MAC_DEBUG_NOTIFIER
+	OPEN_NOTIFIER_LOG;
+#endif
     }
     notifierCount++;
     UNLOCK_NOTIFIER_INIT;
@@ -482,6 +515,9 @@ Tcl_FinalizeNotifier(
 
 	close(receivePipe);
 	triggerPipe = -1;
+#ifdef TCL_MAC_DEBUG_NOTIFIER
+	CLOSE_NOTIFIER_LOG;
+#endif
     }
     UNLOCK_NOTIFIER_INIT;
 
@@ -852,11 +888,32 @@ Tcl_WaitForEvent(
     FileHandler *filePtr;
     FileHandlerEvent *fileEvPtr;
     int mask;
+    Tcl_Time myTime;
     int waitForFiles;
+    Tcl_Time *myTimePtr;
     ThreadSpecificData *tsdPtr = TCL_TSD_INIT(&dataKey);
 
     if (tclStubs.tcl_WaitForEvent != tclOriginalNotifier.waitForEventProc) {
 	return tclStubs.tcl_WaitForEvent(timePtr);
+    }
+
+    if (timePtr != NULL) {
+	/*
+	 * TIP #233 (Virtualized Time). Is virtual time in effect? And do we
+	 * actually have something to scale? If yes to both then we call the
+	 * handler to do this scaling.
+	 */
+
+	myTime.sec  = timePtr->sec;
+	myTime.usec = timePtr->usec;
+
+	if (myTime.sec != 0 || myTime.usec != 0) {
+	    (*tclScaleTimeProcPtr) (&myTime, tclTimeClientData);
+	}
+
+	myTimePtr = &myTime;
+    } else {
+	myTimePtr = NULL;
     }
 
     /*
@@ -894,7 +951,7 @@ Tcl_WaitForEvent(
         Tcl_Panic("Tcl_WaitForEvent: CFRunLoop not initialized");
     }
     waitForFiles = (tsdPtr->numFdBits > 0);
-    if (timePtr != NULL && timePtr->sec == 0 && timePtr->usec == 0) {
+    if (myTimePtr != NULL && myTimePtr->sec == 0 && myTimePtr->usec == 0) {
 	/*
 	 * Cannot emulate a polling select with a polling condition variable.
 	 * Instead, pretend to wait for files and tell the notifier thread
@@ -905,7 +962,7 @@ Tcl_WaitForEvent(
 
 	waitForFiles = 1;
 	tsdPtr->pollState = POLL_WANT;
-	timePtr = NULL;
+	myTimePtr = NULL;
     } else {
 	tsdPtr->pollState = 0;
     }
@@ -936,10 +993,10 @@ Tcl_WaitForEvent(
 	CFTimeInterval waitTime;
 	CFStringRef runLoopMode;
 
-	if (timePtr == NULL) {
+	if (myTimePtr == NULL) {
 	    waitTime = 1.0e10; /* Wait forever, as per CFRunLoop.c */
 	} else {
-	    waitTime = timePtr->sec + 1.0e-6 * timePtr->usec;
+	    waitTime = myTimePtr->sec + 1.0e-6 * myTimePtr->usec;
 	}
 	/*
 	 * If the run loop is already running (e.g. if Tcl_WaitForEvent was
@@ -1294,3 +1351,11 @@ AtForkChild(void)
 #endif /* HAVE_PTHREAD_ATFORK */
 
 #endif /* HAVE_COREFOUNDATION */
+
+/*
+ * Local Variables:
+ * mode: c
+ * c-basic-offset: 4
+ * fill-column: 78
+ * End:
+ */

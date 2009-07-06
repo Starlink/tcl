@@ -1,7 +1,7 @@
 Tcl Mac OS X README
 -------------------
 
-RCS: @(#) $Id: README,v 1.1.2.9 2007/04/29 02:21:33 das Exp $
+RCS: @(#) $Id: README,v 1.16.2.1 2008/06/12 06:33:01 das Exp $
 
 This is the README file for the Mac OS X/Darwin version of Tcl.
 
@@ -57,10 +57,10 @@ the Resources/Scripts directory of the framework.
 and bundles are also loaded more efficiently from VFS (no temporary copy to the
 native filesystem required).
 
-- The 'deploy' target of macosx/Makefile installs the html manpages into the
+- The 'deploy' target of macosx/GNUmakefile installs the html manpages into the
 standard documentation location in the Tcl framework:
 	Tcl.framework/Resources/Documentation/Reference/Tcl
-No nroff manpages are installed by default by the Makefile.
+No nroff manpages are installed by default by the GNUmakefile.
 
 - The Tcl framework can be installed in any of the system's standard
 framework directories:
@@ -78,18 +78,71 @@ or is present in /Applications/Installers on Macs that came with OS X
 preinstalled. The most recent version can be downloaded from the ADC website
 http://connect.apple.com (after you register for free ADC membership).
 
-- Tcl is most easily built as a Mac OS X framework via Makefile in tcl/macosx
+- Tcl is most easily built as a Mac OS X framework via GNUmakefile in tcl/macosx
 (see below for details), but can also be built with the standard unix configure
 and make buildsystem in tcl/unix as on any other unix platform (indeed, the
-Makefile is just a wrapper around the unix buildsystem).
+GNUmakefile is just a wrapper around the unix buildsystem).
 The Mac OS X specific configure flags are --enable-framework and
 --disable-corefoundation (which disables CF and notably reverts to the standard
 select based notifier).
 
-- It is also possible to build with Apple's IDE via the tcl/macosx/Tcl.pbproj
-project, this simply calls through to the tcl/macosx/Makefile.
+- It is also possible to build with Apple's IDE via the projects in tcl/macosx,
+take care to only use the project matching your DevTools and OS version:
+    * Tcl.pbproj for Xcode or ProjectBuilder on 10.3 and earlier, this has a
+	'Tcl' target that simply calls through to the tcl/macosx/GNUMakefile.
+    * Tcl.xcode for Xcode 2.4 on 10.4 and Xcode 2.5 on 10.4 and later, which
+	additionally has native 'tcltest' and 'tests' targets for debugging and
+	running the testsuite, these targets' 'Debug' build configuration has
+	ZeroLink and Fix&Continue enabled, use the 'DebugNoFixZL' build
+	configuration if you need a debug build without these features. The
+	following build configurations are available:
+	'DebugUnthreaded': debug build with threading turned off.
+	'DebugNoCF': debug build with corefoundation turned off.
+	'DebugNoCFUnthreaded': debug build with corefoundation & threading off.
+	'DebugMemCompile': debug build with memory and bytecode debugging on.
+	'DebugLeaks': debug build with PURIFY defined.
+	'DebugGCov': debug build with generation of gcov data files enabled.
+	'Debug64bit': builds the targets as 64bit with debugging enabled,
+		requires a 64bit capable processor (i.e. G5 or Core2/Xeon).
+	'ReleaseUniversal': builds the targets as universal binaries for the
+		ppc, ppc64, i386 and x86_64 architectures.
+	'ReleaseUniversal10.4uSDK': same as 'ReleaseUniversal' but builds
+		against the 10.4u SDK, required to build universal binaries on
+		PowerPC Tiger (where the system libraries are not universal).
+	'ReleasePPC10.3.9SDK': builds for PowerPC against the 10.3.9 SDK, useful
+		for verifying on Tiger that building on Panther would succeed.
+	'ReleasePPC10.2.8SDK': builds for PowerPC with gcc-3.3 against the
+		10.2.8 SDK, useful to verify on Tiger that building on Jaguar
+		would succeed.
+    * Tcl.xcodeproj for Xcode 3.1 on 10.5 and later, which has the following
+	additional build configurations:
+	'ReleaseUniversal10.5SDK': same as 'ReleaseUniversal' but builds
+		against the 10.5 SDK on Leopard (with 10.5 deployment target).
+	'Debug gcc42':  same as 'Debug' but builds with gcc 4.2.
+	'Debug llvmgcc42': same as 'Debug' but builds with llvm-gcc 4.2.
+	'ReleaseUniversal gcc42': same as 'ReleaseUniversal' but builds with
+		gcc 4.2.
+	'ReleaseUniversal llvmgcc42': same as 'ReleaseUniversal' but builds
+		with llvm-gcc 4.2.
+	Note that all non-SDK configurations have 10.5 deployment target.
 
-- To build universal binaries, set CFLAGS as follows:
+Notes about the native targets of the Xcode projects:
+    * the Xcode projects refer to the toplevel tcl source directory through the
+	TCL_SRCROOT user build setting, by default this is set to the
+	project-relative path '../../tcl', if your tcl source directory is named
+	differently, e.g. '../../tcl8.5', you'll need to manually change the
+	TCL_SRCROOT setting by editing your ${USER}.pbxuser file (located inside
+	the Tcl.xcodeproj bundle directory) with a text editor.
+    * the native targets need a version of the unix configure script with config
+	headers enabled, this is automatically generated as tcl/macosx/configure
+	by the project but that requires 2.59 versions of autoconf & autoheader.
+	These are not available on Mac OS X 10.5 by default and need to be
+	installed manually. By default they are assumed to be installed as
+	/usr/local/bin/autoconf-2.59 and /usr/local/bin/autoheader-2.59, set the
+	AUTOCONF and AUTOHEADER build settings in ${USER}.pbxuser to their true
+	locations if necessary.
+
+- To build universal binaries outside of Tcl.xcodeproj, set CFLAGS as follows:
     export CFLAGS="-arch ppc -arch ppc64 -arch i386 -arch x86_64 \
 	-isysroot /Developer/SDKs/MacOSX10.4u.sdk -mmacosx-version-min=10.4"
 This requires Mac OS X 10.4 and Xcode 2.4 (or Xcode 2.2 if -arch x86_64 is
@@ -107,10 +160,12 @@ to the minimal OS version (>= 10.2) the binaries should be able to run on, e.g:
 This requires Mac OS X 10.2 and gcc 3.1; if you have gcc 4 or later you can set
 CFLAGS instead:
     export CFLAGS="-mmacosx-version-min=10.2"
+The Tcl.xcode project is setup to produce binaries that can run on 10.2 or
+later (except for the Universal and SDK configurations).
 Support for weak-linking was added to the code for 8.4.14/8.5a5.
 
-Detailed Instructions for building with macosx/Makefile
--------------------------------------------------------
+Detailed Instructions for building with macosx/GNUmakefile
+----------------------------------------------------------
 
 - Unpack the tcl source release archive.
 

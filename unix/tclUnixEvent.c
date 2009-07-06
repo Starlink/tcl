@@ -1,18 +1,17 @@
-/* 
+/*
  * tclUnixEvent.c --
  *
  *	This file implements Unix specific event related routines.
  *
  * Copyright (c) 1997 by Sun Microsystems, Inc.
  *
- * See the file "license.terms" for information on usage and redistribution
- * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
+ * See the file "license.terms" for information on usage and redistribution of
+ * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclUnixEvent.c,v 1.4 2001/11/21 02:36:21 hobbs Exp $
+ * RCS: @(#) $Id: tclUnixEvent.c,v 1.9 2005/11/02 23:26:50 dkf Exp $
  */
 
 #include "tclInt.h"
-#include "tclPort.h"
 
 /*
  *----------------------------------------------------------------------
@@ -31,17 +30,16 @@
  */
 
 void
-Tcl_Sleep(ms)
-    int ms;			/* Number of milliseconds to sleep. */
+Tcl_Sleep(
+    int ms)			/* Number of milliseconds to sleep. */
 {
     struct timeval delay;
-    Tcl_Time before, after;
+    Tcl_Time before, after, vdelay;
 
     /*
-     * The only trick here is that select appears to return early
-     * under some conditions, so we have to check to make sure that
-     * the right amount of time really has elapsed.  If it's too
-     * early, go back to sleep again.
+     * The only trick here is that select appears to return early under some
+     * conditions, so we have to check to make sure that the right amount of
+     * time really has elapsed.  If it's too early, go back to sleep again.
      */
 
     Tcl_GetTime(&before);
@@ -53,16 +51,28 @@ Tcl_Sleep(ms)
 	after.sec += 1;
     }
     while (1) {
-	delay.tv_sec = after.sec - before.sec;
-	delay.tv_usec = after.usec - before.usec;
-	if (delay.tv_usec < 0) {
-	    delay.tv_usec += 1000000;
-	    delay.tv_sec -= 1;
+	/*
+	 * TIP #233: Scale from virtual time to real-time for select.
+	 */
+
+	vdelay.sec  = after.sec  - before.sec;
+	vdelay.usec = after.usec - before.usec;
+
+	if (vdelay.usec < 0) {
+	    vdelay.usec += 1000000;
+	    vdelay.sec  -= 1;
 	}
 
+	if ((vdelay.sec != 0) || (vdelay.usec != 0)) {
+	    (*tclScaleTimeProcPtr) (&vdelay, tclTimeClientData);
+	}
+
+	delay.tv_sec  = vdelay.sec;
+	delay.tv_usec = vdelay.usec;
+
 	/*
-	 * Special note:  must convert delay.tv_sec to int before comparing
-	 * to zero, since delay.tv_usec is unsigned on some platforms.
+	 * Special note: must convert delay.tv_sec to int before comparing to
+	 * zero, since delay.tv_usec is unsigned on some platforms.
 	 */
 
 	if ((((int) delay.tv_sec) < 0)
@@ -74,3 +84,11 @@ Tcl_Sleep(ms)
 	Tcl_GetTime(&before);
     }
 }
+
+/*
+ * Local Variables:
+ * mode: c
+ * c-basic-offset: 4
+ * fill-column: 78
+ * End:
+ */

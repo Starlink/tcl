@@ -12,11 +12,10 @@
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclLoadDyld.c,v 1.14.2.11 2007/09/05 01:38:55 das Exp $
+ * RCS: @(#) $Id: tclLoadDyld.c,v 1.29 2007/12/13 15:28:42 dgp Exp $
  */
 
 #include "tclInt.h"
-#include "tclPort.h"
 
 #ifndef MODULE_SCOPE
 #define MODULE_SCOPE extern
@@ -62,7 +61,6 @@ extern char *dlerror(void) WEAK_IMPORT_ATTRIBUTE;
 #include <mach-o/swap.h>
 #include <mach-o/arch.h>
 #include <libkern/OSByteOrder.h>
-#undef panic
 #include <mach/mach.h>
 #include <stdbool.h>
 

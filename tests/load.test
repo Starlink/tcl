@@ -10,7 +10,7 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
-# RCS: @(#) $Id: load.test,v 1.11.2.2 2007/08/14 06:34:13 das Exp $
+# RCS: @(#) $Id: load.test,v 1.19 2007/12/13 15:26:06 dgp Exp $
 
 if {[lsearch [namespace children] ::tcltest] == -1} {
     package require tcltest 2
@@ -19,38 +19,30 @@ if {[lsearch [namespace children] ::tcltest] == -1} {
 
 # Figure out what extension is used for shared libraries on this
 # platform.
-
-if {$tcl_platform(platform) == "macintosh"} {
-    puts "can't run dynamic library tests on macintosh machines"
-    ::tcltest::cleanupTests
-    return
+if {![info exists ext]} {
+    set ext [info sharedlibextension]
 }
-
 # Tests require the existence of one of the DLLs in the dltest directory.
-set ext [info sharedlibextension]
 set testDir [file join [file dirname [info nameofexecutable]] dltest]
 set x [file join $testDir pkga$ext]
 set dll "[file tail $x]Required"
-::tcltest::testConstraint $dll [file readable $x]
+testConstraint $dll [file readable $x]
 
 # Tests also require that this DLL has not already been loaded.
 set loaded "[file tail $x]Loaded"
 set alreadyLoaded [info loaded]
-::tcltest::testConstraint $loaded \
-	[expr {![string match *pkga* $alreadyLoaded]}]
+testConstraint $loaded [expr {![string match *pkga* $alreadyLoaded]}]
 
 set alreadyTotalLoaded [info loaded]
 
 # Certain tests require the 'teststaticpkg' command from tcltest
 
-::tcltest::testConstraint teststaticpkg \
-	[string compare {} [info commands teststaticpkg]]
+testConstraint teststaticpkg [llength [info commands teststaticpkg]]
 
 # Test load-10.1 requires the 'testsimplefilesystem' command from tcltest
 
-::tcltest::testConstraint testsimplefilesystem \
-	[string compare {} [info commands testsimplefilesystem]]
-
+testConstraint testsimplefilesystem \
+	[llength [info commands testsimplefilesystem]]
 
 test load-1.1 {basic errors} {} {
     list [catch {load} msg] $msg
@@ -94,7 +86,7 @@ test load-2.4 {loading with no _SafeInit procedure} [list $dll $loaded] {
 test load-3.1 {error in _Init procedure, same interpreter} \
 	[list $dll $loaded] {
     list [catch {load [file join $testDir pkge$ext] pkge} msg] \
-	    $msg $errorInfo $errorCode
+	    $msg $::errorInfo $::errorCode
 } {1 {couldn't open "non_existent": no such file or directory} {couldn't open "non_existent": no such file or directory
     while executing
 "open non_existent"
@@ -106,10 +98,10 @@ test load-3.2 {error in _Init procedure, slave interpreter} \
 	[list $dll $loaded] {
     catch {interp delete x}
     interp create x
-    set errorCode foo
-    set errorInfo bar
+    set ::errorCode foo
+    set ::errorInfo bar
     set result [list [catch {load [file join $testDir pkge$ext] pkge x} msg] \
-	    $msg $errorInfo $errorCode]
+	    $msg $::errorInfo $::errorCode]
     interp delete x
     set result
 } {1 {couldn't open "non_existent": no such file or directory} {couldn't open "non_existent": no such file or directory
@@ -140,8 +132,10 @@ test load-5.1 {file name not specified and no static package: pick default} \
 
 # On some platforms, like SunOS 4.1.3, these tests can't be run because
 # they cause the process to exit.
+#
+# As of 2005, such ancient broken systems no longer matter.
 
-test load-6.1 {errors loading file} [list $dll $loaded nonPortable] {
+test load-6.1 {errors loading file} [list $dll $loaded] {
     catch {load foo foo}
 } {1}
 
@@ -214,5 +208,6 @@ test load-10.1 {load from vfs} \
     -cleanup {testsimplefilesystem 0; cd $dir; unset dir}
 
 # cleanup
+unset ext
 ::tcltest::cleanupTests
 return

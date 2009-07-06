@@ -12,7 +12,7 @@
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
 #
-# RCS: @(#) $Id: http.test,v 1.33.2.6 2006/10/06 19:00:53 hobbs Exp $
+# RCS: @(#) $Id: http.test,v 1.48.2.1 2008/12/11 01:20:02 patthoyts Exp $
 
 if {[lsearch [namespace children] ::tcltest] == -1} {
     package require tcltest 2
@@ -97,7 +97,7 @@ test http-1.4 {http::config} {
 	-proxyfilter myFilter -useragent "Tcl Test Suite" \
 	-urlencoding iso8859-1
     set x [http::config]
-    eval http::config $savedconf
+    http::config {*}$savedconf
     set x
 } {-accept */* -proxyfilter myFilter -proxyhost nowhere.come -proxyport 8080 -urlencoding iso8859-1 -useragent {Tcl Test Suite}}
 test http-1.5 {http::config} {
@@ -117,7 +117,7 @@ test http-2.1 {http::reset} {
 
 test http-3.1 {http::geturl} {
     list [catch {http::geturl -bogus flag} msg] $msg
-} {1 {Unknown option flag, can be: -binary, -blocksize, -channel, -command, -handler, -headers, -progress, -query, -queryblocksize, -querychannel, -queryprogress, -validate, -timeout, -type}}
+} {1 {Unknown option flag, can be: -binary, -blocksize, -channel, -command, -handler, -headers, -keepalive, -method, -myaddr, -progress, -protocol, -query, -queryblocksize, -querychannel, -queryprogress, -strict, -timeout, -type, -validate}}
 test http-3.2 {http::geturl} {
     catch {http::geturl http:junk} err
     set err
@@ -137,8 +137,6 @@ set fullurl http://user:pass@[info hostname]:$port/a/b/c
 set binurl //[info hostname]:$port/binary
 set posturl //[info hostname]:$port/post
 set badposturl //[info hostname]:$port/droppost
-set badcharurl //%user@[info hostname]:$port/a/^b/c
-
 test http-3.4 {http::geturl} {
     set token [http::geturl $url]
     http::data $token
@@ -207,7 +205,7 @@ test http-3.10 {http::geturl queryprogress} {
 	lappend postProgress $y
     }
     set postProgress {}
-    set t [http::geturl $posturl -query $query \
+    set t [http::geturl $posturl -keepalive 0 -query $query \
 	    -queryprogress postProgress -queryblocksize 16384]
     http::wait $t
     list [http::status $t] [string length $query] $postProgress [http::data $t]
@@ -282,7 +280,7 @@ test http-3.12 {http::geturl querychannel with aborted request} {nonPortable} {
 	http::wait $t
 	upvar #0 $t state
     } err]} {
-	puts $errorInfo
+	puts $::errorInfo
 	error $err
     }
 
@@ -315,37 +313,26 @@ test http-3.18 {http::geturl parse failures} -body {
     http::geturl http://somewhere:123456789/
 } -returnCodes error -result {Invalid port number: 123456789}
 test http-3.19 {http::geturl parse failures} -body {
-    set ::http::strict 1
     http::geturl http://{user}@somewhere
 } -returnCodes error -result {Illegal characters in URL user}
 test http-3.20 {http::geturl parse failures} -body {
-    set ::http::strict 1
     http::geturl http://%user@somewhere
 } -returnCodes error -result {Illegal encoding character usage "%us" in URL user}
 test http-3.21 {http::geturl parse failures} -body {
-    set ::http::strict 1
     http::geturl http://somewhere/{path}
 } -returnCodes error -result {Illegal characters in URL path}
 test http-3.22 {http::geturl parse failures} -body {
-    set ::http::strict 1
     http::geturl http://somewhere/%path
 } -returnCodes error -result {Illegal encoding character usage "%pa" in URL path}
 test http-3.23 {http::geturl parse failures} -body {
-    set ::http::strict 1
     http::geturl http://somewhere/path?{query}
 } -returnCodes error -result {Illegal characters in URL path}
 test http-3.24 {http::geturl parse failures} -body {
-    set ::http::strict 1
     http::geturl http://somewhere/path?%query
 } -returnCodes error -result {Illegal encoding character usage "%qu" in URL path}
-test http-3.25 {http::geturl parse failures} -body {
-    set ::http::strict 0
-    set token [http::geturl $badcharurl]
-    http::cleanup $token
-} -returnCodes ok -result {}
 
 test http-4.1 {http::Event} {
-    set token [http::geturl $url]
+    set token [http::geturl $url -keepalive 0]
     upvar #0 $token data
     array set meta $data(meta)
     expr ($data(totalsize) == $meta(Content-Length))
@@ -377,6 +364,7 @@ test http-4.4 {http::Event} {
 test http-4.5 {http::Event} {
     set testfile [makeFile "" testfile]
     set out [open $testfile w]
+    fconfigure $out -translation lf
     set token [http::geturl $url -channel $out]
     close $out
     upvar #0 $token data
@@ -411,7 +399,7 @@ if 0 {
     } {111 111}
 }
 test http-4.7 {http::Event} {
-    set token [http::geturl $url -progress myProgress]
+    set token [http::geturl $url -keepalive 0 -progress myProgress]
     set progress
 } {111 111}
 test http-4.8 {http::Event} {
@@ -430,49 +418,43 @@ test http-4.10 {http::Event} {
 #	Short timeout to working server (the test server). This lets us try a
 #	reset during the connection.
 test http-4.11 {http::Event} {
-    set token [http::geturl $url -timeout 1 -command {#}]
+    set token [http::geturl $url -timeout 1 -keepalive 0 -command {#}]
     http::reset $token
     http::status $token
 } {reset}
 #	Longer timeout with reset.
 test http-4.12 {http::Event} {
-    set token [http::geturl $url/?timeout=10 -command {#}]
+    set token [http::geturl $url/?timeout=10 -keepalive 0 -command {#}]
     http::reset $token
     http::status $token
 } {reset}
 #	Medium timeout to working server that waits even longer. The timeout
 #	hits while waiting for a reply.
 test http-4.13 {http::Event} {
-    set token [http::geturl $url?timeout=30 -timeout 10 -command {#}]
+    set token [http::geturl $url?timeout=30 -keepalive 0 -timeout 10 -command {#}]
     http::wait $token
     http::status $token
 } {timeout}
 #	Longer timeout to good host, bad port, gets an error after the
 #	connection "completes" but the socket is bad.
-test http-4.14 {http::Event} {
-    set code [catch {
-	set token [http::geturl $badurl/?timeout=10 -timeout 10000 -command {#}]
-	if {[string length $token] == 0} {
-	    error "bogus return from http::geturl"
-	}
-	http::wait $token
-	http::status $token
-    } err]
+test http-4.14 {http::Event} -body {
+    set token [http::geturl $badurl/?timeout=10 -timeout 10000 -command \#]
+    if {$token eq ""} {
+	error "bogus return from http::geturl"
+    }
+    http::wait $token
+    http::status $token
     # error code varies among platforms.
-    list $code [regexp {(connect failed|couldn't open socket)} $err]
-} {1 1}
+} -returnCodes 1 -match regexp -result {(connect failed|couldn't open socket)}
 # Bogus host
-test http-4.15 {http::Event} {
-    # This test may fail if you use a proxy server.  That is to be
+test http-4.15 {http::Event} -body {
+    # This test may fail if you use a proxy server. That is to be
     # expected and is not a problem with Tcl.
-    set code [catch {
-	set token [http::geturl //not_a_host.tcl.tk -timeout 1000 -command {#}]
-	http::wait $token
-	http::status $token
-    } err]
-    # error code varies among platforms.
-    list $code [string match "couldn't open socket*" $err]
-} {1 1}
+    set token [http::geturl //not_a_host.tcl.tk -timeout 1000 -command \#]
+    http::wait $token
+    http::status $token
+    # error codes vary among platforms.
+} -returnCodes 1 -match glob -result "couldn't open socket*"
 
 test http-5.1 {http::formatQuery} {
     http::formatQuery name1 value1 name2 "value two"

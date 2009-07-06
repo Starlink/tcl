@@ -5,29 +5,29 @@
 '\" See the file "license.terms" for information on usage and redistribution
 '\" of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 '\" 
-'\" RCS: @(#) $Id: dde.n,v 1.8.2.4 2004/12/03 00:37:21 hobbs Exp $
+'\" RCS: @(#) $Id: dde.n,v 1.24 2008/01/18 15:59:22 dkf Exp $
 '\" 
 .so man.macros
-.TH dde n 1.2 dde "Tcl Bundled Packages"
+.TH dde n 1.3 dde "Tcl Bundled Packages"
 .BS
 '\" Note:  do not modify the .SH NAME line immediately below!
 .SH NAME
 dde \- Execute a Dynamic Data Exchange command
 .SH SYNOPSIS
 .sp
-\fBpackage require dde 1.2\fR
+\fBpackage require dde 1.3\fR
 .sp
-\fBdde eval\fR ?\fB\-async\fR? \fIservice cmd\fR ?\fIarg ...\fR?
+\fBdde servername\fR ?\fB\-force\fR? ?\fB\-handler \fIproc\fR? ?\fB\-\|\-\fR? ?\fItopic\fR?
 .sp
 \fBdde execute\fR ?\fB\-async\fR? \fIservice topic data\fR
 .sp
-\fBdde poke \fIservice topic item data\fR
+\fBdde poke\fR \fIservice topic item data\fR
 .sp
-\fBdde request\fR ?\fB\-binary\fR? \fIservice topic data\fR
-.sp
-\fBdde servername\fR ?\fItopic\fR?
+\fBdde request\fR ?\fB\-binary\fR? \fIservice topic item\fR
 .sp
 \fBdde services \fIservice topic\fR
+.sp
+\fBdde eval\fR ?\fB\-async\fR? \fItopic cmd \fR?\fIarg arg ...\fR?
 .BE
 
 .SH DESCRIPTION
@@ -39,23 +39,40 @@ transaction needs a \fIservice name\fR and a \fItopic\fR. Both the
 \fIservice name\fR and \fItopic\fR are application defined; Tcl uses
 the service name \fBTclEval\fR, while the topic name is the name of the
 interpreter given by \fBdde servername\fR. Other applications have their
-own \fIservice name\fRs and \fItopic\fRs. For instance, Microsoft Excel
+own \fIservice names\fR and \fItopics\fR. For instance, Microsoft Excel
 has the service name \fBExcel\fR.
 .PP
-The \fBeval\fR and \fBexecute\fR commands accept the option \fB\-async\fR:
-
 .SH "DDE COMMANDS"
 .PP
 The following commands are a subset of the full Dynamic Data Exchange
 set of commands.
 .TP
-\fBdde servername \fR?\fItopic\fR?
+\fBdde servername \fR?\fB\-force\fR? ?\fB\-handler \fIproc\fR? ?\fB\-\|\-\fR? ?\fItopic\fR?
+.
 \fBdde servername\fR registers the interpreter as a DDE server with
 the service name \fBTclEval\fR and the topic name specified by \fItopic\fR.
 If no \fItopic\fR is given, \fBdde servername\fR returns the name
-of the current topic or the empty string if it is not registered as a service.
+of the current topic or the empty string if it is not registered as a
+service. If the given \fItopic\fR name is already in use, then a
+suffix of the form
+.QW " #2"
+or
+.QW " #3"
+is appended to the name to make it
+unique. The command's result will be the name actually used. The
+\fB\-force\fR option is used to force registration of precisely the
+given \fItopic\fR name.
+.RS
+.PP
+The \fB\-handler\fR option specifies a Tcl procedure that will be called to
+process calls to the dde server. If the package has been loaded into a
+safe interpreter then a \fB\-handler\fR procedure must be defined. The
+procedure is called with all the arguments provided by the remote
+call.
+.RE
 .TP
 \fBdde execute\fR ?\fB\-async\fR? \fIservice topic data\fR
+.
 \fBdde execute\fR takes the \fIdata\fR and sends it to the server indicated
 by \fIservice\fR with the topic indicated by \fItopic\fR. Typically,
 \fIservice\fR is the name of an application, and \fItopic\fR is a file to
@@ -67,6 +84,7 @@ script did not run, unless the \fB\-async\fR flag was used, in which case
 the command returns immediately with no error.
 .TP
 \fBdde poke \fIservice topic item data\fR
+.
 \fBdde poke\fR passes the \fIdata\fR to the server indicated by
 \fIservice\fR using the \fItopic\fR and \fIitem\fR specified.  Typically,
 \fIservice\fR is the name of an application.  \fItopic\fR is application
@@ -76,6 +94,7 @@ it must always be non-null.  The \fIdata\fR field is given to the remote
 application.
 .TP
 \fBdde request\fR ?\fB\-binary\fR? \fIservice topic item\fR
+.
 \fBdde request\fR is typically used to get the value of something; the
 value of a cell in Microsoft Excel or the text of a selection in
 Microsoft Word. \fIservice\fR is typically the name of an application,
@@ -86,24 +105,25 @@ string with terminating null.  If \fB\-binary\fR is specified, the
 result is returned as a byte array.
 .TP
 \fBdde services \fIservice topic\fR
+.
 \fBdde services\fR returns a list of service-topic pairs that
 currently exist on the machine. If \fIservice\fR and \fItopic\fR are
-both null strings ({}), then all service-topic pairs currently
-available on the system are returned. If \fIservice\fR is null and
+both empty strings ({}), then all service-topic pairs currently
+available on the system are returned. If \fIservice\fR is empty and
 \fItopic\fR is not, then all services with the specified topic are
-returned. If \fIservice\fR is not null and \fItopic\fR is, all topics
-for a given service are returned. If both are not null, if that
-service-topic pair currently exists, it is returned; otherwise, null
-is returned.
+returned. If \fIservice\fR is non-empty and \fItopic\fR is, all topics
+for a given service are returned. If both are non-empty, if that
+service-topic pair currently exists, it is returned; otherwise, an
+empty string is returned.
 .TP
 \fBdde eval\fR ?\fB\-async\fR? \fItopic cmd \fR?\fIarg arg ...\fR?
+.
 \fBdde eval\fR evaluates a command and its arguments using the interpreter
 specified by \fItopic\fR. The DDE service must be the \fBTclEval\fR
 service.  The \fB\-async\fR option requests asynchronous invocation.  The
 command returns an error message if the script did not run, unless the
 \fB\-async\fR flag was used, in which case the command returns immediately
-with no error.  This command can be used to replace \fBsend\fR on Windows.
-
+with no error.  This command can be used to replace send on Windows.
 .SH "DDE AND TCL"
 A Tcl interpreter always has a service name of \fBTclEval\fR.  Each
 different interpreter of all running Tcl applications must be
@@ -136,7 +156,6 @@ without adding the \fB&\fR to place the process in the background).
 If for any reason the event queue is not flushed, DDE commands may
 hang until the event queue is flushed.  This can create a deadlock
 situation.
-
 .SH EXAMPLE
 This asks Internet Explorer (which must already be running) to go to a
 particularly important website:
@@ -144,9 +163,7 @@ particularly important website:
 package require dde
 \fBdde execute\fR iexplore WWW_OpenURL http://www.tcl.tk/
 .CE
-
 .SH "SEE ALSO"
 tk(n), winfo(n), send(n)
-
 .SH KEYWORDS
 application, dde, name, remote execution

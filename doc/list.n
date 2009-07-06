@@ -1,12 +1,12 @@
 '\"
 '\" Copyright (c) 1993 The Regents of the University of California.
 '\" Copyright (c) 1994-1996 Sun Microsystems, Inc.
-'\" Copyright (c) 2001 Kevin B. Kenny.  All rights reserved.
+'\" Copyright (c) 2001 Kevin B. Kenny <kennykb@acm.org>.  All rights reserved.
 '\"
 '\" See the file "license.terms" for information on usage and redistribution
 '\" of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 '\" 
-'\" RCS: @(#) $Id: list.n,v 1.7.4.1 2004/10/27 12:52:40 dkf Exp $
+'\" RCS: @(#) $Id: list.n,v 1.11 2008/03/26 09:59:22 dkf Exp $
 '\" 
 .so man.macros
 .TH list n "" Tcl "Tcl Built-In Commands"
@@ -45,11 +45,10 @@ while \fBconcat\fR with the same arguments will return
 
 .SH "SEE ALSO"
 lappend(n), lindex(n), linsert(n), llength(n), lrange(n),
-lreplace(n), lsearch(n),
-.VS 8.4
-lset(n),
-.VE 8.4
-lsort(n)
+.VS 8.5
+lrepeat(n),
+.VE 8.5
+lreplace(n), lsearch(n), lset(n), lsort(n)
 
 .SH KEYWORDS
 element, list

@@ -14,15 +14,15 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
-# RCS: @(#) $Id: namespace-old.test,v 1.6 2001/04/07 02:11:19 msofer Exp $
+# RCS: @(#) $Id: namespace-old.test,v 1.13 2007/12/13 15:26:06 dgp Exp $
 
 if {[lsearch [namespace children] ::tcltest] == -1} {
-    package require tcltest
+    package require tcltest 2.2
     namespace import -force ::tcltest::*
 }
 
 # Clear out any namespaces called test_ns_*
-catch {eval namespace delete [namespace children :: test_ns_*]}
+catch {namespace delete {*}[namespace children :: test_ns_*]}
 
 test namespace-old-1.1 {usage for "namespace" command} {
     list [catch {namespace} msg] $msg
@@ -251,8 +251,8 @@ test namespace-old-4.3 {command "namespace delete" doesn't support patterns} {
 test namespace-old-4.4 {command "namespace delete" handles multiple args} {
     set cmd {
         namespace eval test_ns_delete {
-            eval namespace delete \
-                [namespace children [namespace current] ns?]
+            namespace delete \
+                {*}[namespace children [namespace current] ns?]
         }
     }
     list [catch $cmd msg] $msg [namespace children test_ns_delete]
@@ -336,9 +336,9 @@ test namespace-old-5.9 {usage for "namespace children"} {
     list [catch {namespace children test_ns_hier1 y z} msg] $msg
 } {1 {wrong # args: should be "namespace children ?name? ?pattern?"}}
 
-test namespace-old-5.10 {command "namespace children" must get valid namespace} {
-    list [catch {namespace children xyzzy} msg] $msg
-} {1 {unknown namespace "xyzzy" in namespace children command}}
+test namespace-old-5.10 {command "namespace children" must get valid namespace} -body {
+    namespace children xyzzy
+} -returnCodes error -result {namespace "xyzzy" not found in "::"}
 
 test namespace-old-5.11 {querying namespace children} {
     lsort [namespace children :: test_ns_hier*]
@@ -372,9 +372,9 @@ test namespace-old-5.18 {usage for "namespace parent"} {
     list [catch {namespace parent x y} msg] $msg
 } {1 {wrong # args: should be "namespace parent ?name?"}}
 
-test namespace-old-5.19 {command "namespace parent" must get valid namespace} {
-    list [catch {namespace parent xyzzy} msg] $msg
-} {1 {unknown namespace "xyzzy" in namespace parent command}}
+test namespace-old-5.19 {command "namespace parent" must get valid namespace} -body {
+    namespace parent xyzzy
+} -returnCodes error -result {namespace "xyzzy" not found in "::"}
 
 test namespace-old-5.20 {querying namespace parent} {
     list [namespace eval :: {namespace parent}] \
@@ -527,11 +527,12 @@ test namespace-old-6.16 {public variables affect all parent namespaces} {
 } {{cache2 version} {cache2 version}}
 
 test namespace-old-6.17 {usage for "namespace which"} {
-    list [catch "namespace which -baz" msg] $msg
+    list [catch "namespace which -baz x" msg] $msg
 } {1 {wrong # args: should be "namespace which ?-command? ?-variable? name"}}
 test namespace-old-6.18 {usage for "namespace which"} {
-    list [catch "namespace which -command" msg] $msg
-} {1 {wrong # args: should be "namespace which ?-command? ?-variable? name"}}
+    # Presume no imported command called -command ;^)
+    namespace which -command
+} {}
 
 test namespace-old-6.19 {querying:  namespace which -command} {
     proc test_ns_cache1::test_ns_cache_cmd {} {
@@ -683,12 +684,8 @@ test namespace-old-9.4 {check export status} {
 } {::test_ns_import::cmd1 ::test_ns_import::cmd2 ::test_ns_import::cmd3}
 
 test namespace-old-9.5 {empty import list in "namespace import" command} {
-    namespace import
-} {}
-
-test namespace-old-9.6 {empty import list for "namespace import" command} {
-    namespace import
-} {}
+    lsort [namespace import]
+} {bytestring cleanupTests configure customMatch debug errorChannel errorFile getMatchingFiles interpreter limitConstraints loadFile loadScript loadTestedCommands mainThread makeDirectory makeFile match matchDirectories matchFiles normalizeMsg normalizePath outputChannel outputFile preserveCore removeDirectory removeFile restoreState runAllTests saveState singleProcess skip skipDirectories skipFiles temporaryDirectory test testConstraint testsDirectory threadReap verbose viewFile workingDirectory}
 
 test namespace-old-9.7 {empty forget list for "namespace forget" command} {
     namespace forget
@@ -850,15 +847,3 @@ eval namespace delete [namespace children :: test_ns_*]
 # cleanup
 ::tcltest::cleanupTests
 return
-
-
-
-
-
-
-
-
-
-
-
-

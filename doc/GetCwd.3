@@ -4,7 +4,7 @@
 '\" See the file "license.terms" for information on usage and redistribution
 '\" of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 '\" 
-'\" RCS: @(#) $Id: GetCwd.3,v 1.5 2002/02/08 02:52:54 dgp Exp $
+'\" RCS: @(#) $Id: GetCwd.3,v 1.9 2007/12/13 15:22:31 dgp Exp $
 '\" 
 .so man.macros
 .TH Tcl_GetCwd 3 8.1 Tcl "Tcl Library Procedures"
@@ -21,7 +21,7 @@ char *
 int
 \fBTcl_Chdir\fR(\fIpath\fR)
 .SH ARGUMENTS
-.AS Tcl_DString *bufferPtr
+.AS Tcl_DString *bufferPtr in/out
 .AP Tcl_Interp *interp in
 Interpreter in which to report an error, if any.
 .AP Tcl_DString *bufferPtr in/out
@@ -41,7 +41,7 @@ the same functionality as the Tcl \fBpwd\fR command.
 .PP
 \fBTcl_GetCwd\fR returns a pointer to a string specifying the current
 directory, or NULL if the current directory could not be determined.
-If NULL is returned, an error message is left in the interp's result.
+If NULL is returned, an error message is left in the \fIinterp\fR's result.
 Storage for the result string is allocated in bufferPtr; the caller
 must call \fBTcl_DStringFree()\fR when the result is no longer needed.
 The format of the path is UTF\-8.

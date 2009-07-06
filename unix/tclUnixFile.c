@@ -1,72 +1,61 @@
-/* 
+/*
  * tclUnixFile.c --
  *
- *      This file contains wrappers around UNIX file handling functions.
- *      These wrappers mask differences between Windows and UNIX.
+ *	This file contains wrappers around UNIX file handling functions.
+ *	These wrappers mask differences between Windows and UNIX.
  *
  * Copyright (c) 1995-1998 Sun Microsystems, Inc.
  *
- * See the file "license.terms" for information on usage and redistribution
- * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
+ * See the file "license.terms" for information on usage and redistribution of
+ * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclUnixFile.c,v 1.32.2.2 2003/10/31 08:46:41 vincentdarley Exp $
+ * RCS: @(#) $Id: tclUnixFile.c,v 1.52 2007/12/13 15:28:42 dgp Exp $
  */
 
 #include "tclInt.h"
-#include "tclPort.h"
+#include "tclFileSystem.h"
 
-static int NativeMatchType(CONST char* nativeName, Tcl_GlobTypeData *types);
-
+static int NativeMatchType(Tcl_Interp *interp, CONST char* nativeEntry,
+	CONST char* nativeName, Tcl_GlobTypeData *types);
 
 /*
  *---------------------------------------------------------------------------
  *
  * TclpFindExecutable --
  *
- *	This procedure computes the absolute path name of the current
+ *	This function computes the absolute path name of the current
  *	application, given its argv[0] value.
  *
  * Results:
- *	A dirty UTF string that is the path to the executable.  At this
- *	point we may not know the system encoding.  Convert the native
- *	string value to UTF using the default encoding.  The assumption
- *	is that we will still be able to parse the path given the path
- *	name contains ASCII string and '/' chars do not conflict with
- *	other UTF chars.
+ *	None.
  *
  * Side effects:
- *	The variable tclNativeExecutableName gets filled in with the file
- *	name for the application, if we figured it out.  If we couldn't
- *	figure it out, tclNativeExecutableName is set to NULL.
+ *	The computed path name is stored as a ProcessGlobalValue.
  *
  *---------------------------------------------------------------------------
  */
 
-char *
-TclpFindExecutable(argv0)
-    CONST char *argv0;		/* The value of the application's argv[0]
+void
+TclpFindExecutable(
+    CONST char *argv0)		/* The value of the application's argv[0]
 				 * (native). */
 {
     CONST char *name, *p;
     Tcl_StatBuf statBuf;
-    int length;
-    Tcl_DString buffer, nameString;
+    Tcl_DString buffer, nameString, cwd, utfName;
+    Tcl_Encoding encoding;
 
     if (argv0 == NULL) {
-	return NULL;
+	return;
     }
-    if (tclNativeExecutableName != NULL) {
-	return tclNativeExecutableName;
-    }
-
     Tcl_DStringInit(&buffer);
 
     name = argv0;
     for (p = name; *p != '\0'; p++) {
 	if (*p == '/') {
 	    /*
-	     * The name contains a slash, so use the name directly
-	     * without doing a path search.
+	     * The name contains a slash, so use the name directly without
+	     * doing a path search.
 	     */
 
 	    goto gotName;
@@ -76,8 +65,8 @@ TclpFindExecutable(argv0)
     p = getenv("PATH");					/* INTL: Native. */
     if (p == NULL) {
 	/*
-	 * There's no PATH environment variable; use the default that
-	 * is used by sh.
+	 * There's no PATH environment variable; use the default that is used
+	 * by sh.
 	 */
 
 	p = ":/bin:/usr/bin";
@@ -90,13 +79,12 @@ TclpFindExecutable(argv0)
     }
 
     /*
-     * Search through all the directories named in the PATH variable
-     * to see if argv[0] is in one of them.  If so, use that file
-     * name.
+     * Search through all the directories named in the PATH variable to see if
+     * argv[0] is in one of them. If so, use that file name.
      */
 
     while (1) {
-	while (isspace(UCHAR(*p))) {		/* INTL: BUG */
+	while (isspace(UCHAR(*p))) {			/* INTL: BUG */
 	    p++;
 	}
 	name = p;
@@ -131,52 +119,63 @@ TclpFindExecutable(argv0)
 	    p++;
 	}
     }
+    TclSetObjNameOfExecutable(Tcl_NewObj(), NULL);
     goto done;
 
     /*
-     * If the name starts with "/" then just copy it to tclExecutableName.
+     * If the name starts with "/" then just store it
      */
 
-gotName:
+  gotName:
 #ifdef DJGPP
-    if (name[1] == ':')  {
+    if (name[1] == ':')
 #else
-    if (name[0] == '/')  {
+    if (name[0] == '/')
 #endif
-	Tcl_ExternalToUtfDString(NULL, name, -1, &nameString);
-	tclNativeExecutableName = (char *)
-		ckalloc((unsigned) (Tcl_DStringLength(&nameString) + 1));
-	strcpy(tclNativeExecutableName, Tcl_DStringValue(&nameString));
-	Tcl_DStringFree(&nameString);
+    {
+	encoding = Tcl_GetEncoding(NULL, NULL);
+	Tcl_ExternalToUtfDString(encoding, name, -1, &utfName);
+	TclSetObjNameOfExecutable(
+		Tcl_NewStringObj(Tcl_DStringValue(&utfName), -1), encoding);
+	Tcl_DStringFree(&utfName);
 	goto done;
     }
 
     /*
-     * The name is relative to the current working directory.  First
-     * strip off a leading "./", if any, then add the full path name of
-     * the current working directory.
+     * The name is relative to the current working directory. First strip off
+     * a leading "./", if any, then add the full path name of the current
+     * working directory.
      */
 
     if ((name[0] == '.') && (name[1] == '/')) {
 	name += 2;
     }
 
-    Tcl_ExternalToUtfDString(NULL, name, -1, &nameString);
+    Tcl_DStringInit(&nameString);
+    Tcl_DStringAppend(&nameString, name, -1);
+
+    TclpGetCwd(NULL, &cwd);
 
     Tcl_DStringFree(&buffer);
-    TclpGetCwd(NULL, &buffer);
-
-    length = Tcl_DStringLength(&buffer) + Tcl_DStringLength(&nameString) + 2;
-    tclNativeExecutableName = (char *) ckalloc((unsigned) length);
-    strcpy(tclNativeExecutableName, Tcl_DStringValue(&buffer));
-    tclNativeExecutableName[Tcl_DStringLength(&buffer)] = '/';
-    strcpy(tclNativeExecutableName + Tcl_DStringLength(&buffer) + 1,
-	    Tcl_DStringValue(&nameString));
+    Tcl_UtfToExternalDString(NULL, Tcl_DStringValue(&cwd),
+	    Tcl_DStringLength(&cwd), &buffer);
+    if (Tcl_DStringValue(&cwd)[Tcl_DStringLength(&cwd) -1] != '/') {
+	Tcl_DStringAppend(&buffer, "/", 1);
+    }
+    Tcl_DStringFree(&cwd);
+    Tcl_DStringAppend(&buffer, Tcl_DStringValue(&nameString),
+	    Tcl_DStringLength(&nameString));
     Tcl_DStringFree(&nameString);
-    
-done:
+
+    encoding = Tcl_GetEncoding(NULL, NULL);
+    Tcl_ExternalToUtfDString(encoding, Tcl_DStringValue(&buffer), -1,
+	    &utfName);
+    TclSetObjNameOfExecutable(
+	    Tcl_NewStringObj(Tcl_DStringValue(&utfName), -1), encoding);
+    Tcl_DStringFree(&utfName);
+
+  done:
     Tcl_DStringFree(&buffer);
-    return tclNativeExecutableName;
 }
 
 /*
@@ -184,80 +183,101 @@ done:
  *
  * TclpMatchInDirectory --
  *
- *	This routine is used by the globbing code to search a
- *	directory for all files which match a given pattern.
+ *	This routine is used by the globbing code to search a directory for
+ *	all files which match a given pattern.
  *
- * Results: 
- *	The return value is a standard Tcl result indicating whether an
- *	error occurred in globbing.  Errors are left in interp, good
- *	results are lappended to resultPtr (which must be a valid object)
+ * Results:
+ *	The return value is a standard Tcl result indicating whether an error
+ *	occurred in globbing. Errors are left in interp, good results are
+ *	[lappend]ed to resultPtr (which must be a valid object).
  *
  * Side effects:
  *	None.
  *
- *---------------------------------------------------------------------- */
+ *----------------------------------------------------------------------
+ */
 
 int
-TclpMatchInDirectory(interp, resultPtr, pathPtr, pattern, types)
-    Tcl_Interp *interp;		/* Interpreter to receive errors. */
-    Tcl_Obj *resultPtr;		/* List object to lappend results. */
-    Tcl_Obj *pathPtr;	        /* Contains path to directory to search. */
-    CONST char *pattern;	/* Pattern to match against. */
-    Tcl_GlobTypeData *types;	/* Object containing list of acceptable types.
+TclpMatchInDirectory(
+    Tcl_Interp *interp,		/* Interpreter to receive errors. */
+    Tcl_Obj *resultPtr,		/* List object to lappend results. */
+    Tcl_Obj *pathPtr,		/* Contains path to directory to search. */
+    CONST char *pattern,	/* Pattern to match against. */
+    Tcl_GlobTypeData *types)	/* Object containing list of acceptable types.
 				 * May be NULL. In particular the directory
 				 * flag is very important. */
 {
     CONST char *native;
     Tcl_Obj *fileNamePtr;
+    int matchResult = 0;
+
+    if (types != NULL && types->type == TCL_GLOB_TYPE_MOUNT) {
+	/*
+	 * The native filesystem never adds mounts.
+	 */
+
+	return TCL_OK;
+    }
 
     fileNamePtr = Tcl_FSGetTranslatedPath(interp, pathPtr);
     if (fileNamePtr == NULL) {
 	return TCL_ERROR;
     }
-    
+
     if (pattern == NULL || (*pattern == '\0')) {
-	/* Match a file directly */
+	/*
+	 * Match a file directly.
+	 */
+	Tcl_Obj *tailPtr;
+	CONST char *nativeTail;
+
 	native = (CONST char*) Tcl_FSGetNativePath(pathPtr);
-	if (NativeMatchType(native, types)) {
+	tailPtr = TclPathPart(interp, pathPtr, TCL_PATH_TAIL);
+	nativeTail = (CONST char*) Tcl_FSGetNativePath(tailPtr);
+	matchResult = NativeMatchType(interp, native, nativeTail, types);
+	if (matchResult == 1) {
 	    Tcl_ListObjAppendElement(interp, resultPtr, pathPtr);
 	}
+	Tcl_DecrRefCount(tailPtr);
 	Tcl_DecrRefCount(fileNamePtr);
-	return TCL_OK;
     } else {
 	DIR *d;
 	Tcl_DirEntry *entryPtr;
 	CONST char *dirName;
 	int dirLength;
-	int matchHidden;
+	int matchHidden, matchHiddenPat;
 	int nativeDirLen;
 	Tcl_StatBuf statBuf;
-	Tcl_DString ds;      /* native encoding of dir */
-	Tcl_DString dsOrig;  /* utf-8 encoding of dir */
+	Tcl_DString ds;		/* native encoding of dir */
+	Tcl_DString dsOrig;	/* utf-8 encoding of dir */
 
 	Tcl_DStringInit(&dsOrig);
 	dirName = Tcl_GetStringFromObj(fileNamePtr, &dirLength);
 	Tcl_DStringAppend(&dsOrig, dirName, dirLength);
-	
+
 	/*
 	 * Make sure that the directory part of the name really is a
-	 * directory.  If the directory name is "", use the name "."
-	 * instead, because some UNIX systems don't treat "" like "."
-	 * automatically.  Keep the "" for use in generating file names,
-	 * otherwise "glob foo.c" would return "./foo.c".
+	 * directory.  If the directory name is "", use the name "." instead,
+	 * because some UNIX systems don't treat "" like "." automatically.
+	 * Keep the "" for use in generating file names, otherwise "glob
+	 * foo.c" would return "./foo.c".
 	 */
 
 	if (dirLength == 0) {
 	    dirName = ".";
 	} else {
 	    dirName = Tcl_DStringValue(&dsOrig);
-	    /* Make sure we have a trailing directory delimiter */
+
+	    /*
+	     * Make sure we have a trailing directory delimiter.
+	     */
+
 	    if (dirName[dirLength-1] != '/') {
 		dirName = Tcl_DStringAppend(&dsOrig, "/", 1);
 		dirLength++;
 	    }
 	}
-	Tcl_DecrRefCount(fileNamePtr);
-	
+
 	/*
 	 * Now open the directory for reading and iterate over the contents.
 	 */
@@ -268,17 +288,21 @@ TclpMatchInDirectory(interp, resultPtr, pathPtr, pattern, types)
 		|| !S_ISDIR(statBuf.st_mode)) {
 	    Tcl_DStringFree(&dsOrig);
 	    Tcl_DStringFree(&ds);
+	    Tcl_DecrRefCount(fileNamePtr);
 	    return TCL_OK;
 	}
 
 	d = opendir(native);				/* INTL: Native. */
 	if (d == NULL) {
 	    Tcl_DStringFree(&ds);
-	    Tcl_ResetResult(interp);
-	    Tcl_AppendResult(interp, "couldn't read directory \"",
-		    Tcl_DStringValue(&dsOrig), "\": ",
-		    Tcl_PosixError(interp), (char *) NULL);
+	    if (interp != NULL) {
+		Tcl_ResetResult(interp);
+		Tcl_AppendResult(interp, "couldn't read directory \"",
+			Tcl_DStringValue(&dsOrig), "\": ",
+			Tcl_PosixError(interp), (char *) NULL);
+	    }
 	    Tcl_DStringFree(&dsOrig);
+	    Tcl_DecrRefCount(fileNamePtr);
 	    return TCL_ERROR;
 	}
 
@@ -287,92 +311,135 @@ TclpMatchInDirectory(interp, resultPtr, pathPtr, pattern, types)
 	/*
 	 * Check to see if -type or the pattern requests hidden files.
 	 */
-	matchHidden = ((types && (types->perm & TCL_GLOB_PERM_HIDDEN)) ||
-		((pattern[0] == '.')
-			|| ((pattern[0] == '\\') && (pattern[1] == '.'))));
 
-	while ((entryPtr = TclOSreaddir(d)) != NULL) { /* INTL: Native. */
+	matchHiddenPat = (pattern[0] == '.')
+		|| ((pattern[0] == '\\') && (pattern[1] == '.'));
+	matchHidden = matchHiddenPat 
+		|| (types && (types->perm & TCL_GLOB_PERM_HIDDEN));
+	while ((entryPtr = TclOSreaddir(d)) != NULL) {	/* INTL: Native. */
 	    Tcl_DString utfDs;
 	    CONST char *utfname;
 
-	    /* 
-	     * Skip this file if it doesn't agree with the hidden
-	     * parameters requested by the user (via -type or pattern).
+	    /*
+	     * Skip this file if it doesn't agree with the hidden parameters
+	     * requested by the user (via -type or pattern).
 	     */
+
 	    if (*entryPtr->d_name == '.') {
 		if (!matchHidden) continue;
 	    } else {
+#ifdef MAC_OSX_TCL
+		if (matchHiddenPat) continue;
+		/* Also need to check HFS hidden flag in TclMacOSXMatchType. */
+#else
 		if (matchHidden) continue;
+#endif
 	    }
 
 	    /*
 	     * Now check to see if the file matches, according to both type
-	     * and pattern.  If so, add the file to the result.
+	     * and pattern. If so, add the file to the result.
 	     */
 
-	    utfname = Tcl_ExternalToUtfDString(NULL, entryPtr->d_name,
-		    -1, &utfDs);
+	    utfname = Tcl_ExternalToUtfDString(NULL, entryPtr->d_name, -1,
+		    &utfDs);
 	    if (Tcl_StringCaseMatch(utfname, pattern, 0)) {
 		int typeOk = 1;
 
 		if (types != NULL) {
 		    Tcl_DStringSetLength(&ds, nativeDirLen);
 		    native = Tcl_DStringAppend(&ds, entryPtr->d_name, -1);
-		    typeOk = NativeMatchType(native, types);
+		    matchResult = NativeMatchType(interp, native,
+			    entryPtr->d_name, types);
+		    typeOk = (matchResult == 1);
 		}
 		if (typeOk) {
-		    Tcl_ListObjAppendElement(interp, resultPtr, 
+		    Tcl_ListObjAppendElement(interp, resultPtr,
 			    TclNewFSPathObj(pathPtr, utfname,
-				    Tcl_DStringLength(&utfDs)));
+			    Tcl_DStringLength(&utfDs)));
 		}
 	    }
 	    Tcl_DStringFree(&utfDs);
+	    if (matchResult < 0) {
+		break;
+	    }
 	}
 
 	closedir(d);
 	Tcl_DStringFree(&ds);
 	Tcl_DStringFree(&dsOrig);
+	Tcl_DecrRefCount(fileNamePtr);
+    }
+    if (matchResult < 0) {
+	return TCL_ERROR;
+    } else {
 	return TCL_OK;
     }
 }
-static int 
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * NativeMatchType --
+ *
+ *	This routine is used by the globbing code to check if a file
+ *	matches a given type description.
+ *
+ * Results:
+ *	The return value is 1, 0 or -1 indicating whether the file
+ *	matches the given criteria, does not match them, or an error
+ *	occurred (in wich case an error is left in interp).
+ *
+ * Side effects:
+ *	None.
+ *
+ *----------------------------------------------------------------------
+ */
+
+static int
 NativeMatchType(
-    CONST char* nativeEntry,  /* Native path to check */
-    Tcl_GlobTypeData *types)  /* Type description to match against */
+    Tcl_Interp *interp,       /* Interpreter to receive errors. */
+    CONST char *nativeEntry,  /* Native path to check. */
+    CONST char *nativeName,   /* Native filename to check. */
+    Tcl_GlobTypeData *types)  /* Type description to match against. */
 {
     Tcl_StatBuf buf;
     if (types == NULL) {
-	/* 
-	 * Simply check for the file's existence, but do it
-	 * with lstat, in case it is a link to a file which
-	 * doesn't exist (since that case would not show up
-	 * if we used 'access' or 'stat')
+	/*
+	 * Simply check for the file's existence, but do it with lstat, in
+	 * case it is a link to a file which doesn't exist (since that case
+	 * would not show up if we used 'access' or 'stat')
 	 */
+
 	if (TclOSlstat(nativeEntry, &buf) != 0) {
 	    return 0;
 	}
     } else {
 	if (types->perm != 0) {
 	    if (TclOSstat(nativeEntry, &buf) != 0) {
-		/* 
-		 * Either the file has disappeared between the
-		 * 'readdir' call and the 'stat' call, or
-		 * the file is a link to a file which doesn't
-		 * exist (which we could ascertain with
-		 * lstat), or there is some other strange
-		 * problem.  In all these cases, we define this
-		 * to mean the file does not match any defined
-		 * permission, and therefore it is not 
-		 * added to the list of files to return.
+		/*
+		 * Either the file has disappeared between the 'readdir' call
+		 * and the 'stat' call, or the file is a link to a file which
+		 * doesn't exist (which we could ascertain with lstat), or
+		 * there is some other strange problem. In all these cases, we
+		 * define this to mean the file does not match any defined
+		 * permission, and therefore it is not added to the list of
+		 * files to return.
 		 */
+
 		return 0;
 	    }
-	    
-	    /* 
-	     * readonly means that there are NO write permissions
-	     * (even for user), but execute is OK for anybody
+
+	    /*
+	     * readonly means that there are NO write permissions (even for
+	     * user), but execute is OK for anybody OR that the user immutable
+	     * flag is set (where supported).
 	     */
+
 	    if (((types->perm & TCL_GLOB_PERM_RONLY) &&
+#if defined(HAVE_CHFLAGS) && defined(UF_IMMUTABLE)
+			!(buf.st_flags & UF_IMMUTABLE) &&
+#endif
 			(buf.st_mode & (S_IWOTH|S_IWGRP|S_IWUSR))) ||
 		((types->perm & TCL_GLOB_PERM_R) &&
 			(access(nativeEntry, R_OK) != 0)) ||
@@ -380,20 +447,27 @@ NativeMatchType(
 			(access(nativeEntry, W_OK) != 0)) ||
 		((types->perm & TCL_GLOB_PERM_X) &&
 			(access(nativeEntry, X_OK) != 0))
+#ifndef MAC_OSX_TCL
+		|| ((types->perm & TCL_GLOB_PERM_HIDDEN) &&
+			(*nativeName != '.'))
+#endif
 		) {
 		return 0;
 	    }
 	}
 	if (types->type != 0) {
 	    if (types->perm == 0) {
-		/* We haven't yet done a stat on the file */
+		/*
+		 * We haven't yet done a stat on the file.
+		 */
+
 		if (TclOSstat(nativeEntry, &buf) != 0) {
-		    /* 
-		     * Posix error occurred.  The only ok
-		     * case is if this is a link to a nonexistent
-		     * file, and the user did 'glob -l'. So
-		     * we check that here:
+		    /*
+		     * Posix error occurred. The only ok case is if this is a
+		     * link to a nonexistent file, and the user did 'glob -l'.
+		     * So we check that here:
 		     */
+
 		    if (types->type & TCL_GLOB_TYPE_LINK) {
 			if (TclOSlstat(nativeEntry, &buf) == 0) {
 			    if (S_ISLNK(buf.st_mode)) {
@@ -404,32 +478,29 @@ NativeMatchType(
 		    return 0;
 		}
 	    }
+
 	    /*
 	     * In order bcdpfls as in 'find -t'
 	     */
-	    if (
-		((types->type & TCL_GLOB_TYPE_BLOCK) &&
-			S_ISBLK(buf.st_mode)) ||
-		((types->type & TCL_GLOB_TYPE_CHAR) &&
-			S_ISCHR(buf.st_mode)) ||
-		((types->type & TCL_GLOB_TYPE_DIR) &&
-			S_ISDIR(buf.st_mode)) ||
-		((types->type & TCL_GLOB_TYPE_PIPE) &&
-			S_ISFIFO(buf.st_mode)) ||
-		((types->type & TCL_GLOB_TYPE_FILE) &&
-			S_ISREG(buf.st_mode))
+
+	    if (((types->type & TCL_GLOB_TYPE_BLOCK)&& S_ISBLK(buf.st_mode)) ||
+		((types->type & TCL_GLOB_TYPE_CHAR) && S_ISCHR(buf.st_mode)) ||
+		((types->type & TCL_GLOB_TYPE_DIR)  && S_ISDIR(buf.st_mode)) ||
+		((types->type & TCL_GLOB_TYPE_PIPE) && S_ISFIFO(buf.st_mode))||
+		((types->type & TCL_GLOB_TYPE_FILE) && S_ISREG(buf.st_mode))
 #ifdef S_ISSOCK
-		|| ((types->type & TCL_GLOB_TYPE_SOCK) &&
-			S_ISSOCK(buf.st_mode))
+		||((types->type & TCL_GLOB_TYPE_SOCK) && S_ISSOCK(buf.st_mode))
 #endif /* S_ISSOCK */
 		) {
-		/* Do nothing -- this file is ok */
+		/*
+		 * Do nothing - this file is ok.
+		 */
 	    } else {
 #ifdef S_ISLNK
 		if (types->type & TCL_GLOB_TYPE_LINK) {
 		    if (TclOSlstat(nativeEntry, &buf) == 0) {
 			if (S_ISLNK(buf.st_mode)) {
-			    return 1;
+			    goto filetypeOK;
 			}
 		    }
 		}
@@ -437,6 +508,29 @@ NativeMatchType(
 		return 0;
 	    }
 	}
+    filetypeOK: ;
+#ifdef MAC_OSX_TCL
+	if (types->macType != NULL || types->macCreator != NULL ||
+		(types->perm & TCL_GLOB_PERM_HIDDEN)) {
+	    int matchResult;
+
+	    if (types->perm == 0 && types->type == 0) {
+		/*
+		 * We haven't yet done a stat on the file.
+		 */
+
+		if (TclOSstat(nativeEntry, &buf) != 0) {
+		    return 0;
+		}
+	    }
+
+	    matchResult = TclMacOSXMatchType(interp, nativeEntry, nativeName,
+		    &buf, types);
+	    if (matchResult != 1) {
+		return matchResult;
+	    }
+	}
+#endif
     }
     return 1;
 }
@@ -446,15 +540,15 @@ NativeMatchType(
  *
  * TclpGetUserHome --
  *
- *	This function takes the specified user name and finds their
- *	home directory.
+ *	This function takes the specified user name and finds their home
+ *	directory.
  *
  * Results:
  *	The result is a pointer to a string specifying the user's home
  *	directory, or NULL if the user's home directory could not be
- *	determined.  Storage for the result string is allocated in
- *	bufferPtr; the caller must call Tcl_DStringFree() when the result
- *	is no longer needed.
+ *	determined. Storage for the result string is allocated in bufferPtr;
+ *	the caller must call Tcl_DStringFree() when the result is no longer
+ *	needed.
  *
  * Side effects:
  *	None.
@@ -463,10 +557,10 @@ NativeMatchType(
  */
 
 char *
-TclpGetUserHome(name, bufferPtr)
-    CONST char *name;		/* User name for desired home directory. */
-    Tcl_DString *bufferPtr;	/* Uninitialized or free DString filled
-				 * with name of user's home directory. */
+TclpGetUserHome(
+    CONST char *name,		/* User name for desired home directory. */
+    Tcl_DString *bufferPtr)	/* Uninitialized or free DString filled with
+				 * name of user's home directory. */
 {
     struct passwd *pwPtr;
     Tcl_DString ds;
@@ -475,7 +569,7 @@ TclpGetUserHome(name, bufferPtr)
     native = Tcl_UtfToExternalDString(NULL, name, -1, &ds);
     pwPtr = getpwnam(native);				/* INTL: Native. */
     Tcl_DStringFree(&ds);
-    
+
     if (pwPtr == NULL) {
 	endpwent();
 	return NULL;
@@ -501,10 +595,10 @@ TclpGetUserHome(name, bufferPtr)
  *---------------------------------------------------------------------------
  */
 
-int 
-TclpObjAccess(pathPtr, mode)
-    Tcl_Obj *pathPtr;        /* Path of file to access */
-    int mode;                /* Permission setting. */
+int
+TclpObjAccess(
+    Tcl_Obj *pathPtr,		/* Path of file to access */
+    int mode)			/* Permission setting. */
 {
     CONST char *path = Tcl_FSGetNativePath(pathPtr);
     if (path == NULL) {
@@ -525,14 +619,14 @@ TclpObjAccess(pathPtr, mode)
  *	See chdir() documentation.
  *
  * Side effects:
- *	See chdir() documentation.  
+ *	See chdir() documentation.
  *
  *---------------------------------------------------------------------------
  */
 
-int 
-TclpObjChdir(pathPtr)
-    Tcl_Obj *pathPtr;          /* Path to new working directory */
+int
+TclpObjChdir(
+    Tcl_Obj *pathPtr)		/* Path to new working directory */
 {
     CONST char *path = Tcl_FSGetNativePath(pathPtr);
     if (path == NULL) {
@@ -558,10 +652,10 @@ TclpObjChdir(pathPtr)
  *----------------------------------------------------------------------
  */
 
-int 
-TclpObjLstat(pathPtr, bufPtr)
-    Tcl_Obj *pathPtr;		/* Path of file to stat */
-    Tcl_StatBuf *bufPtr;	/* Filled with results of stat call. */
+int
+TclpObjLstat(
+    Tcl_Obj *pathPtr,		/* Path of file to stat */
+    Tcl_StatBuf *bufPtr)	/* Filled with results of stat call. */
 {
     return TclOSlstat(Tcl_FSGetNativePath(pathPtr), bufPtr);
 }
@@ -569,17 +663,17 @@ TclpObjLstat(pathPtr, bufPtr)
 /*
  *---------------------------------------------------------------------------
  *
- * TclpObjGetCwd --
+ * TclpGetNativeCwd --
  *
  *	This function replaces the library version of getcwd().
  *
  * Results:
- *	The result is a pointer to a string specifying the current
- *	directory, or NULL if the current directory could not be
- *	determined.  If NULL is returned, an error message is left in the
- *	interp's result.  Storage for the result string is allocated in
- *	bufferPtr; the caller must call Tcl_DStringFree() when the result
- *	is no longer needed.
+ *	The input and output are filesystem paths in native form. The result
+ *	is either the given clientData, if the working directory hasn't
+ *	changed, or a new clientData (owned by our caller), giving the new
+ *	native path, or NULL if the current directory could not be determined.
+ *	If NULL is returned, the caller can examine the standard posix error
+ *	codes to determine the cause of the problem.
  *
  * Side effects:
  *	None.
@@ -587,39 +681,73 @@ TclpObjLstat(pathPtr, bufPtr)
  *----------------------------------------------------------------------
  */
 
-Tcl_Obj* 
-TclpObjGetCwd(interp)
-    Tcl_Interp *interp;
-{
-    Tcl_DString ds;
-    if (TclpGetCwd(interp, &ds) != NULL) {
-	Tcl_Obj *cwdPtr = Tcl_NewStringObj(Tcl_DStringValue(&ds), -1);
-	Tcl_IncrRefCount(cwdPtr);
-	Tcl_DStringFree(&ds);
-	return cwdPtr;
-    } else {
-	return NULL;
-    }
-}
-
-/* Older string based version */
-CONST char *
-TclpGetCwd(interp, bufferPtr)
-    Tcl_Interp *interp;		/* If non-NULL, used for error reporting. */
-    Tcl_DString *bufferPtr;	/* Uninitialized or free DString filled
-				 * with name of current directory. */
+ClientData
+TclpGetNativeCwd(
+    ClientData clientData)
 {
     char buffer[MAXPATHLEN+1];
 
 #ifdef USEGETWD
-    if (getwd(buffer) == NULL) {			/* INTL: Native. */
+    if (getwd(buffer) == NULL)				/* INTL: Native. */
 #else
-    if (getcwd(buffer, MAXPATHLEN + 1) == NULL) {	/* INTL: Native. */
+    if (getcwd(buffer, MAXPATHLEN+1) == NULL)		/* INTL: Native. */
 #endif
+    {
+	return NULL;
+    }
+    if ((clientData != NULL) && strcmp(buffer, (CONST char*)clientData) == 0) {
+	/*
+	 * No change to pwd.
+	 */
+
+	return clientData;
+    } else {
+	char *newCd = (char *) ckalloc((unsigned) (strlen(buffer) + 1));
+	strcpy(newCd, buffer);
+	return (ClientData) newCd;
+    }
+}
+
+/*
+ *---------------------------------------------------------------------------
+ *
+ * TclpGetCwd --
+ *
+ *	This function replaces the library version of getcwd(). (Obsolete
+ *	function, only retained for old extensions which may call it
+ *	directly).
+ *
+ * Results:
+ *	The result is a pointer to a string specifying the current directory,
+ *	or NULL if the current directory could not be determined. If NULL is
+ *	returned, an error message is left in the interp's result. Storage for
+ *	the result string is allocated in bufferPtr; the caller must call
+ *	Tcl_DStringFree() when the result is no longer needed.
+ *
+ * Side effects:
+ *	None.
+ *
+ *----------------------------------------------------------------------
+ */
+
+CONST char *
+TclpGetCwd(
+    Tcl_Interp *interp,		/* If non-NULL, used for error reporting. */
+    Tcl_DString *bufferPtr)	/* Uninitialized or free DString filled with
+				 * name of current directory. */
+{
+    char buffer[MAXPATHLEN+1];
+
+#ifdef USEGETWD
+    if (getwd(buffer) == NULL)				/* INTL: Native. */
+#else
+    if (getcwd(buffer, MAXPATHLEN+1) == NULL)		/* INTL: Native. */
+#endif
+    {
 	if (interp != NULL) {
 	    Tcl_AppendResult(interp,
 		    "error getting working directory name: ",
-		    Tcl_PosixError(interp), (char *) NULL);
+		    Tcl_PosixError(interp), NULL);
 	}
 	return NULL;
     }
@@ -634,11 +762,11 @@ TclpGetCwd(interp, bufferPtr)
  *	This function replaces the library version of readlink().
  *
  * Results:
- *	The result is a pointer to a string specifying the contents
- *	of the symbolic link given by 'path', or NULL if the symbolic
- *	link could not be read.  Storage for the result string is
- *	allocated in bufferPtr; the caller must call Tcl_DStringFree()
- *	when the result is no longer needed.
+ *	The result is a pointer to a string specifying the contents of the
+ *	symbolic link given by 'path', or NULL if the symbolic link could not
+ *	be read. Storage for the result string is allocated in bufferPtr; the
+ *	caller must call Tcl_DStringFree() when the result is no longer
+ *	needed.
  *
  * Side effects:
  *	See readlink() documentation.
@@ -647,10 +775,10 @@ TclpGetCwd(interp, bufferPtr)
  */
 
 char *
-TclpReadlink(path, linkPtr)
-    CONST char *path;		/* Path of file to readlink (UTF-8). */
-    Tcl_DString *linkPtr;	/* Uninitialized or free DString filled
-				 * with contents of link (UTF-8). */
+TclpReadlink(
+    CONST char *path,		/* Path of file to readlink (UTF-8). */
+    Tcl_DString *linkPtr)	/* Uninitialized or free DString filled with
+				 * contents of link (UTF-8). */
 {
 #ifndef DJGPP
     char link[MAXPATHLEN];
@@ -661,7 +789,7 @@ TclpReadlink(path, linkPtr)
     native = Tcl_UtfToExternalDString(NULL, path, -1, &ds);
     length = readlink(native, link, sizeof(link));	/* INTL: Native. */
     Tcl_DStringFree(&ds);
-    
+
     if (length < 0) {
 	return NULL;
     }
@@ -689,10 +817,10 @@ TclpReadlink(path, linkPtr)
  *----------------------------------------------------------------------
  */
 
-int 
-TclpObjStat(pathPtr, bufPtr)
-    Tcl_Obj *pathPtr;		/* Path of file to stat */
-    Tcl_StatBuf *bufPtr;	/* Filled with results of stat call. */
+int
+TclpObjStat(
+    Tcl_Obj *pathPtr,		/* Path of file to stat */
+    Tcl_StatBuf *bufPtr)	/* Filled with results of stat call. */
 {
     CONST char *path = Tcl_FSGetNativePath(pathPtr);
     if (path == NULL) {
@@ -702,67 +830,142 @@ TclpObjStat(pathPtr, bufPtr)
     }
 }
 
-
 #ifdef S_IFLNK
 
-Tcl_Obj* 
-TclpObjLink(pathPtr, toPtr, linkAction)
-    Tcl_Obj *pathPtr;
-    Tcl_Obj *toPtr;
-    int linkAction;
+Tcl_Obj*
+TclpObjLink(
+    Tcl_Obj *pathPtr,
+    Tcl_Obj *toPtr,
+    int linkAction)
 {
     if (toPtr != NULL) {
 	CONST char *src = Tcl_FSGetNativePath(pathPtr);
-	CONST char *target = Tcl_FSGetNativePath(toPtr);
-	
-	if (src == NULL || target == NULL) {
+	CONST char *target = NULL;
+
+	if (src == NULL) {
 	    return NULL;
 	}
+
+	/*
+	 * If we're making a symbolic link and the path is relative, then we
+	 * must check whether it exists _relative_ to the directory in which
+	 * the src is found (not relative to the current cwd which is just not
+	 * relevant in this case).
+	 *
+	 * If we're making a hard link, then a relative path is just converted
+	 * to absolute relative to the cwd.
+	 */
+
+	if ((linkAction & TCL_CREATE_SYMBOLIC_LINK)
+		&& (Tcl_FSGetPathType(toPtr) == TCL_PATH_RELATIVE)) {
+	    Tcl_Obj *dirPtr, *absPtr;
+
+	    dirPtr = TclPathPart(NULL, pathPtr, TCL_PATH_DIRNAME);
+	    if (dirPtr == NULL) {
+		return NULL;
+	    }
+	    absPtr = Tcl_FSJoinToPath(dirPtr, 1, &toPtr);
+	    Tcl_IncrRefCount(absPtr);
+	    if (Tcl_FSAccess(absPtr, F_OK) == -1) {
+		Tcl_DecrRefCount(absPtr);
+		Tcl_DecrRefCount(dirPtr);
+
+		/*
+		 * Target doesn't exist.
+		 */
+
+		errno = ENOENT;
+		return NULL;
+	    }
+
+	    /*
+	     * Target exists; we'll construct the relative path we want below.
+	     */
+
+	    Tcl_DecrRefCount(absPtr);
+	    Tcl_DecrRefCount(dirPtr);
+	} else {
+	    target = Tcl_FSGetNativePath(toPtr);
+	    if (target == NULL) {
+		return NULL;
+	    }
+	    if (access(target, F_OK) == -1) {
+		/*
+		 * Target doesn't exist.
+		 */
+
+		errno = ENOENT;
+		return NULL;
+	    }
+	}
+
 	if (access(src, F_OK) != -1) {
-	    /* src exists */
+	    /*
+	     * Src exists.
+	     */
+
 	    errno = EEXIST;
 	    return NULL;
 	}
-	if (access(target, F_OK) == -1) {
-	    /* target doesn't exist */
-	    errno = ENOENT;
-	    return NULL;
-	}
-	/* 
-	 * Check symbolic link flag first, since we prefer to
-	 * create these.
+
+	/*
+	 * Check symbolic link flag first, since we prefer to create these.
 	 */
+
 	if (linkAction & TCL_CREATE_SYMBOLIC_LINK) {
-	    if (symlink(target, src) != 0) return NULL;
+	    int targetLen;
+	    Tcl_DString ds;
+	    Tcl_Obj *transPtr;
+
+	    /*
+	     * Now we don't want to link to the absolute, normalized path.
+	     * Relative links are quite acceptable (but links to ~user are not
+	     * -- these must be expanded first).
+	     */
+
+	    transPtr = Tcl_FSGetTranslatedPath(NULL, toPtr);
+	    if (transPtr == NULL) {
+		return NULL;
+	    }
+	    target = Tcl_GetStringFromObj(transPtr, &targetLen);
+	    target = Tcl_UtfToExternalDString(NULL, target, targetLen, &ds);
+	    Tcl_DecrRefCount(transPtr);
+
+	    if (symlink(target, src) != 0) {
+		toPtr = NULL;
+	    }
+	    Tcl_DStringFree(&ds);
 	} else if (linkAction & TCL_CREATE_HARD_LINK) {
-	    if (link(target, src) != 0) return NULL;
+	    if (link(target, src) != 0) {
+		return NULL;
+	    }
 	} else {
 	    errno = ENODEV;
 	    return NULL;
 	}
 	return toPtr;
     } else {
-	Tcl_Obj* linkPtr = NULL;
+	Tcl_Obj *linkPtr = NULL;
 
 	char link[MAXPATHLEN];
 	int length;
 	Tcl_DString ds;
 	Tcl_Obj *transPtr;
-	
+
 	transPtr = Tcl_FSGetTranslatedPath(NULL, pathPtr);
 	if (transPtr == NULL) {
 	    return NULL;
 	}
 	Tcl_DecrRefCount(transPtr);
-	
+
 	length = readlink(Tcl_FSGetNativePath(pathPtr), link, sizeof(link));
 	if (length < 0) {
 	    return NULL;
 	}
 
 	Tcl_ExternalToUtfDString(NULL, link, length, &ds);
-	linkPtr = Tcl_NewStringObj(Tcl_DStringValue(&ds), 
-				   Tcl_DStringLength(&ds));
+	linkPtr = Tcl_NewStringObj(Tcl_DStringValue(&ds),
+		Tcl_DStringLength(&ds));
 	Tcl_DStringFree(&ds);
 	if (linkPtr != NULL) {
 	    Tcl_IncrRefCount(linkPtr);
@@ -770,34 +973,176 @@ TclpObjLink(pathPtr, toPtr, linkAction)
 	return linkPtr;
     }
 }
-
-#endif
-
+#endif /* S_IFLNK */
 
 /*
  *---------------------------------------------------------------------------
  *
  * TclpFilesystemPathType --
  *
- *      This function is part of the native filesystem support, and
- *      returns the path type of the given path.  Right now it simply
- *      returns NULL.  In the future it could return specific path
- *      types, like 'nfs', 'samba', 'FAT32', etc.
+ *	This function is part of the native filesystem support, and returns
+ *	the path type of the given path. Right now it simply returns NULL. In
+ *	the future it could return specific path types, like 'nfs', 'samba',
+ *	'FAT32', etc.
  *
  * Results:
- *      NULL at present.
+ *	NULL at present.
  *
  * Side effects:
  *	None.
  *
  *---------------------------------------------------------------------------
  */
-Tcl_Obj*
-TclpFilesystemPathType(pathObjPtr)
-    Tcl_Obj* pathObjPtr;
+
+Tcl_Obj *
+TclpFilesystemPathType(
+    Tcl_Obj *pathPtr)
 {
-    /* All native paths are of the same type */
+    /*
+     * All native paths are of the same type.
+     */
+
     return NULL;
+}
+
+/*
+ *---------------------------------------------------------------------------
+ *
+ * TclpNativeToNormalized --
+ *
+ *	Convert native format to a normalized path object, with refCount of
+ *	zero.
+ *
+ *	Currently assumes all native paths are actually normalized already, so
+ *	if the path given is not normalized this will actually just convert to
+ *	a valid string path, but not necessarily a normalized one.
+ *
+ * Results:
+ *	A valid normalized path.
+ *
+ * Side effects:
+ *	None.
+ *
+ *---------------------------------------------------------------------------
+ */
+
+Tcl_Obj *
+TclpNativeToNormalized(
+    ClientData clientData)
+{
+    Tcl_DString ds;
+    Tcl_Obj *objPtr;
+    int len;
+
+    CONST char *copy;
+    Tcl_ExternalToUtfDString(NULL, (CONST char*)clientData, -1, &ds);
+
+    copy = Tcl_DStringValue(&ds);
+    len = Tcl_DStringLength(&ds);
+
+    objPtr = Tcl_NewStringObj(copy,len);
+    Tcl_DStringFree(&ds);
+
+    return objPtr;
+}
+
+/*
+ *---------------------------------------------------------------------------
+ *
+ * TclNativeCreateNativeRep --
+ *
+ *	Create a native representation for the given path.
+ *
+ * Results:
+ *	The nativePath representation.
+ *
+ * Side effects:
+ *	Memory will be allocated. The path may need to be normalized.
+ *
+ *---------------------------------------------------------------------------
+ */
+
+ClientData
+TclNativeCreateNativeRep(
+    Tcl_Obj *pathPtr)
+{
+    char *nativePathPtr;
+    Tcl_DString ds;
+    Tcl_Obj *validPathPtr;
+    int len;
+    char *str;
+
+    if (TclFSCwdIsNative()) {
+	/*
+	 * The cwd is native, which means we can use the translated path
+	 * without worrying about normalization (this will also usually be
+	 * shorter so the utf-to-external conversion will be somewhat faster).
+	 */
+
+	validPathPtr = Tcl_FSGetTranslatedPath(NULL, pathPtr);
+	if (validPathPtr == NULL) {
+	    return NULL;
+	}
+    } else {
+	/*
+	 * Make sure the normalized path is set.
+	 */
+
+	validPathPtr = Tcl_FSGetNormalizedPath(NULL, pathPtr);
+	if (validPathPtr == NULL) {
+	    return NULL;
+	}
+	Tcl_IncrRefCount(validPathPtr);
+    }
+
+    str = Tcl_GetStringFromObj(validPathPtr, &len);
+    Tcl_UtfToExternalDString(NULL, str, len, &ds);
+    len = Tcl_DStringLength(&ds) + sizeof(char);
+    Tcl_DecrRefCount(validPathPtr);
+    nativePathPtr = ckalloc((unsigned) len);
+    memcpy((void*)nativePathPtr, (void*)Tcl_DStringValue(&ds), (size_t) len);
+
+    Tcl_DStringFree(&ds);
+    return (ClientData)nativePathPtr;
+}
+
+/*
+ *---------------------------------------------------------------------------
+ *
+ * TclNativeDupInternalRep --
+ *
+ *	Duplicate the native representation.
+ *
+ * Results:
+ *	The copied native representation, or NULL if it is not possible to
+ *	copy the representation.
+ *
+ * Side effects:
+ *	Memory will be allocated for the copy.
+ *
+ *---------------------------------------------------------------------------
+ */
+
+ClientData
+TclNativeDupInternalRep(
+    ClientData clientData)
+{
+    char *copy;
+    size_t len;
+
+    if (clientData == NULL) {
+	return NULL;
+    }
+
+    /*
+     * ASCII representation when running on Unix.
+     */
+
+    len = sizeof(char) + (strlen((CONST char*) clientData) * sizeof(char));
+
+    copy = (char *) ckalloc(len);
+    memcpy((void *) copy, (void *) clientData, len);
+    return (ClientData)copy;
 }
 
 /*
@@ -815,10 +1160,19 @@ TclpFilesystemPathType(pathObjPtr)
  *
  *---------------------------------------------------------------------------
  */
-int 
-TclpUtime(pathPtr, tval)
-    Tcl_Obj *pathPtr;      /* File to modify */
-    struct utimbuf *tval;  /* New modification date structure */
+
+int
+TclpUtime(
+    Tcl_Obj *pathPtr,		/* File to modify */
+    struct utimbuf *tval)	/* New modification date structure */
 {
-    return utime(Tcl_FSGetNativePath(pathPtr),tval);
+    return utime(Tcl_FSGetNativePath(pathPtr), tval);
 }
+
+/*
+ * Local Variables:
+ * mode: c
+ * c-basic-offset: 4
+ * fill-column: 78
+ * End:
+ */

@@ -5,7 +5,7 @@
 '\" See the file "license.terms" for information on usage and redistribution
 '\" of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 '\" 
-'\" RCS: @(#) $Id: read.n,v 1.7.8.1 2004/10/27 14:23:57 dkf Exp $
+'\" RCS: @(#) $Id: read.n,v 1.15 2007/12/13 15:22:33 dgp Exp $
 '\" 
 .so man.macros
 .TH read n 8.1 Tcl "Tcl Built-In Commands"
@@ -32,13 +32,11 @@ the channel is configured to use a multi-byte encoding, then the
 number of characters read may not be the same as the number of bytes
 read.
 .PP
-.VS
 \fIChannelId\fR must be an identifier for an open channel such as the
 Tcl standard input channel (\fBstdin\fR), the return value from an
 invocation of \fBopen\fR or \fBsocket\fR, or the result of a channel
 creation command provided by a Tcl extension. The channel must have
 been opened for input.
-.VE
 .PP
 If \fIchannelId\fR is in nonblocking mode, the command may not read as
 many characters as requested: once all available input has been read,
@@ -80,7 +78,7 @@ with each line in the file corresponding to an element in the list:
 set fl [open /proc/meminfo]
 set data [\fBread\fR $fl]
 close $fl
-set lines [split $data \\n]
+set lines [split $data \en]
 .CE
 
 .SH "SEE ALSO"

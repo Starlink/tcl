@@ -12,7 +12,6 @@
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclParse.c,v 1.62.2.2 2008/12/01 22:39:59 dgp Exp $
  */
 
 #include "tclInt.h"
@@ -894,21 +893,21 @@ TclParseBackslash(
 	 */
 
 	if (isdigit(UCHAR(*p)) && (UCHAR(*p) < '8')) {	/* INTL: digit */
-	    result = (unsigned char)(*p - '0');
+	    result = UCHAR(*p - '0');
 	    p++;
 	    if ((numBytes == 2) || !isdigit(UCHAR(*p))	/* INTL: digit */
 		    || (UCHAR(*p) >= '8')) {
 		break;
 	    }
 	    count = 3;
-	    result = (unsigned char)((result << 3) + (*p - '0'));
+	    result = UCHAR((result << 3) + (*p - '0'));
 	    p++;
 	    if ((numBytes == 3) || !isdigit(UCHAR(*p))	/* INTL: digit */
 		    || (UCHAR(*p) >= '8')) {
 		break;
 	    }
 	    count = 4;
-	    result = (unsigned char)((result << 3) + (*p - '0'));
+	    result = UCHAR((result << 3) + (*p - '0'));
 	    break;
 	}
 
@@ -2181,16 +2180,17 @@ TclSubstTokens(
 	    break;
 
 	case TCL_TOKEN_COMMAND: {
-	    Interp *iPtr = (Interp *) interp;
-
-	    iPtr->numLevels++;
-	    code = TclInterpReady(interp);
-	    if (code == TCL_OK) {
-		/* TIP #280: Transfer line information to nested command */
+  	    Interp *iPtr = (Interp *) interp;
+	    
+	    /* TIP #280: Transfer line information to nested command */
+ 	    iPtr->numLevels++;
+  	    code = TclInterpReady(interp);
+  	    if (code == TCL_OK) {
 		code = TclEvalEx(interp, tokenPtr->start+1, tokenPtr->size-2,
 			0, line);
 	    }
 	    iPtr->numLevels--;
+	    TclResetCancellation(interp, 0);
 	    appendObj = Tcl_GetObjResult(interp);
 	    break;
 	}

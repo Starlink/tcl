@@ -5,11 +5,12 @@
  *
  * Copyright (c) 1998 by Sun Microsystems, Inc.
  * Copyright (c) 1999 by Scriptics Corporation
+ * Copyright (c) 2008 by George Peter Staplin
  *
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclWinThrd.c,v 1.43.4.1 2008/12/21 20:13:49 dgp Exp $
+ * RCS: @(#) $Id: tclWinThrd.c,v 1.49 2008/10/13 22:51:31 patthoyts Exp $
  */
 
 #include "tclWinInt.h"
@@ -155,7 +156,7 @@ TclpThreadCreate(
     EnterCriticalSection(&joinLock);
 
     *idPtr = 0; /* must initialize as Tcl_Thread is a pointer and
-		 * on WIN64 sizeof void* != sizeof unsigned
+                 * on WIN64 sizeof void* != sizeof unsigned
 		 */
 
 #if defined(_MSC_VER) || defined(__MSVCRT__) || defined(__BORLANDC__)
@@ -593,7 +594,7 @@ void
 Tcl_ConditionWait(
     Tcl_Condition *condPtr,	/* Really (WinCondition **) */
     Tcl_Mutex *mutexPtr,	/* Really (CRITICAL_SECTION **) */
-    Tcl_Time *timePtr)		/* Timeout on waiting period */
+    const Tcl_Time *timePtr) /* Timeout on waiting period */
 {
     WinCondition *winCondPtr;	/* Per-condition queue head */
     CRITICAL_SECTION *csPtr;	/* Caller's Mutex, after casting */
@@ -694,7 +695,7 @@ Tcl_ConditionWait(
     while (!timeout && (tsdPtr->flags & WIN_THREAD_BLOCKED)) {
 	ResetEvent(tsdPtr->condEvent);
 	LeaveCriticalSection(&winCondPtr->condLock);
-	if (WaitForSingleObject(tsdPtr->condEvent, wtime) == WAIT_TIMEOUT) {
+	if (WaitForSingleObjectEx(tsdPtr->condEvent, wtime, TRUE) == WAIT_TIMEOUT) {
 	    timeout = 1;
 	}
 	EnterCriticalSection(&winCondPtr->condLock);
@@ -858,6 +859,9 @@ TclpFinalizeCondition(
     }
 }
 
+
+
+
 /*
  * Additions by AOL for specialized thread memory allocator.
  */
@@ -893,7 +897,7 @@ TclpFreeAllocMutex(
 void *
 TclpGetAllocCache(void)
 {
-    VOID *result;
+    void *result;
 
     if (!once) {
 	/*
@@ -958,6 +962,49 @@ TclpFreeAllocCache(
 
 }
 #endif /* USE_THREAD_ALLOC */
+
+
+void *TclpThreadCreateKey (void) {
+    DWORD *key;
+
+    key = TclpSysAlloc(sizeof *key, 0);
+    if (key == NULL) {
+	Tcl_Panic("unable to allocate thread key!");
+    }
+
+    *key = TlsAlloc();
+
+    if (*key == TLS_OUT_OF_INDEXES) {
+	Tcl_Panic("unable to allocate thread-local storage");
+    }
+
+    return key;
+}
+
+void TclpThreadDeleteKey(void *keyPtr) {
+    DWORD *key = keyPtr;
+
+    if (!TlsFree(*key)) {
+	Tcl_Panic("unable to delete key");
+    }
+
+    TclpSysFree(keyPtr);
+}
+
+void TclpThreadSetMasterTSD(void *tsdKeyPtr, void *ptr) {
+    DWORD *key = tsdKeyPtr;
+
+    if (!TlsSetValue(*key, ptr)) {
+	Tcl_Panic("unable to set master TSD value");
+    }
+}
+
+void *TclpThreadGetMasterTSD(void *tsdKeyPtr) {
+    DWORD *key = tsdKeyPtr;
+
+    return TlsGetValue(*key);
+}
+
 #endif /* TCL_THREADS */
 
 /*

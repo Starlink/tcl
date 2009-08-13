@@ -8,7 +8,7 @@
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclWinSock.c,v 1.62 2008/02/22 11:50:54 patthoyts Exp $
+ * RCS: @(#) $Id: tclWinSock.c,v 1.64 2008/12/18 01:14:17 ferrieux Exp $
  */
 
 #include "tclWinInt.h"
@@ -168,6 +168,7 @@ static Tcl_EventProc		SocketEventProc;
 static Tcl_EventSetupProc	SocketSetupProc;
 static Tcl_DriverBlockModeProc	TcpBlockProc;
 static Tcl_DriverCloseProc	TcpCloseProc;
+static Tcl_DriverClose2Proc	TcpClose2Proc;
 static Tcl_DriverSetOptionProc	TcpSetOptionProc;
 static Tcl_DriverGetOptionProc	TcpGetOptionProc;
 static Tcl_DriverInputProc	TcpInputProc;
@@ -191,7 +192,7 @@ static Tcl_ChannelType tcpChannelType = {
     TcpGetOptionProc,	    /* Get option proc. */
     TcpWatchProc,	    /* Set up notifier to watch this channel. */
     TcpGetHandleProc,	    /* Get an OS handle from channel. */
-    NULL,		    /* close2proc. */
+    TcpClose2Proc,	    /* Close2proc. */
     TcpBlockProc,	    /* Set socket into (non-)blocking mode. */
     NULL,		    /* flush proc. */
     NULL,		    /* handler proc. */
@@ -812,6 +813,58 @@ TcpCloseProc(
      */
 
     ckfree((char *) infoPtr);
+    return errorCode;
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * TcpClose2Proc --
+ *
+ *	This function is called by the generic IO level to perform the channel
+ *	type specific part of a half-close: namely, a shutdown() on a socket.
+ *
+ * Results:
+ *	0 if successful, the value of errno if failed.
+ *
+ * Side effects:
+ *	Shuts down one side of the socket.
+ *
+ *----------------------------------------------------------------------
+ */
+
+static int
+TcpClose2Proc(
+    ClientData instanceData,	/* The socket to close. */
+    Tcl_Interp *interp,		/* For error reporting. */
+    int flags)			/* Flags that indicate which side to close. */
+{
+    SocketInfo *infoPtr = (SocketInfo *) instanceData;
+    int errorCode = 0;
+    int sd;
+
+    /*
+     * Shutdown the OS socket handle.
+     */
+    switch(flags)
+	{
+	case TCL_CLOSE_READ:
+	    sd=SD_RECEIVE;
+	    break;
+	case TCL_CLOSE_WRITE:
+	    sd=SD_SEND;
+	    break;
+	default:
+	    if (interp) {
+		Tcl_AppendResult(interp, "Socket close2proc called bidirectionally", NULL);
+	    }
+	    return TCL_ERROR;
+	}
+    if (shutdown(infoPtr->socket,sd) == SOCKET_ERROR) {
+	TclWinConvertWSAError((DWORD) WSAGetLastError());
+	errorCode = Tcl_GetErrno();
+    }
+
     return errorCode;
 }
 
@@ -1472,7 +1525,7 @@ TcpAccept(
      */
 
     if (infoPtr->acceptProc != NULL) {
-	(infoPtr->acceptProc) (infoPtr->acceptProcData, newInfoPtr->channel,
+	infoPtr->acceptProc(infoPtr->acceptProcData, newInfoPtr->channel,
 		inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
     }
 }
@@ -2121,7 +2174,7 @@ SocketThread(
     LPVOID arg)
 {
     MSG msg;
-    ThreadSpecificData *tsdPtr = (ThreadSpecificData *)(arg);
+    ThreadSpecificData *tsdPtr = (ThreadSpecificData *) arg;
 
     /*
      * Create a dummy window receiving socket events.
@@ -2362,7 +2415,7 @@ InitializeHostName(
     DWORD length = sizeof(wbuf) / sizeof(WCHAR);
     Tcl_DString ds;
 
-    if ((*tclWinProcs->getComputerNameProc)(wbuf, &length) != 0) {
+    if (tclWinProcs->getComputerNameProc(wbuf, &length) != 0) {
 	/*
 	 * Convert string from native to UTF then change to lowercase.
 	 */

@@ -10,7 +10,7 @@
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclPosixStr.c,v 1.12.10.1 2009/03/15 15:38:19 dkf Exp $
+ * RCS: @(#) $Id: tclPosixStr.c,v 1.13 2008/04/27 22:21:32 dkf Exp $
  */
 
 #include "tclInt.h"
@@ -33,7 +33,7 @@
  *----------------------------------------------------------------------
  */
 
-CONST char *
+const char *
 Tcl_ErrnoId(void)
 {
     switch (errno) {
@@ -479,7 +479,7 @@ Tcl_ErrnoId(void)
  *----------------------------------------------------------------------
  */
 
-CONST char *
+const char *
 Tcl_ErrnoMsg(
      int err)			/* Error number (such as in errno variable). */
 {
@@ -929,7 +929,7 @@ Tcl_ErrnoMsg(
  *----------------------------------------------------------------------
  */
 
-CONST char *
+const char *
 Tcl_SignalId(
      int sig)			/* Number of signal. */
 {
@@ -1039,9 +1039,6 @@ Tcl_SignalId(
 #ifdef SIGXFSZ
     case SIGXFSZ: return "SIGXFSZ";
 #endif
-#if defined(SIGINFO) && (!defined(SIGPWR) || (SIGINFO != SIGPWR))
-    case SIGINFO: return "SIGINFO";
-#endif
     }
     return "unknown signal";
 }
@@ -1063,7 +1060,7 @@ Tcl_SignalId(
  *----------------------------------------------------------------------
  */
 
-CONST char *
+const char *
 Tcl_SignalMsg(
      int sig)			/* Number of signal. */
 {
@@ -1172,9 +1169,6 @@ Tcl_SignalMsg(
 #endif
 #ifdef SIGXFSZ
     case SIGXFSZ: return "exceeded file size limit";
-#endif
-#if defined(SIGINFO) && (!defined(SIGPWR) || (SIGINFO != SIGPWR))
-    case SIGINFO: return "information request";
 #endif
     }
     return "unknown signal";

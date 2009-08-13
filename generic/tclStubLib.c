@@ -10,7 +10,7 @@
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclStubLib.c,v 1.21.2.1 2008/04/01 19:21:06 dgp Exp $
+ * RCS: @(#) $Id: tclStubLib.c,v 1.29 2008/10/22 20:23:59 nijtmans Exp $
  */
 
 /*
@@ -20,24 +20,23 @@
  * including the rest of the stub functions.
  */
 
-#ifndef USE_TCL_STUBS
 #define USE_TCL_STUBS
-#endif
-#undef USE_TCL_STUB_PROCS
 
 #include "tclInt.h"
 
-/*
- * Tcl_InitStubs and stub table pointers are built as exported symbols.
- */
+MODULE_SCOPE const TclStubs *tclStubsPtr;
+MODULE_SCOPE const TclPlatStubs *tclPlatStubsPtr;
+MODULE_SCOPE const TclIntStubs *tclIntStubsPtr;
+MODULE_SCOPE const TclIntPlatStubs *tclIntPlatStubsPtr;
+MODULE_SCOPE const TclTomMathStubs *tclTomMathStubsPtr;
 
-TclStubs *tclStubsPtr = NULL;
-TclPlatStubs *tclPlatStubsPtr = NULL;
-TclIntStubs *tclIntStubsPtr = NULL;
-TclIntPlatStubs *tclIntPlatStubsPtr = NULL;
-TclTomMathStubs* tclTomMathStubsPtr = NULL;
+const TclStubs *tclStubsPtr = NULL;
+const TclPlatStubs *tclPlatStubsPtr = NULL;
+const TclIntStubs *tclIntStubsPtr = NULL;
+const TclIntPlatStubs *tclIntPlatStubsPtr = NULL;
+const TclTomMathStubs *tclTomMathStubsPtr = NULL;
 
-static TclStubs *
+static const TclStubs *
 HasStubSupport(
     Tcl_Interp *interp)
 {
@@ -47,9 +46,9 @@ HasStubSupport(
 	return iPtr->stubTable;
     }
 
-    interp->result =
-	    "This interpreter does not support stubs-enabled extensions.";
-    interp->freeProc = TCL_STATIC;
+    iPtr->result =
+	    (char *)"This interpreter does not support stubs-enabled extensions.";
+    iPtr->freeProc = TCL_STATIC;
     return NULL;
 }
 
@@ -80,17 +79,13 @@ static int isDigit(const int c)
  *----------------------------------------------------------------------
  */
 
-#ifdef Tcl_InitStubs
-#undef Tcl_InitStubs
-#endif
-
-CONST char *
+MODULE_SCOPE const char *
 Tcl_InitStubs(
     Tcl_Interp *interp,
-    CONST char *version,
+    const char *version,
     int exact)
 {
-    CONST char *actualVersion = NULL;
+    const char *actualVersion = NULL;
     ClientData pkgData = NULL;
 
     /*
@@ -109,14 +104,14 @@ Tcl_InitStubs(
 	return NULL;
     }
     if (exact) {
-	CONST char *p = version;
+	const char *p = version;
 	int count = 0;
 
 	while (*p) {
 	    count += !isDigit(*p++);
 	}
 	if (count == 1) {
-	    CONST char *q = actualVersion;
+	    const char *q = actualVersion;
 
 	    p = version;
 	    while (*p && (*p == *q)) {
@@ -134,7 +129,7 @@ Tcl_InitStubs(
 	    }
 	}
     }
-    tclStubsPtr = (TclStubs*)pkgData;
+    tclStubsPtr = (TclStubs *) pkgData;
 
     if (tclStubsPtr->hooks) {
 	tclPlatStubsPtr = tclStubsPtr->hooks->tclPlatStubs;
@@ -166,25 +161,22 @@ Tcl_InitStubs(
  *----------------------------------------------------------------------
  */
 
-#ifdef TclTomMathInitializeStubs
-#undef TclTomMathInitializeStubs
-#endif
-
-CONST char*
+MODULE_SCOPE const char *
 TclTomMathInitializeStubs(
-    Tcl_Interp* interp,		/* Tcl interpreter */
-    CONST char* version,	/* Tcl version needed */
+    Tcl_Interp *interp,		/* Tcl interpreter */
+    const char *version,	/* Tcl version needed */
     int epoch,			/* Stubs table epoch from the header files */
-    int revision		/* Stubs table revision number from the
+    int revision)		/* Stubs table revision number from the
 				 * header files */
-) {
+{
     int exact = 0;
-    const char* packageName = "tcl::tommath";
-    const char* errMsg = NULL;
+    const char *packageName = "tcl::tommath";
+    const char *errMsg = NULL;
     ClientData pkgClientData = NULL;
-    const char* actualVersion = 
+    const char *actualVersion =
 	Tcl_PkgRequireEx(interp, packageName, version, exact, &pkgClientData);
-    TclTomMathStubs* stubsPtr = (TclTomMathStubs*) pkgClientData;
+    TclTomMathStubs *stubsPtr = pkgClientData;
+
     if (actualVersion == NULL) {
 	return NULL;
     }
@@ -200,8 +192,7 @@ TclTomMathInitializeStubs(
     }
     Tcl_ResetResult(interp);
     Tcl_AppendResult(interp, "error loading ", packageName,
-		     " (requested version ", version,
-		     ", actual version ", actualVersion,
-		     "): ", errMsg, NULL);
+	    " (requested version ", version, ", actual version ",
+	    actualVersion, "): ", errMsg, NULL);
     return NULL;
 }

@@ -5,11 +5,12 @@
  *	the real work is done in the platform dependent files.
  *
  * Copyright (c) 1998 by Sun Microsystems, Inc.
+ * Copyright (c) 2008 by George Peter Staplin
  *
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclThread.c,v 1.19 2007/12/13 15:23:20 dgp Exp $
+ * RCS: @(#) $Id: tclThread.c,v 1.21 2008/07/24 21:54:39 nijtmans Exp $
  */
 
 #include "tclInt.h"
@@ -84,21 +85,22 @@ Tcl_GetThreadData(
     /*
      * Initialize the key for this thread.
      */
-    result = TclpThreadDataKeyGet(keyPtr);
+    result = TclThreadStorageKeyGet(keyPtr);
 
     if (result == NULL) {
-	result = ckalloc((size_t) size);
-	memset(result, 0, (size_t) size);
-	TclpThreadDataKeySet(keyPtr, result);
+	result = ckalloc((size_t)size);
+	memset(result, 0, (size_t)size);
+	TclThreadStorageKeySet(keyPtr, result);
     }
 #else /* TCL_THREADS */
     if (*keyPtr == NULL) {
-	result = ckalloc((size_t) size);
-	memset(result, 0, (size_t) size);
-	*keyPtr = (Tcl_ThreadDataKey)result;
+	result = ckalloc((size_t)size);
+	memset(result, 0, (size_t)size);
+	*keyPtr = result;
 	RememberSyncObject((char *) keyPtr, &keyRecord);
+    } else {
+        result = *keyPtr;
     }
-    result = * (void **) keyPtr;
 #endif /* TCL_THREADS */
     return result;
 }
@@ -122,14 +124,13 @@ Tcl_GetThreadData(
 
 void *
 TclThreadDataKeyGet(
-    Tcl_ThreadDataKey *keyPtr)	/* Identifier for the data chunk, really
-				 * (pthread_key_t **) */
+    Tcl_ThreadDataKey *keyPtr)	/* Identifier for the data chunk. */
+
 {
 #ifdef TCL_THREADS
-    return TclpThreadDataKeyGet(keyPtr);
+    return TclThreadStorageKeyGet(keyPtr);
 #else /* TCL_THREADS */
-    char *result = *(char **) keyPtr;
-    return result;
+    return *keyPtr;
 #endif /* TCL_THREADS */
 }
 
@@ -355,7 +356,7 @@ Tcl_ConditionFinalize(
 void
 TclFinalizeThreadData(void)
 {
-    TclpFinalizeThreadDataThread();
+    TclFinalizeThreadDataThread();
 }
 
 /*
@@ -396,7 +397,7 @@ TclFinalizeSynchronization(void)
     if (keyRecord.list != NULL) {
 	for (i=0 ; i<keyRecord.num ; i++) {
 	    keyPtr = (Tcl_ThreadDataKey *) keyRecord.list[i];
-	    blockPtr = (void *) *keyPtr;
+	    blockPtr = *keyPtr;
 	    ckfree(blockPtr);
 	}
 	ckfree((char *) keyRecord.list);
@@ -404,7 +405,7 @@ TclFinalizeSynchronization(void)
     }
     keyRecord.max = 0;
     keyRecord.num = 0;
-    
+
 #ifdef TCL_THREADS
     /*
      * Call thread storage master cleanup.
@@ -495,7 +496,7 @@ void
 Tcl_ConditionWait(
     Tcl_Condition *condPtr,	/* Really (pthread_cond_t **) */
     Tcl_Mutex *mutexPtr,	/* Really (pthread_mutex_t **) */
-    Tcl_Time *timePtr)		/* Timeout on waiting period */
+    const Tcl_Time *timePtr) /* Timeout on waiting period */
 {
 }
 

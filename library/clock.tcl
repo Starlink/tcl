@@ -13,7 +13,7 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
-# RCS: @(#) $Id: clock.tcl,v 1.47.2.5 2009/01/03 04:36:53 kennykb Exp $
+# RCS: @(#) $Id: clock.tcl,v 1.51 2008/12/12 17:42:52 nijtmans Exp $
 #
 #----------------------------------------------------------------------
 
@@ -4378,8 +4378,8 @@ proc ::tcl::clock::add { clockval args } {
 		}
 		default {
 		    return -code error \
-			-errorcode [list CLOCK badSwitch $a] \
-			"bad switch \"$a\",\
+			-errorcode [list CLOCK badSwitch $flag] \
+			"bad switch \"$flag\",\
                          must be -gmt, -locale or -timezone"
 		}
 	    }

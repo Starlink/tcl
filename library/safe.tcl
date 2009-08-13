@@ -12,7 +12,7 @@
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
-# RCS: @(#) $Id: safe.tcl,v 1.16.4.1 2008/06/25 16:42:05 andreas_kupries Exp $
+# RCS: @(#) $Id: safe.tcl,v 1.17 2008/06/25 17:40:03 andreas_kupries Exp $
 
 #
 # The implementation is based on namespaces. These naming conventions
@@ -380,13 +380,13 @@ namespace eval ::safe {
 	    lappend slave_tm_path   "\$[PathToken $i]"
 	    incr i
 	}
-	Set [TmPathListName      $slave] $slave_tm_path
 	Set $nname $i
-	Set [PathListName        $slave] $access_path
+	Set [PathListName $slave] $access_path
 	Set [VirtualPathListName $slave] $slave_auto_path
+	Set [TmPathListName      $slave] $slave_tm_path
 
-	Set [StaticsOkName  $slave] $staticsok
-	Set [NestedOkName   $slave] $nestedok
+	Set [StaticsOkName $slave] $staticsok
+	Set [NestedOkName $slave] $nestedok
 	Set [DeleteHookName $slave] $deletehook
 
 	SyncAccessPath $slave
@@ -451,7 +451,7 @@ proc ::safe::interpAddToAccessPath {slave path} {
 	# NB we need to add [namespace current], aliases are always
 	# absolute paths.
 	::interp alias $slave source {} [namespace current]::AliasSource $slave
-	::interp alias $slave load   {} [namespace current]::AliasLoad $slave
+	::interp alias $slave load {} [namespace current]::AliasLoad $slave
 
 	# This alias lets the slave use the encoding names, convertfrom,
 	# convertto, and system, but not "encoding system <name>" to set
@@ -482,7 +482,7 @@ proc ::safe::interpAddToAccessPath {slave path} {
 	# Source init.tcl and tm.tcl into the slave, to get auto_load
 	# and other procedures defined:
 
-	if {[catch {::interp eval $slave \
+	if {[catch {::interp eval $slave\
 		{source [file join $tcl_library init.tcl]}} msg]} {
 	    Log $slave "can't source init.tcl ($msg)"
 	    error "can't source init.tcl into slave $slave ($msg)"

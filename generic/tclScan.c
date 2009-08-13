@@ -8,7 +8,7 @@
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclScan.c,v 1.27 2007/12/13 15:23:20 dgp Exp $
+ * RCS: @(#) $Id: tclScan.c,v 1.30 2008/12/10 18:21:47 ferrieux Exp $
  */
 
 #include "tclInt.h"
@@ -405,6 +405,7 @@ ValidateFormat(
 	case 'i':
 	case 'o':
 	case 'x':
+	case 'b':
 	    break;
 	case 'u':
 	    if (flags & SCAN_BIG) {
@@ -556,13 +557,13 @@ Tcl_ScanObjCmd(
     ClientData dummy,    	/* Not used. */
     Tcl_Interp *interp,		/* Current interpreter. */
     int objc,			/* Number of arguments. */
-    Tcl_Obj *CONST objv[])	/* Argument objects. */
+    Tcl_Obj *const objv[])	/* Argument objects. */
 {
     char *format;
     int numVars, nconversions, totalVars = -1;
     int objIndex, offset, i, result, code;
     long value;
-    CONST char *string, *end, *baseString;
+    const char *string, *end, *baseString;
     char op = 0;
     int width, underflow = 0;
     Tcl_WideInt wideValue;
@@ -575,7 +576,7 @@ Tcl_ScanObjCmd(
 
     if (objc < 3) {
 	Tcl_WrongNumArgs(interp, 1, objv,
-		"string format ?varName varName ...?");
+		"string format ?varName ...?");
 	return TCL_ERROR;
     }
 
@@ -595,7 +596,7 @@ Tcl_ScanObjCmd(
      */
 
     if (totalVars > 0) {
-	objs = (Tcl_Obj **) ckalloc(sizeof(Tcl_Obj*) * totalVars);
+	objs = (Tcl_Obj **) ckalloc(sizeof(Tcl_Obj *) * totalVars);
 	for (i = 0; i < totalVars; i++) {
 	    objs[i] = NULL;
 	}
@@ -731,6 +732,10 @@ Tcl_ScanObjCmd(
 	case 'x':
 	    op = 'i';
 	    parseFlag |= TCL_PARSE_HEXADECIMAL_ONLY;
+	    break;
+	case 'b':
+	    op = 'i';
+	    parseFlag |= TCL_PARSE_BINARY_ONLY;
 	    break;
 	case 'u':
 	    op = 'i';
@@ -1017,7 +1022,7 @@ Tcl_ScanObjCmd(
 	}
     }
     if (objs != NULL) {
-	ckfree((char*) objs);
+	ckfree((char *) objs);
     }
     if (code == TCL_OK) {
 	if (underflow && (nconversions == 0)) {
@@ -1037,7 +1042,7 @@ Tcl_ScanObjCmd(
     }
     return code;
 }
-
+
 /*
  * Local Variables:
  * mode: c

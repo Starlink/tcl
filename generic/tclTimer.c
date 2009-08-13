@@ -9,7 +9,7 @@
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclTimer.c,v 1.31 2008/01/22 20:52:10 dgp Exp $
+ * RCS: @(#) $Id: tclTimer.c,v 1.37 2008/12/09 20:16:30 dgp Exp $
  */
 
 #include "tclInt.h"
@@ -128,6 +128,14 @@ static Tcl_ThreadDataKey dataKey;
 #define TCL_TIME_DIFF_MS(t1, t2) \
     (1000*((Tcl_WideInt)(t1).sec - (Tcl_WideInt)(t2).sec) + \
 	    ((long)(t1).usec - (long)(t2).usec)/1000)
+
+/*
+ * The maximum number of milliseconds for each Tcl_Sleep call in AfterDelay.
+ * This is used to limit the maximum lag between interp limit and script
+ * cancellation checks.
+ */
+
+#define TCL_TIME_MAXIMUM_SLICE 500
 
 /*
  * Prototypes for functions referenced only in this file:
@@ -576,8 +584,8 @@ TimerHandlerEventProc(
 	 * potential reentrancy problems.
 	 */
 
-	(*nextPtrPtr) = timerHandlerPtr->nextPtr;
-	(*timerHandlerPtr->proc)(timerHandlerPtr->clientData);
+	*nextPtrPtr = timerHandlerPtr->nextPtr;
+	timerHandlerPtr->proc(timerHandlerPtr->clientData);
 	ckfree((char *) timerHandlerPtr);
     }
     TimerSetupProc(NULL, TCL_TIMER_EVENTS);
@@ -735,7 +743,7 @@ TclServiceIdle(void)
 	if (tsdPtr->idleList == NULL) {
 	    tsdPtr->lastIdlePtr = NULL;
 	}
-	(*idlePtr->proc)(idlePtr->clientData);
+	idlePtr->proc(idlePtr->clientData);
 	ckfree((char *) idlePtr);
     }
     if (tsdPtr->idleList) {
@@ -769,7 +777,7 @@ Tcl_AfterObjCmd(
     ClientData clientData,	/* Unused */
     Tcl_Interp *interp,		/* Current interpreter. */
     int objc,			/* Number of arguments. */
-    Tcl_Obj *CONST objv[])	/* Argument objects. */
+    Tcl_Obj *const objv[])	/* Argument objects. */
 {
     Tcl_WideInt ms;		/* Number of milliseconds to wait */
     Tcl_Time wakeup;
@@ -778,14 +786,14 @@ Tcl_AfterObjCmd(
     int length;
     int index;
     char buf[16 + TCL_INTEGER_SPACE];
-    static CONST char *afterSubCmds[] = {
+    static const char *const afterSubCmds[] = {
 	"cancel", "idle", "info", NULL
     };
     enum afterSubCmds {AFTER_CANCEL, AFTER_IDLE, AFTER_INFO};
     ThreadSpecificData *tsdPtr = InitTimer();
 
     if (objc < 2) {
-	Tcl_WrongNumArgs(interp, 1, objv, "option ?arg arg ...?");
+	Tcl_WrongNumArgs(interp, 1, objv, "option ?arg ...?");
 	return TCL_ERROR;
     }
 
@@ -812,7 +820,7 @@ Tcl_AfterObjCmd(
 	|| objv[1]->typePtr == &tclWideIntType
 #endif
 	|| objv[1]->typePtr == &tclBignumType
-	|| ( Tcl_GetIndexFromObj(NULL, objv[1], afterSubCmds, "", 0, 
+	|| ( Tcl_GetIndexFromObj(NULL, objv[1], afterSubCmds, "", 0,
 				 &index) != TCL_OK )) {
 	index = -1;
 	if (Tcl_GetWideIntFromObj(NULL, objv[1], &ms) != TCL_OK) {
@@ -824,7 +832,7 @@ Tcl_AfterObjCmd(
 	}
     }
 
-    /* 
+    /*
      * At this point, either index = -1 and ms contains the number of ms
      * to wait, or else index is the index of a subcommand.
      */
@@ -915,7 +923,7 @@ Tcl_AfterObjCmd(
     }
     case AFTER_IDLE:
 	if (objc < 3) {
-	    Tcl_WrongNumArgs(interp, 2, objv, "script script ...");
+	    Tcl_WrongNumArgs(interp, 2, objv, "script ?script ...?");
 	    return TCL_ERROR;
 	}
 	afterPtr = (AfterInfo *) ckalloc((unsigned) (sizeof(AfterInfo)));
@@ -980,7 +988,7 @@ Tcl_AfterObjCmd(
  *
  * Results:
  *	Standard Tcl result code (with error set if an error occurred due to a
- *	time limit being exceeded).
+ *	time limit being exceeded or being canceled).
  *
  * Side effects:
  *	May adjust the time limit granularity marker.
@@ -1008,6 +1016,14 @@ AfterDelay(
 
     do {
 	Tcl_GetTime(&now);
+	if (Tcl_AsyncReady()) {
+	    if (Tcl_AsyncInvoke(interp, TCL_OK) != TCL_OK) {
+		return TCL_ERROR;
+	    }
+	}
+	if (Tcl_Canceled(interp, TCL_LEAVE_ERR_MSG) == TCL_ERROR) {
+	    return TCL_ERROR;
+	}
 	if (iPtr->limit.timeEvent != NULL
 	    && TCL_TIME_BEFORE(iPtr->limit.time, now)) {
 	    iPtr->limit.granularityTicker = 0;
@@ -1023,6 +1039,9 @@ AfterDelay(
 		diff = LONG_MAX;
 	    }
 #endif
+	    if (diff > TCL_TIME_MAXIMUM_SLICE) {
+		diff = TCL_TIME_MAXIMUM_SLICE;
+	    }
 	    if (diff > 0) {
 		Tcl_Sleep((long)diff);
 	    }
@@ -1033,8 +1052,19 @@ AfterDelay(
 		diff = LONG_MAX;
 	    }
 #endif
+	    if (diff > TCL_TIME_MAXIMUM_SLICE) {
+		diff = TCL_TIME_MAXIMUM_SLICE;
+	    }
 	    if (diff > 0) {
 		Tcl_Sleep((long)diff);
+	    }
+	    if (Tcl_AsyncReady()) {
+		if (Tcl_AsyncInvoke(interp, TCL_OK) != TCL_OK) {
+		    return TCL_ERROR;
+		}
+	    }
+	    if (Tcl_Canceled(interp, TCL_LEAVE_ERR_MSG) == TCL_ERROR) {
+		return TCL_ERROR;
 	    }
 	    if (Tcl_LimitCheck(interp) != TCL_OK) {
 		return TCL_ERROR;
@@ -1147,7 +1177,7 @@ AfterProc(
     result = Tcl_EvalObjEx(interp, afterPtr->commandPtr, TCL_EVAL_GLOBAL);
     if (result != TCL_OK) {
 	Tcl_AddErrorInfo(interp, "\n    (\"after\" script)");
-	TclBackgroundException(interp, result);
+	Tcl_BackgroundException(interp, result);
     }
     Tcl_Release((ClientData) interp);
 

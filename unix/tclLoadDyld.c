@@ -12,7 +12,7 @@
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclLoadDyld.c,v 1.29.2.1 2009/04/10 18:10:44 das Exp $
+ * RCS: @(#) $Id: tclLoadDyld.c,v 1.30 2008/04/27 22:21:34 dkf Exp $
  */
 
 #include "tclInt.h"
@@ -112,7 +112,7 @@ MODULE_SCOPE long tclMacOSXDarwinRelease;
  *----------------------------------------------------------------------
  */
 
-static CONST char*
+static const char*
 DyldOFIErrorMsg(
     int err)
 {
@@ -198,7 +198,7 @@ TclpDlopen(
     if (tclMacOSXDarwinRelease >= 8)
 #endif
     {
-	dlHandle = dlopen(nativePath, RTLD_NOW | RTLD_GLOBAL);
+	dlHandle = dlopen(nativePath, RTLD_NOW | RTLD_LOCAL);
 	if (!dlHandle) {
 	    /*
 	     * Let the OS loader examine the binary search path for whatever
@@ -208,7 +208,7 @@ TclpDlopen(
 
 	    fileName = Tcl_GetString(pathPtr);
 	    nativeFileName = Tcl_UtfToExternalDString(NULL, fileName, -1, &ds);
-	    dlHandle = dlopen(nativeFileName, RTLD_NOW | RTLD_GLOBAL);
+	    dlHandle = dlopen(nativeFileName, RTLD_NOW | RTLD_LOCAL);
 	}
 	if (dlHandle) {
 	    TclLoadDbgMsg("dlopen() successful");
@@ -346,7 +346,7 @@ MODULE_SCOPE Tcl_PackageInitProc *
 TclpFindSymbol(
     Tcl_Interp *interp,		/* For error reporting. */
     Tcl_LoadHandle loadHandle,	/* Handle from TclpDlopen. */
-    CONST char *symbol)		/* Symbol name to look up. */
+    const char *symbol)		/* Symbol name to look up. */
 {
     Tcl_DyldLoadHandle *dyldLoadHandle = (Tcl_DyldLoadHandle *) loadHandle;
     Tcl_PackageInitProc *proc = NULL;
@@ -528,7 +528,7 @@ TclpUnloadFile(
 
 int
 TclGuessPackageName(
-    CONST char *fileName,	/* Name of file containing package (already
+    const char *fileName,	/* Name of file containing package (already
 				 * translated to local form if needed). */
     Tcl_DString *bufPtr)	/* Initialized empty dstring. Append package
 				 * name to this if possible. */

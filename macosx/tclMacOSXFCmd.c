@@ -9,7 +9,7 @@
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclMacOSXFCmd.c,v 1.12 2007/04/23 20:46:14 das Exp $
+ * RCS: @(#) $Id: tclMacOSXFCmd.c,v 1.15 2008/10/26 18:50:06 dkf Exp $
  */
 
 #include "tclInt.h"
@@ -74,7 +74,7 @@ static Tcl_Obj *	NewOSTypeObj(const OSType newOSType);
 static int		SetOSTypeFromAny(Tcl_Interp *interp, Tcl_Obj *objPtr);
 static void		UpdateStringOfOSType(Tcl_Obj *objPtr);
 
-static Tcl_ObjType tclOSTypeType = {
+static const Tcl_ObjType tclOSTypeType = {
     "osType",				/* name */
     NULL,				/* freeIntRepProc */
     NULL,				/* dupIntRepProc */
@@ -132,8 +132,8 @@ TclMacOSXGetFileAttribute(
     Tcl_StatBuf statBuf;
     struct attrlist alist;
     fileinfobuf finfo;
-    finderinfo *finder = (finderinfo*)(&finfo.data);
-    off_t *rsrcForkSize = (off_t*)(&finfo.data);
+    finderinfo *finder = (finderinfo *) &finfo.data;
+    off_t *rsrcForkSize = (off_t *) &finfo.data;
     const char *native;
 
     result = TclpObjStat(fileName, &statBuf);
@@ -224,8 +224,8 @@ TclMacOSXSetFileAttribute(
     Tcl_StatBuf statBuf;
     struct attrlist alist;
     fileinfobuf finfo;
-    finderinfo *finder = (finderinfo*)(&finfo.data);
-    off_t *rsrcForkSize = (off_t*)(&finfo.data);
+    finderinfo *finder = (finderinfo *) &finfo.data;
+    off_t *rsrcForkSize = (off_t *) &finfo.data;
     const char *native;
 
     result = TclpObjStat(fileName, &statBuf);
@@ -382,9 +382,9 @@ TclMacOSXSetFileAttribute(
 
 int
 TclMacOSXCopyFileAttributes(
-    CONST char *src,		/* Path name of source file (native). */
-    CONST char *dst,		/* Path name of target file (native). */
-    CONST Tcl_StatBuf *statBufPtr)
+    const char *src,		/* Path name of source file (native). */
+    const char *dst,		/* Path name of target file (native). */
+    const Tcl_StatBuf *statBufPtr)
 				/* Stat info for source file */
 {
 #ifdef WEAK_IMPORT_COPYFILE
@@ -405,7 +405,7 @@ TclMacOSXCopyFileAttributes(
 #ifdef HAVE_GETATTRLIST
     struct attrlist alist;
     fileinfobuf finfo;
-    off_t *rsrcForkSize = (off_t*)(&finfo.data);
+    off_t *rsrcForkSize = (off_t *) &finfo.data;
 
     bzero(&alist, sizeof(struct attrlist));
     alist.bitmapcount = ATTR_BIT_MAP_COUNT;
@@ -489,15 +489,15 @@ TclMacOSXCopyFileAttributes(
 int
 TclMacOSXMatchType(
     Tcl_Interp *interp,       /* Interpreter to receive errors. */
-    CONST char *pathName,     /* Native path to check. */
-    CONST char *fileName,     /* Native filename to check. */
+    const char *pathName,     /* Native path to check. */
+    const char *fileName,     /* Native filename to check. */
     Tcl_StatBuf *statBufPtr,  /* Stat info for file to check */
     Tcl_GlobTypeData *types)  /* Type description to match against. */
 {
 #ifdef HAVE_GETATTRLIST
     struct attrlist alist;
     fileinfobuf finfo;
-    finderinfo *finder = (finderinfo*)(&finfo.data);
+    finderinfo *finder = (finderinfo *) &finfo.data;
     OSType osType;
 
     bzero(&alist, sizeof(struct attrlist));

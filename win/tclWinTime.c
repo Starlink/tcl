@@ -9,7 +9,7 @@
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclWinTime.c,v 1.33 2005/11/04 00:06:51 dkf Exp $
+ * RCS: @(#) $Id: tclWinTime.c,v 1.35 2008/10/26 18:43:27 dkf Exp $
  */
 
 #include "tclInt.h"
@@ -158,7 +158,7 @@ TclpGetSeconds(void)
 {
     Tcl_Time t;
 
-    (*tclGetTimeProcPtr) (&t, tclTimeClientData);    /* Tcl_GetTime inlined. */
+    tclGetTimeProcPtr(&t, tclTimeClientData);	/* Tcl_GetTime inlined. */
     return t.sec;
 }
 
@@ -192,7 +192,7 @@ TclpGetClicks(void)
     Tcl_Time now;		/* Current Tcl time */
     unsigned long retval;	/* Value to return */
 
-    (*tclGetTimeProcPtr) (&now, tclTimeClientData);   /* Tcl_GetTime inlined */
+    tclGetTimeProcPtr(&now, tclTimeClientData);	/* Tcl_GetTime inlined */
 
     retval = (now.sec * 1000000) + now.usec;
     return retval;
@@ -254,7 +254,7 @@ void
 Tcl_GetTime(
     Tcl_Time *timePtr)		/* Location to store time information. */
 {
-    (*tclGetTimeProcPtr) (timePtr, tclTimeClientData);
+    tclGetTimeProcPtr(timePtr, tclTimeClientData);
 }
 
 /*
@@ -624,7 +624,7 @@ TclpGetTZName(
 
 struct tm *
 TclpGetDate(
-    CONST time_t *t,
+    const time_t *t,
     int useGMT)
 {
     struct tm *tmPtr;
@@ -1170,7 +1170,7 @@ AccumulateSample(
 
 struct tm *
 TclpGmtime(
-    CONST time_t *timePtr)	/* Pointer to the number of seconds since the
+    const time_t *timePtr)	/* Pointer to the number of seconds since the
 				 * local system's epoch */
 {
     /*
@@ -1201,9 +1201,8 @@ TclpGmtime(
 
 struct tm *
 TclpLocaltime(
-    CONST time_t *timePtr)	/* Pointer to the number of seconds since the
+    const time_t *timePtr)	/* Pointer to the number of seconds since the
 				 * local system's epoch */
-
 {
     /*
      * The MS implementation of localtime is thread safe because it returns

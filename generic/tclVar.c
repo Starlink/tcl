@@ -16,7 +16,7 @@
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclVar.c,v 1.160.2.3 2008/10/08 14:52:39 dgp Exp $
+ * RCS: @(#) $Id: tclVar.c,v 1.173 2008/12/17 16:47:38 nijtmans Exp $
  */
 
 #include "tclInt.h"
@@ -30,7 +30,7 @@ static void		FreeVarEntry(Tcl_HashEntry *hPtr);
 static int		CompareVarKeys(void *keyPtr, Tcl_HashEntry *hPtr);
 static unsigned int	HashVarKey(Tcl_HashTable *tablePtr, void *keyPtr);
 
-static Tcl_HashKeyType tclVarHashKeyType = {
+static const Tcl_HashKeyType tclVarHashKeyType = {
     TCL_HASH_KEY_TYPE_VERSION,	/* version */
     0,				/* flags */
     HashVarKey,			/* hashKeyProc */
@@ -67,19 +67,10 @@ VarHashCreateVar(
 
 #define VarHashFindVar(tablePtr, key) \
     VarHashCreateVar((tablePtr), (key), NULL)
-#ifdef _AIX
-/* Work around AIX cc problem causing crash in TclDeleteVars. Possible
- * optimizer bug. Do _NOT_ inline this function, this re-activates the
- * problem.
- */
-static void
-VarHashInvalidateEntry(Var* varPtr) {
-    varPtr->flags |= VAR_DEAD_HASH;
-}
-#else
+
 #define VarHashInvalidateEntry(varPtr) \
     ((varPtr)->flags |= VAR_DEAD_HASH)
-#endif
+
 #define VarHashDeleteEntry(varPtr) \
     Tcl_DeleteHashEntry(&(((VarInHash *) varPtr)->entry))
 
@@ -210,7 +201,7 @@ static Tcl_SetFromAnyProc	PanicOnSetVarName;
  *			Tcl_Obj), or NULL if it is a scalar variable
  */
 
-static Tcl_ObjType localVarNameType = {
+static const Tcl_ObjType localVarNameType = {
     "localVarName",
     FreeLocalVarName, DupLocalVarName, PanicOnUpdateVarName, PanicOnSetVarName
 };
@@ -228,13 +219,13 @@ static Tcl_ObjType localVarNameType = {
 static Tcl_FreeInternalRepProc FreeNsVarName;
 static Tcl_DupInternalRepProc DupNsVarName;
 
-static Tcl_ObjType tclNsVarNameType = {
+static const Tcl_ObjType tclNsVarNameType = {
     "namespaceVarName",
     FreeNsVarName, DupNsVarName, PanicOnUpdateVarName, PanicOnSetVarName
 };
 #endif
 
-static Tcl_ObjType tclParsedVarNameType = {
+static const Tcl_ObjType tclParsedVarNameType = {
     "parsedVarName",
     FreeParsedVarName, DupParsedVarName, UpdateParsedVarName, PanicOnSetVarName
 };
@@ -251,7 +242,7 @@ static Tcl_ObjType tclParsedVarNameType = {
  * as this can be safely copied.
  */
 
-Tcl_ObjType tclArraySearchType = {
+const Tcl_ObjType tclArraySearchType = {
     "array search",
     NULL, NULL, NULL, SetArraySearchObj
 };
@@ -903,7 +894,7 @@ TclLookupSimpleVar(
 	    && !(flags & AVOID_RESOLVERS)) {
 	resPtr = iPtr->resolverPtr;
 	if (cxtNsPtr->varResProc) {
-	    result = (*cxtNsPtr->varResProc)(interp, varName,
+	    result = cxtNsPtr->varResProc(interp, varName,
 		    (Tcl_Namespace *) cxtNsPtr, flags, &var);
 	} else {
 	    result = TCL_CONTINUE;
@@ -911,7 +902,7 @@ TclLookupSimpleVar(
 
 	while (result == TCL_CONTINUE && resPtr) {
 	    if (resPtr->varResProc) {
-		result = (*resPtr->varResProc)(interp, varName,
+		result = resPtr->varResProc(interp, varName,
 			(Tcl_Namespace *) cxtNsPtr, flags, &var);
 	    }
 	    resPtr = resPtr->nextPtr;
@@ -2522,7 +2513,7 @@ Tcl_AppendObjCmd(
     int i;
 
     if (objc < 2) {
-	Tcl_WrongNumArgs(interp, 1, objv, "varName ?value value ...?");
+	Tcl_WrongNumArgs(interp, 1, objv, "varName ?value ...?");
 	return TCL_ERROR;
     }
 
@@ -2587,7 +2578,7 @@ Tcl_LappendObjCmd(
     int result;
 
     if (objc < 2) {
-	Tcl_WrongNumArgs(interp, 1, objv, "varName ?value value ...?");
+	Tcl_WrongNumArgs(interp, 1, objv, "varName ?value ...?");
 	return TCL_ERROR;
     }
     if (objc == 2) {
@@ -2732,7 +2723,7 @@ Tcl_ArrayObjCmd(
 	ARRAY_NAMES, ARRAY_NEXTELEMENT, ARRAY_SET, ARRAY_SIZE,
 	ARRAY_STARTSEARCH, ARRAY_STATISTICS, ARRAY_UNSET
     };
-    static const char *arrayOptions[] = {
+    static const char *const arrayOptions[] = {
 	"anymore", "donesearch", "exists", "get", "names", "nextelement",
 	"set", "size", "startsearch", "statistics", "unset", NULL
     };
@@ -3060,7 +3051,7 @@ Tcl_ArrayObjCmd(
 	char *name;
 	Tcl_Obj *namePtr, *resultPtr, *patternPtr;
 	int mode, matched = 0;
-	static const char *options[] = {
+	static const char *const options[] = {
 	    "-exact", "-glob", "-regexp", NULL
 	};
 	enum options { OPT_EXACT, OPT_GLOB, OPT_REGEXP };
@@ -3223,7 +3214,7 @@ Tcl_ArrayObjCmd(
     }
 
     case ARRAY_STATISTICS: {
-	const char *stats;
+	char *stats;
 
 	if (notArray) {
 	    goto error;
@@ -3232,7 +3223,7 @@ Tcl_ArrayObjCmd(
 	stats = Tcl_HashStats((Tcl_HashTable *) varPtr->value.tablePtr);
 	if (stats != NULL) {
 	    Tcl_SetObjResult(interp, Tcl_NewStringObj(stats, -1));
-	    ckfree((void *)stats);
+	    ckfree((char *)stats);
 	} else {
 	    Tcl_SetResult(interp,"error reading array statistics",TCL_STATIC);
 	    return TCL_ERROR;
@@ -3842,11 +3833,6 @@ Tcl_GlobalObjCmd(
     register char *tail;
     int result, i;
 
-    if (objc < 2) {
-	Tcl_WrongNumArgs(interp, 1, objv, "varName ?varName ...?");
-	return TCL_ERROR;
-    }
-
     /*
      * If we are not executing inside a Tcl procedure, just return.
      */
@@ -3951,11 +3937,6 @@ Tcl_VariableObjCmd(
     Tcl_Obj *varValuePtr;
     int i, result;
     Tcl_Obj *varNamePtr, *tailPtr;
-
-    if (objc < 2) {
-	Tcl_WrongNumArgs(interp, 1, objv, "?name value...? name ?value?");
-	return TCL_ERROR;
-    }
 
     for (i=1 ; i<objc ; i+=2) {
 	/*
@@ -4370,7 +4351,7 @@ TclDeleteNamespaceVars(
 	    varPtr = VarHashFirstVar(tablePtr, &search)) {
 	Tcl_Obj *objPtr = Tcl_NewObj();
 	Tcl_IncrRefCount(objPtr);
-	
+
 	VarHashRefCount(varPtr)++;	/* Make sure we get to remove from
 					 * hash. */
 	Tcl_GetVariableFullName(interp, (Tcl_Var) varPtr, objPtr);
@@ -4960,7 +4941,7 @@ ObjFindNamespaceVar(
 	resPtr = iPtr->resolverPtr;
 
 	if (cxtNsPtr->varResProc) {
-	    result = (*cxtNsPtr->varResProc)(interp, name,
+	    result = cxtNsPtr->varResProc(interp, name,
 		    (Tcl_Namespace *) cxtNsPtr, flags, &var);
 	} else {
 	    result = TCL_CONTINUE;
@@ -4968,7 +4949,7 @@ ObjFindNamespaceVar(
 
 	while (result == TCL_CONTINUE && resPtr) {
 	    if (resPtr->varResProc) {
-		result = (*resPtr->varResProc)(interp, name,
+		result = resPtr->varResProc(interp, name,
 			(Tcl_Namespace *) cxtNsPtr, flags, &var);
 	    }
 	    resPtr = resPtr->nextPtr;

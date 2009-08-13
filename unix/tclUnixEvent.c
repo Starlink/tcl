@@ -8,12 +8,10 @@
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclUnixEvent.c,v 1.9.10.1 2009/04/10 18:02:42 das Exp $
+ * RCS: @(#) $Id: tclUnixEvent.c,v 1.10 2008/10/26 12:45:04 dkf Exp $
  */
 
 #include "tclInt.h"
-#ifndef HAVE_COREFOUNDATION	/* Darwin/Mac OS X CoreFoundation notifier is
-				 * in tclMacOSXNotify.c */
 
 /*
  *----------------------------------------------------------------------
@@ -66,7 +64,7 @@ Tcl_Sleep(
 	}
 
 	if ((vdelay.sec != 0) || (vdelay.usec != 0)) {
-	    (*tclScaleTimeProcPtr) (&vdelay, tclTimeClientData);
+	    tclScaleTimeProcPtr(&vdelay, tclTimeClientData);
 	}
 
 	delay.tv_sec  = vdelay.sec;
@@ -87,7 +85,6 @@ Tcl_Sleep(
     }
 }
 
-#endif /* HAVE_COREFOUNDATION */
 /*
  * Local Variables:
  * mode: c

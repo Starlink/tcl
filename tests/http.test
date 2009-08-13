@@ -12,7 +12,7 @@
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
 #
 #
-# RCS: @(#) $Id: http.test,v 1.48.2.2 2009/04/10 13:15:57 dgp Exp $
+# RCS: @(#) $Id: http.test,v 1.49 2008/12/09 22:38:05 patthoyts Exp $
 
 if {[lsearch [namespace children] ::tcltest] == -1} {
     package require tcltest 2

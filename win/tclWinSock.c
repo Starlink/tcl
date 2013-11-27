@@ -968,7 +968,7 @@ CreateSocket(
      * Set kernel space buffering
      */
 
-    TclSockMinimumBuffers((int) sock, TCP_BUFFER_SIZE);
+    TclSockMinimumBuffers((void *)sock, TCP_BUFFER_SIZE);
 
     if (server) {
 	/*
@@ -1129,7 +1129,7 @@ CreateSocketAddress(
 
     ZeroMemory(sockaddrPtr, sizeof(SOCKADDR_IN));
     sockaddrPtr->sin_family = AF_INET;
-    sockaddrPtr->sin_port = htons((u_short) (port & 0xFFFF));
+    sockaddrPtr->sin_port = htons((unsigned short) (port & 0xFFFF));
     if (host == NULL) {
 	addr.s_addr = INADDR_ANY;
     } else {
@@ -1273,7 +1273,7 @@ Tcl_OpenTcpClient(
 	return NULL;
     }
 
-    wsprintfA(channelName, "sock%d", infoPtr->socket);
+    sprintf(channelName, "sock%" TCL_I_MODIFIER "u", (size_t)infoPtr->socket);
 
     infoPtr->channel = Tcl_CreateChannel(&tcpChannelType, channelName,
 	    (ClientData) infoPtr, (TCL_READABLE | TCL_WRITABLE));
@@ -1326,7 +1326,7 @@ Tcl_MakeTcpClientChannel(
      * Set kernel space buffering and non-blocking.
      */
 
-    TclSockMinimumBuffers(PTR2INT(sock), TCP_BUFFER_SIZE);
+    TclSockMinimumBuffers(sock, TCP_BUFFER_SIZE);
 
     infoPtr = NewSocketInfo((SOCKET) sock);
 
@@ -1338,7 +1338,7 @@ Tcl_MakeTcpClientChannel(
     SendMessage(tsdPtr->hwnd, SOCKET_SELECT,
 	    (WPARAM) SELECT, (LPARAM) infoPtr);
 
-    wsprintfA(channelName, "sock%d", infoPtr->socket);
+    sprintf(channelName, "sock%" TCL_I_MODIFIER "u", (size_t)infoPtr->socket);
     infoPtr->channel = Tcl_CreateChannel(&tcpChannelType, channelName,
 	    (ClientData) infoPtr, (TCL_READABLE | TCL_WRITABLE));
     Tcl_SetChannelOption(NULL, infoPtr->channel, "-translation", "auto crlf");
@@ -1391,7 +1391,7 @@ Tcl_OpenTcpServer(
     infoPtr->acceptProc = acceptProc;
     infoPtr->acceptProcData = acceptProcData;
 
-    wsprintfA(channelName, "sock%d", infoPtr->socket);
+    sprintf(channelName, "sock%" TCL_I_MODIFIER "u", (size_t)infoPtr->socket);
 
     infoPtr->channel = Tcl_CreateChannel(&tcpChannelType, channelName,
 	    (ClientData) infoPtr, 0);
@@ -1497,7 +1497,7 @@ TcpAccept(
     SendMessage(tsdPtr->hwnd, SOCKET_SELECT,
 	    (WPARAM) SELECT, (LPARAM) newInfoPtr);
 
-    wsprintfA(channelName, "sock%d", newInfoPtr->socket);
+    sprintf(channelName, "sock%" TCL_I_MODIFIER "u", (size_t)newInfoPtr->socket);
     newInfoPtr->channel = Tcl_CreateChannel(&tcpChannelType, channelName,
 	    (ClientData) newInfoPtr, (TCL_READABLE | TCL_WRITABLE));
     if (Tcl_SetChannelOption(NULL, newInfoPtr->channel, "-translation",
@@ -2431,22 +2431,18 @@ InitializeHostName(
 	Tcl_DStringInit(&ds);
 	if (TclpHasSockets(NULL) == TCL_OK) {
 	    /*
-	     * Buffer length of 255 copied slavishly from previous version of
-	     * this routine. Presumably there's a more "correct" macro value
-	     * for a properly sized buffer for a gethostname() call.
-	     * Maintainers are welcome to supply it.
+	     * The buffer size of 256 is recommended by the MSDN page that
+	     * documents gethostname() as being always adequate.
 	     */
 
 	    Tcl_DString inDs;
 
 	    Tcl_DStringInit(&inDs);
-	    Tcl_DStringSetLength(&inDs, 255);
+	    Tcl_DStringSetLength(&inDs, 256);
 	    if (gethostname(Tcl_DStringValue(&inDs),
-			    Tcl_DStringLength(&inDs)) == 0) {
-		Tcl_DStringSetLength(&ds, 0);
-	    } else {
-		Tcl_ExternalToUtfDString(NULL,
-			Tcl_DStringValue(&inDs), -1, &ds);
+		    Tcl_DStringLength(&inDs)) == 0) {
+		Tcl_ExternalToUtfDString(NULL, Tcl_DStringValue(&inDs), -1,
+			&ds);
 	    }
 	    Tcl_DStringFree(&inDs);
 	}
@@ -2479,12 +2475,8 @@ InitializeHostName(
  */
 
 int
-TclWinGetSockOpt(
-    int s,
-    int level,
-    int optname,
-    char * optval,
-    int FAR *optlen)
+TclWinGetSockOpt(SOCKET s, int level, int optname, char *optval,
+	int *optlen)
 {
     /*
      * Check that WinSock is initialized; do not call it if not, to prevent
@@ -2496,15 +2488,11 @@ TclWinGetSockOpt(
 	return SOCKET_ERROR;
     }
 
-    return getsockopt((SOCKET)s, level, optname, optval, optlen);
+    return getsockopt(s, level, optname, optval, optlen);
 }
 
 int
-TclWinSetSockOpt(
-    int s,
-    int level,
-    int optname,
-    const char * optval,
+TclWinSetSockOpt(SOCKET s, int level, int optname, const char *optval,
     int optlen)
 {
     /*
@@ -2517,12 +2505,28 @@ TclWinSetSockOpt(
 	return SOCKET_ERROR;
     }
 
-    return setsockopt((SOCKET)s, level, optname, optval, optlen);
+    return setsockopt(s, level, optname, optval, optlen);
 }
 
-u_short
-TclWinNToHS(
-    u_short netshort)
+unsigned short
+TclWinNToHS(unsigned short netshort)
+{
+    /*
+     * Check that WinSock is initialized; do not call it if not, to
+     * prevent system crashes. This can happen at exit time if the exit
+     * handler for WinSock ran before other exit handlers that want to
+     * use sockets.
+     */
+
+    if (!SocketsEnabled()) {
+        return (unsigned short) -1;
+    }
+
+    return ntohs(netshort);
+}
+
+char *
+TclpInetNtoa(struct in_addr addr)
 {
     /*
      * Check that WinSock is initialized; do not call it if not, to prevent
@@ -2531,10 +2535,10 @@ TclWinNToHS(
      */
 
     if (!SocketsEnabled()) {
-	return (u_short) -1;
+        return NULL;
     }
 
-    return ntohs(netshort);
+    return inet_ntoa(addr);
 }
 
 struct servent *

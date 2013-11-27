@@ -14,9 +14,20 @@
 #ifndef _TCLWINPORT
 #define _TCLWINPORT
 
+#ifndef _WIN64
+/* See [Bug 2935503]: file mtime sets wrong time */
+#   define _USE_32BIT_TIME_T
+#endif
+
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #undef WIN32_LEAN_AND_MEAN
+
+/* Compatibility to older visual studio / windows platform SDK */
+#if !defined(MAXULONG_PTR)
+typedef DWORD DWORD_PTR;
+typedef DWORD_PTR * PDWORD_PTR;
+#endif
 
 /*
  * Ask for the winsock function typedefs, also.
@@ -40,12 +51,7 @@
  *---------------------------------------------------------------------------
  */
 
-#ifdef __CYGWIN__
-#   include <unistd.h>
-#   include <wchar.h>
-#else
-#   include <io.h>
-#endif
+#include <io.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -57,18 +63,11 @@
 #include <string.h>
 #include <limits.h>
 
-#ifdef __CYGWIN__
-#   include <unistd.h>
-#   ifndef _wcsicmp
-#	define _wcsicmp wcscasecmp
-#   endif
-#else
-#   ifndef strncasecmp
-#	define strncasecmp strnicmp
-#   endif
-#   ifndef strcasecmp
-#	define strcasecmp stricmp
-#   endif
+#ifndef strncasecmp
+#   define strncasecmp strnicmp
+#endif
+#ifndef strcasecmp
+#   define strcasecmp stricmp
 #endif
 
 /*
@@ -101,31 +100,6 @@
 
 #undef ENOTSUP
 #define ENOTSUP	-1030507
-
-/*
- * Not all mingw32 versions have this struct.
- */
-#if !defined(__BORLANDC__) && !defined(_MSC_VER) && !defined(_WIN64) && defined(HAVE_NO_STRUCT_STAT32I64)
-  struct _stat32i64 {
-    dev_t st_dev;
-    ino_t st_ino;
-    unsigned short st_mode;
-    short st_nlink;
-    short st_uid;
-    short st_gid;
-    dev_t st_rdev;
-    __int64 st_size;
-#ifdef __CYGWIN__
-    struct {long tv_sec;} st_atim;
-    struct {long tv_sec;} st_mtim;
-    struct {long tv_sec;} st_ctim;
-#else
-    long st_atime;
-    long st_mtime;
-    long st_ctime;
-#endif
-  };
-#endif
 
 /* Those codes, from Visual Studio 2010, conflict with other values */
 #undef ENODATA
@@ -397,11 +371,6 @@
 #endif /* __BORLANDC__ */
 
 #ifdef __WATCOMC__
-    /*
-     * OpenWatcom uses a wine derived winsock2.h that is missing the
-     * LPFN_* typedefs.
-     */
-#   define HAVE_NO_LPFN_DECLS
 #   if !defined(__CHAR_SIGNED__)
 #	error "You must use the -j switch to ensure char is signed."
 #   endif
@@ -464,7 +433,7 @@
 /*
  * Older version of Mingw are known to lack a MWMO_ALERTABLE define.
  */
-#if defined(HAVE_NO_MWMO_ALERTABLE)
+#if !defined(MWMO_ALERTABLE)
 #   define MWMO_ALERTABLE 2
 #endif
 
@@ -473,18 +442,12 @@
  * use by tclAlloc.c.
  */
 
-#ifdef __CYGWIN__
-#   define TclpSysAlloc(size, isBin)	malloc((size))
-#   define TclpSysFree(ptr)		free((ptr))
-#   define TclpSysRealloc(ptr, size)	realloc((ptr), (size))
-#else
-#   define TclpSysAlloc(size, isBin)	((void*)HeapAlloc(GetProcessHeap(), \
+#define TclpSysAlloc(size, isBin)	((void*)HeapAlloc(GetProcessHeap(), \
 					    (DWORD)0, (DWORD)size))
-#   define TclpSysFree(ptr)		(HeapFree(GetProcessHeap(), \
+#define TclpSysFree(ptr)		(HeapFree(GetProcessHeap(), \
 					    (DWORD)0, (HGLOBAL)ptr))
-#   define TclpSysRealloc(ptr, size)	((void*)HeapReAlloc(GetProcessHeap(), \
+#define TclpSysRealloc(ptr, size)	((void*)HeapReAlloc(GetProcessHeap(), \
 					    (DWORD)0, (LPVOID)ptr, (DWORD)size))
-#endif
 
 /*
  * The following defines map from standard socket names to our internal
@@ -517,5 +480,9 @@
 #ifndef INVALID_SET_FILE_POINTER
 #define INVALID_SET_FILE_POINTER 0xFFFFFFFF
 #endif /* INVALID_SET_FILE_POINTER */
+
+#ifndef LABEL_SECURITY_INFORMATION
+#   define LABEL_SECURITY_INFORMATION (0x00000010L)
+#endif
 
 #endif /* _TCLWINPORT */

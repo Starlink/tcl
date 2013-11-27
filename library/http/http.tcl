@@ -11,7 +11,7 @@
 package require Tcl 8.4
 # Keep this in sync with pkgIndex.tcl and with the install directories in
 # Makefiles
-package provide http 2.7.7
+package provide http 2.7.9
 
 namespace eval http {
     # Allow resourcing to not clobber existing data
@@ -37,11 +37,11 @@ namespace eval http {
 	for {set i 0} {$i <= 256} {incr i} {
 	    set c [format %c $i]
 	    if {![string match {[-._~a-zA-Z0-9]} $c]} {
-		set map($c) %[format %.2x $i]
+		set map($c) %[format %.2X $i]
 	    }
 	}
 	# These are handled specially
-	set map(\n) %0d%0a
+	set map(\n) %0D%0A
 	variable formMap [array get map]
 
 	# Create a map for HTTP/1.1 open sockets
@@ -863,12 +863,12 @@ proc http::cleanup {token} {
 proc http::Connect {token} {
     variable $token
     upvar 0 $token state
-    global errorInfo errorCode
+    set err "due to unexpected EOF"
     if {
 	[eof $state(sock)] ||
-	[string length [fconfigure $state(sock) -error]]
+	[set err [fconfigure $state(sock) -error]] ne ""
     } then {
-	Finish $token "connect failed [fconfigure $state(sock) -error]" 1
+	Finish $token "connect failed $err" 1
     } else {
 	set state(status) connect
 	fileevent $state(sock) writable {}

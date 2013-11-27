@@ -116,7 +116,7 @@ long		tclObjsShared[TCL_MAX_SHARED_OBJ_STATS] = { 0, 0, 0, 0, 0 };
  */
 
 typedef struct {
-    char *name;		/* Name of function. */
+    const char *name;		/* Name of function. */
     int numArgs;	/* Number of arguments for function. */
 } BuiltinFunc;
 
@@ -126,7 +126,7 @@ typedef struct {
  * operand byte.
  */
 
-static BuiltinFunc tclBuiltinFuncTable[] = {
+static const BuiltinFunc tclBuiltinFuncTable[] = {
     {"acos", 1},
     {"asin", 1},
     {"atan", 1},
@@ -153,7 +153,7 @@ static BuiltinFunc tclBuiltinFuncTable[] = {
     {"round", 1},
     {"srand", 1},
     {"wide", 1},
-    {0},
+    {NULL, 0},
 };
 
 #define LAST_BUILTIN_FUNC	25

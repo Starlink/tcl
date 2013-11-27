@@ -397,7 +397,7 @@ InstructionDesc tclInstructionTable[] = {
 	 * stknext */
     {"existStk",	 1,    0,         0,	{OPERAND_NONE}},
 	/* Test if general variable exists; unparsed variable name is stktop*/
-    {0}
+    {0, 0, 0, 0, {0}}
 };
 
 /*
@@ -4091,12 +4091,13 @@ RecordByteCodeStats(
 				 * to add to accumulated statistics. */
 {
     Interp *iPtr = (Interp *) *codePtr->interpHandle;
-    register ByteCodeStats *statsPtr = &(iPtr->stats);
+    register ByteCodeStats *statsPtr;
 
     if (iPtr == NULL) {
 	/* Avoid segfaulting in case we're called in a deleted interp */
 	return;
     }
+    statsPtr = &(iPtr->stats);
 
     statsPtr->numCompilations++;
     statsPtr->totalSrcBytes += (double) codePtr->numSrcBytes;

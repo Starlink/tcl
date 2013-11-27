@@ -438,10 +438,10 @@ EXTERN void		TclSetupEnv(Tcl_Interp *interp);
 EXTERN int		TclSockGetPort(Tcl_Interp *interp, CONST char *str,
 				CONST char *proto, int *portPtr);
 #endif
-#ifndef TclSockMinimumBuffers_TCL_DECLARED
-#define TclSockMinimumBuffers_TCL_DECLARED
+#ifndef TclSockMinimumBuffersOld_TCL_DECLARED
+#define TclSockMinimumBuffersOld_TCL_DECLARED
 /* 104 */
-EXTERN int		TclSockMinimumBuffers(int sock, int size);
+EXTERN int		TclSockMinimumBuffersOld(int sock, int size);
 #endif
 /* Slot 105 is reserved */
 /* Slot 106 is reserved */
@@ -456,7 +456,11 @@ EXTERN void		TclTeardownNamespace(Namespace *nsPtr);
 /* 109 */
 EXTERN int		TclUpdateReturnInfo(Interp *iPtr);
 #endif
-/* Slot 110 is reserved */
+#ifndef TclSockMinimumBuffers_TCL_DECLARED
+#define TclSockMinimumBuffers_TCL_DECLARED
+/* 110 */
+EXTERN int		TclSockMinimumBuffers(VOID *sock, int size);
+#endif
 #ifndef Tcl_AddInterpResolvers_TCL_DECLARED
 #define Tcl_AddInterpResolvers_TCL_DECLARED
 /* 111 */
@@ -811,7 +815,7 @@ EXTERN void		TclVarErrMsg(Tcl_Interp *interp, CONST char *part1,
 #define Tcl_SetStartupScript_TCL_DECLARED
 /* 178 */
 EXTERN void		Tcl_SetStartupScript(Tcl_Obj *pathPtr,
-				CONST char*encodingName);
+				CONST char *encodingName);
 #endif
 #ifndef Tcl_GetStartupScript_TCL_DECLARED
 #define Tcl_GetStartupScript_TCL_DECLARED
@@ -1046,8 +1050,8 @@ EXTERN void		TclDbDumpActiveObjects(FILE *outFile);
 #ifndef TclDoubleDigits_TCL_DECLARED
 #define TclDoubleDigits_TCL_DECLARED
 /* 249 */
-EXTERN char*		TclDoubleDigits(double dv, int ndigits, int flags,
-				int*decpt, int*signum, char**endPtr);
+EXTERN char *		TclDoubleDigits(double dv, int ndigits, int flags,
+				int *decpt, int *signum, char **endPtr);
 #endif
 
 typedef struct TclIntStubs {
@@ -1158,13 +1162,13 @@ typedef struct TclIntStubs {
     char * (*tclSetPreInitScript) (char *string); /* 101 */
     void (*tclSetupEnv) (Tcl_Interp *interp); /* 102 */
     int (*tclSockGetPort) (Tcl_Interp *interp, CONST char *str, CONST char *proto, int *portPtr); /* 103 */
-    int (*tclSockMinimumBuffers) (int sock, int size); /* 104 */
+    int (*tclSockMinimumBuffersOld) (int sock, int size); /* 104 */
     VOID *reserved105;
     VOID *reserved106;
     VOID *reserved107;
     void (*tclTeardownNamespace) (Namespace *nsPtr); /* 108 */
     int (*tclUpdateReturnInfo) (Interp *iPtr); /* 109 */
-    VOID *reserved110;
+    int (*tclSockMinimumBuffers) (VOID *sock, int size); /* 110 */
     void (*tcl_AddInterpResolvers) (Tcl_Interp *interp, CONST char *name, Tcl_ResolveCmdProc *cmdProc, Tcl_ResolveVarProc *varProc, Tcl_ResolveCompiledVarProc *compiledVarProc); /* 111 */
     int (*tcl_AppendExportList) (Tcl_Interp *interp, Tcl_Namespace *nsPtr, Tcl_Obj *objPtr); /* 112 */
     Tcl_Namespace * (*tcl_CreateNamespace) (Tcl_Interp *interp, CONST char *name, ClientData clientData, Tcl_NamespaceDeleteProc *deleteProc); /* 113 */
@@ -1232,7 +1236,7 @@ typedef struct TclIntStubs {
     int (*tclCallVarTraces) (Interp *iPtr, Var *arrayPtr, Var *varPtr, CONST char *part1, CONST char *part2, int flags, int leaveErrMsg); /* 175 */
     void (*tclCleanupVar) (Var *varPtr, Var *arrayPtr); /* 176 */
     void (*tclVarErrMsg) (Tcl_Interp *interp, CONST char *part1, CONST char *part2, CONST char *operation, CONST char *reason); /* 177 */
-    void (*tcl_SetStartupScript) (Tcl_Obj *pathPtr, CONST char*encodingName); /* 178 */
+    void (*tcl_SetStartupScript) (Tcl_Obj *pathPtr, CONST char *encodingName); /* 178 */
     Tcl_Obj * (*tcl_GetStartupScript) (CONST char **encodingNamePtr); /* 179 */
     VOID *reserved180;
     VOID *reserved181;
@@ -1303,7 +1307,7 @@ typedef struct TclIntStubs {
     VOID *reserved246;
     VOID *reserved247;
     VOID *reserved248;
-    char* (*tclDoubleDigits) (double dv, int ndigits, int flags, int*decpt, int*signum, char**endPtr); /* 249 */
+    char * (*tclDoubleDigits) (double dv, int ndigits, int flags, int *decpt, int *signum, char **endPtr); /* 249 */
 } TclIntStubs;
 
 #ifdef __cplusplus
@@ -1598,9 +1602,9 @@ extern TclIntStubs *tclIntStubsPtr;
 #define TclSockGetPort \
 	(tclIntStubsPtr->tclSockGetPort) /* 103 */
 #endif
-#ifndef TclSockMinimumBuffers
-#define TclSockMinimumBuffers \
-	(tclIntStubsPtr->tclSockMinimumBuffers) /* 104 */
+#ifndef TclSockMinimumBuffersOld
+#define TclSockMinimumBuffersOld \
+	(tclIntStubsPtr->tclSockMinimumBuffersOld) /* 104 */
 #endif
 /* Slot 105 is reserved */
 /* Slot 106 is reserved */
@@ -1613,7 +1617,10 @@ extern TclIntStubs *tclIntStubsPtr;
 #define TclUpdateReturnInfo \
 	(tclIntStubsPtr->tclUpdateReturnInfo) /* 109 */
 #endif
-/* Slot 110 is reserved */
+#ifndef TclSockMinimumBuffers
+#define TclSockMinimumBuffers \
+	(tclIntStubsPtr->tclSockMinimumBuffers) /* 110 */
+#endif
 #ifndef Tcl_AddInterpResolvers
 #define Tcl_AddInterpResolvers \
 	(tclIntStubsPtr->tcl_AddInterpResolvers) /* 111 */
@@ -2036,6 +2043,12 @@ extern TclIntStubs *tclIntStubsPtr;
 #endif /* defined(USE_TCL_STUBS) && !defined(USE_TCL_STUB_PROCS) */
 
 /* !END!: Do not edit above this line. */
+
+#if !defined(_WIN64)
+/* See bug 510001: TclSockMinimumBuffers needs plat imp */
+#   undef TclSockMinimumBuffers
+#   define TclSockMinimumBuffers(a,b) TclSockMinimumBuffersOld(PTR2INT(a),b)
+#endif
 
 #undef TCL_STORAGE_CLASS
 #define TCL_STORAGE_CLASS DLLIMPORT

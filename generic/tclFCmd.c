@@ -10,6 +10,11 @@
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  */
 
+#ifndef _WIN64
+/* See [Bug 2935503]: file mtime sets wrong time */
+#   define _USE_32BIT_TIME_T
+#endif
+
 #include "tclInt.h"
 
 /*
@@ -526,7 +531,7 @@ CopyRenameOneFile(
 	 * 16 bits and we get collisions. See bug #2015723.
 	 */
 
-#ifndef WIN32
+#if !defined(WIN32) && !defined(__CYGWIN__)
 	if ((sourceStatBuf.st_ino != 0) && (targetStatBuf.st_ino != 0)) {
 	    if ((sourceStatBuf.st_ino == targetStatBuf.st_ino) &&
 		    (sourceStatBuf.st_dev == targetStatBuf.st_dev)) {

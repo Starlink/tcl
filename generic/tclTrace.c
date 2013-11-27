@@ -110,10 +110,10 @@ static Tcl_TraceTypeObjCmd TraceExecutionObjCmd;
 static const char *traceTypeOptions[] = {
     "execution", "command", "variable", NULL
 };
-static Tcl_TraceTypeObjCmd *traceSubCmds[] = {
+static Tcl_TraceTypeObjCmd *const traceSubCmds[] = {
     TraceExecutionObjCmd,
     TraceCommandObjCmd,
-    TraceVariableObjCmd,
+    TraceVariableObjCmd
 };
 
 /*
@@ -1122,8 +1122,18 @@ Tcl_TraceCommand(
     tracePtr->refCount = 1;
     cmdPtr->tracePtr = tracePtr;
     if (tracePtr->flags & TCL_TRACE_ANY_EXEC) {
+	/*
+	 * Bug 3484621: up the interp's epoch if this is a BC'ed command
+	 */
+	
+	if ((cmdPtr->compileProc != NULL) && !(cmdPtr->flags & CMD_HAS_EXEC_TRACES)){
+	    Interp *iPtr = (Interp *) interp;
+	    iPtr->compileEpoch++;
+	}
 	cmdPtr->flags |= CMD_HAS_EXEC_TRACES;
     }
+
+    
     return TCL_OK;
 }
 
@@ -1226,6 +1236,15 @@ Tcl_UntraceCommand(
 	 */
 
 	cmdPtr->flags &= ~CMD_HAS_EXEC_TRACES;
+
+        /*
+	 * Bug 3484621: up the interp's epoch if this is a BC'ed command
+	 */
+	
+	if (cmdPtr->compileProc != NULL) {
+	    Interp *iPtr = (Interp *) interp;
+	    iPtr->compileEpoch++;
+	}
     }
 }
 

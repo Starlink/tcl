@@ -414,9 +414,17 @@ TclpGetNativePathType(
 	    }
 #endif
 	    if (path[0] == '/') {
+#ifdef __CYGWIN__
+		/*
+		 * Check for Cygwin // network path prefix
+		 */
+		if (path[1] == '/') {
+		    path++;
+		}
+#endif
 		if (driveNameLengthPtr != NULL) {
 		    /*
-		     * We need this addition in case the QNX code was used.
+		     * We need this addition in case the QNX or Cygwin code was used.
 		     */
 
 		    *driveNameLengthPtr = (1 + path - origPath);
@@ -643,11 +651,20 @@ SplitUnixPath(
     }
 #endif
 
-    if (path[0] == '/') {
-	Tcl_ListObjAppendElement(NULL, result, Tcl_NewStringObj("/",1));
-	p = path+1;
-    } else {
-	p = path;
+    p = path;
+    if (*p == '/') {
+	Tcl_Obj *rootElt = Tcl_NewStringObj("/", 1);
+	p++;
+#ifdef __CYGWIN__
+	/*
+	 * Check for Cygwin // network path prefix
+	 */
+	if (*p == '/') {
+	    Tcl_AppendToObj(rootElt, "/", 1);
+	    p++;
+	}
+#endif
+	Tcl_ListObjAppendElement(NULL, result, rootElt);
     }
 
     /*
@@ -857,7 +874,7 @@ TclpNativeJoinPath(
 
 	if (length > 0 && (start[length-1] != '/')) {
 	    Tcl_AppendToObj(prefix, "/", 1);
-	    length++;
+	    Tcl_GetStringFromObj(prefix, &length);
 	}
 	needsSep = 0;
 
@@ -893,7 +910,7 @@ TclpNativeJoinPath(
 	if ((length > 0) &&
 		(start[length-1] != '/') && (start[length-1] != ':')) {
 	    Tcl_AppendToObj(prefix, "/", 1);
-	    length++;
+	    Tcl_GetStringFromObj(prefix, &length);
 	}
 	needsSep = 0;
 
@@ -2431,15 +2448,6 @@ DoGlob(
 		}
 	    }
 
-#if defined(__CYGWIN__) && defined(__WIN32__)
-	    {
-		char winbuf[MAX_PATH+1];
-
-		cygwin_conv_to_win32_path(Tcl_DStringValue(&append), winbuf);
-		Tcl_DStringFree(&append);
-		Tcl_DStringAppend(&append, winbuf, -1);
-	    }
-#endif /* __CYGWIN__ && __WIN32__ */
 	    break;
 
 	case TCL_PLATFORM_UNIX:

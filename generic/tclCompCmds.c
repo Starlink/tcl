@@ -972,7 +972,7 @@ TclCompileDictForCmd(
      * Compile the loop body itself. It should be stack-neutral.
      */
 
-    SetLineInformation (4);
+    SetLineInformation(3);
     CompileBody(envPtr, bodyTokenPtr, interp);
     TclEmitOpcode(   INST_POP,					envPtr);
 
@@ -1172,6 +1172,7 @@ TclCompileDictUpdateCmd(
     TclEmitInstInt4( INST_BEGIN_CATCH4, range,			envPtr);
 
     ExceptionRangeStarts(envPtr, range);
+    SetLineInformation(parsePtr->numWords - 1);
     CompileBody(envPtr, bodyTokenPtr, interp);
     ExceptionRangeEnds(envPtr, range);
 
@@ -6325,7 +6326,9 @@ TclCompileEnsemble(
     Tcl_IncrRefCount(targetCmdObj);
     cmdPtr = (Command *) Tcl_GetCommandFromObj(interp, targetCmdObj);
     TclDecrRefCount(targetCmdObj);
-    if (cmdPtr == NULL || cmdPtr->compileProc == NULL) {
+    if (cmdPtr == NULL || cmdPtr->compileProc == NULL
+	    || cmdPtr->flags & CMD_HAS_EXEC_TRACES
+	    || ((Interp *)interp)->flags & DONT_COMPILE_CMDS_INLINE) {
 	/*
 	 * Maps to an undefined command or a command without a compiler.
 	 * Cannot compile.

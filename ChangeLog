@@ -1,3 +1,580 @@
+2012-07-24  Don Porter  <dgp@users.sourceforge.net>
+
+	*** 8.5.12 TAGGED FOR RELEASE ***
+
+	* generic/tcl.h:	Bump to 8.5.12 for release.
+	* library/init.tcl:
+	* tools/tcl.wse.in:
+	* unix/configure.in:
+	* unix/tcl.spec:
+	* win/configure.in:
+	* README:
+
+	* unix/configure:	autoconf-2.59
+	* win/configure:
+
+	* changes:	Update for 8.5.12 release.
+
+2012-07-19  Joe Mistachkin  <joe@mistachkin.com>
+
+	* generic/tclTest.c: Fix several more missing mutex-locks in
+	TestasyncCmd.
+
+2012-07-19  Alexandre Ferrieux  <ferrieux@users.sourceforge.net>
+
+	* generic/tclTest.c: [Bug 3544685]: Missing mutex-lock in
+	TestasyncCmd since 2011-08-19. Unbounded gratitude to Stuart
+	Cassoff for spotting it.
+
+2012-07-17  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* win/makefile.vc: [Bug 3544932]: Visual studio compiler check fails
+
+2012-07-16  Donal K. Fellows  <dkf@users.sf.net>
+
+	* unix/tclUnixCompat.c (TclpGetPwNam, TclpGetPwUid, TclpGetGrNam)
+	(TclpGetGrGid): [Bug 3544683]: Use the elaborate memory management
+	scheme outlined on http://www.opengroup.org/austin/docs/austin_328.txt
+	to handle Tcl's use of standard reentrant versions of the passwd/group
+	access functions so that everything can work on all BSDs. Problem
+	identified by Stuart Cassoff.
+
+2012-07-11  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* win/tclWinReg.c: [Bug #3362446]: registry keys command fails
+	with 8.5/8.6. Follow Microsofts example better in order to prevent
+	problems when using HKEY_PERFORMANCE_DATA.
+
+2012-07-10  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* unix/tclUnixNotfy.c: [Bug 3541646] Don't panic on triggerPipe overrun
+
+2012-07-10  Donal K. Fellows  <dkf@users.sf.net>
+
+	* win/tclWinSock.c (InitializeHostName): Corrected logic that
+	extracted the name of the computer from the gethostname call so that
+	it would use the name on success, not failure. Also ensured that the
+	buffer size is exactly that recommended by Microsoft.
+
+2012-07-05  Don Porter  <dgp@users.sourceforge.net>
+
+	* unix/tclUnixPipe.c:	[Bug 1189293] Make "<<" binary safe.
+	* win/tclWinPipe.c:
+
+2012-06-29  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* library/msgcat/msgcat.tcl:   Add tn, ro_MO and ru_MO to msgcat.
+
+2012-06-29  Harald Oehlmann <harald.oehlmann@elmicron.de>
+
+	* library/msgcat/msgcat.tcl:	[Bug 3536888] Locale guessing of msgcat
+	* library/msgcat/pkgIndex.tcl:  fails on (some) Windows 7.  Bump to 1.4.5
+	* unix/Makefile.in
+	* win/Makefile.in
+
+2012-06-29  Donal K. Fellows  <dkf@users.sf.net>
+
+	* doc/GetIndex.3: Reinforced the description of the requirement for
+	the tables of names to index over to be static, following posting to
+	tcl-core by Brian Griffin about a bug caused by Tktreectrl not obeying
+	this rule correctly. This does not represent a functionality change,
+	merely a clearer documentation of a long-standing constraint.
+
+2012-06-25  Don Porter  <dgp@users.sourceforge.net>
+
+	* generic/tclFileSystem.h:	[Bug 3024359] Make sure that the
+	* generic/tclIOUtil.c:	per-thread cache of the list of file systems
+	* generic/tclPathObj.c:	currently registered is only updated at times
+	when no active loops are traversing it.  Also reduce the amount of
+	epoch storing and checking to where it can make a difference.
+
+2012-06-25  Donal K. Fellows  <dkf@users.sf.net>
+
+	* generic/tclCmdAH.c (EncodingDirsObjCmd): [Bug 3537605]: Do the right
+	thing when reporting errors with the number of arguments.
+
+2012-06-25  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/tclfileName.c: [Patch #1536227]: Cygwin network pathname
+	* tests/fileName.test:   support
+
+2012-06-23  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* unix/tclUnixNotfy.c: [Bug 3508771]: Cygwin notifier for handling
+	win32 events.
+
+2012-06-21  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* win/tclWinReg.c:          [Bug #3362446]: registry keys command fails
+	* tests/registry.test:      with 8.5/8.6
+	* library/reg/pkgIndex.tcl: registry version to 1.2.2
+
+2012-06-11  Don Porter  <dgp@users.sourceforge.net>
+
+	* generic/tclBasic.c:	[Bug 3532959] Make sure the lifetime management
+	* generic/tclProc.c:	of entries in the linePBodyPtr hash table can
+	* tests/proc.test:	tolerate either order of teardown, interp first,
+	or Proc first.
+
+2012-06-08  Don Porter  <dgp@users.sourceforge.net>
+
+	* unix/configure.in:	Update autogoo for gettimeofday().
+	* unix/tclUnixPort.h:	Thanks Joe English.
+	* unix/configure:	autoconf 2.13
+
+	* unix/tclUnixPort.h:	[Bug 3530533] Centralize #include <pthread.h>
+	* unix/tclUnixThrd.c:	in the tclUnixPort.h header so that old unix
+	systems that need inclusion in all compilation units are supported.
+
+2012-06-06  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* unix/tclUnixInit.c: On Cygwin, use win32 API in stead of uname()
+	to determine the tcl_platform variables.
+
+2012-05-31  Donal K. Fellows  <dkf@users.sf.net>
+
+	* doc/safe.n: [Bug 1997845]: Corrected formatting so that generated
+	* tools/tcltk-man2html.tcl (cross-reference): HTML can link properly.
+
+2012-05-29  Donal K. Fellows  <dkf@users.sf.net>
+
+	* doc/expr.n, doc/mathop.n: [Bug 2931407]: Clarified semantics of
+	division and remainder operators.
+
+2012-05-25  Donal K. Fellows  <dkf@users.sf.net>
+
+	* doc/namespace.n, doc/Ensemble.3: [Bug 3528418]: Document what is
+	going on with respect to qualification of command prefixes in ensemble
+	subcommand maps.
+
+2012-05-25  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* win/tclWinDde.c:	[Bug 473946] special characters not correctly
+	* win/Makefile.in:	sent, now for XTYP_EXECUTE as well as
+	XTYP_REQUEST.  Fix "make genstubs" when cross-compiling on UNIX
+
+2012-05-24  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* tools/genStubs.tcl:  Take cygwin handling of X11 into account.
+	* generic/tcl*Decls.h: re-generated
+	* generic/tclStubInit.c:  Implement TclpIsAtty, Cygwin only.
+	* doc/dde.n: Doc fix: "dde execute iexplore" doesn't work
+	without -async, because iexplore doesn't return a value
+
+2012-05-22  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* tools/genStubs.tcl:   Let cygwin share stub table with win32
+	* win/Makefile.in:      Don't hardcode dde and reg dll version numbers
+	* win/tclWinSock.c:     implement TclpInetNtoa for win32
+	* generic/tclInt.decls: Revert most of [fcc5957e59], since when
+	  we let cygwin share the win32 stub table this is no longer necessary
+	* generic/tcl*Decls.h:  re-generated
+
+2012-05-21  Don Porter  <dgp@users.sourceforge.net>
+
+	* generic/tclFileName.c: When using Tcl_SetObjLength() calls to grow
+	* generic/tclIOUtil.c:	 and shrink the objPtr->bytes buffer, care must
+	be taken that the value cannot possibly become pure Unicode.  Calling
+	Tcl_AppendToObj() has the possibility of making such a conversion.  Bug
+	found while valgrinding the trunk.
+
+2012-05-17  Donal K. Fellows  <dkf@users.sf.net>
+
+	* generic/tclCmdMZ.c (Tcl_SwitchObjCmd): [Bug 3106532]: Corrected
+	resulting indexes from -indexvar option to be usable with [string
+	range]; this was always the intention (and is consistent with [regexp
+	-indices] too).
+	***POTENTIAL INCOMPATIBILITY***
+	Uses of [switch -regexp -indexvar] that previously compensated for the
+	wrong offsets (by subtracting 1 from the end indices) now do not need
+	to do so as the value is correct.
+
+	* library/safe.tcl (safe::InterpInit): Ensure that the module path is
+	constructed in the correct order.
+	(safe::AliasGlob): [Bug 2964715]: More extensive handling of what
+	globbing is required to support package loading.
+
+	* doc/expr.n: [Bug 3525462]: Corrected statement about what happens
+	when comparing "0y" and "0x12"; the previously documented behavior was
+	actually a subtle bug (now long-corrected).
+
+2012-05-13  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* win/tclWinDde.c:	Protect against receiving strings without
+	ending \0, as external applications (or Tcl with TIP #106) could
+	generate that.
+
+2012-05-10  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* win/tclWinDde.c:		[Bug 473946] special characters not
+	* library/dde/pkgIndex.tcl:	correctly sent.  Bump to 1.3.3
+
+2012-05-02  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/configure.in:		Better detection and implementation for
+	* generic/configure:		cpuid instruction on Intel-derived
+	* generic/tclUnixCompat.c:	processors, both 32-bit and 64-bit.
+	* generic/tclTest.c:		Move cpuid testcase from win-specific
+	* win/tclWinTest.c:		to generic tests, as it should work on
+	* tests/platform.test:		all Intel-related platforms now
+
+2012-04-27  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/tclPort.h:    Move CYGWIN-specific stuff from tclPort.h to
+	* generic/tclEnv.c:     tclUnixPort.h, where it belongs.
+	* unix/tclUnixPort.h:
+	* unix/tclUnixFile.c:
+
+2012-04-27  Donal K. Fellows  <dkf@users.sf.net>
+
+	* library/init.tcl (auto_execok): Allow shell builtins to be detected
+	even if they are upper-cased.
+
+2012-04-26  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/tclStubInit.c:    get rid of _ANSI_ARGS_
+	* generic/tclIntPlatDecls.h
+	* unix/tclUnixPort.h
+	* unix/tclAppInit.c
+	* win/tclAppInit.c
+
+2012-04-24  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/tclInt.decls:		[Bug 3508771] load tclreg.dll in cygwin
+	* generic/tclIntPlatDecls.h:	tclsh Implement TclWinGetSockOpt,
+	* generic/tclStubInit.c:	TclWinGetServByName and TclWinCPUID
+	* generic/tclUnixCompat.c:	for Cygwin.
+	* unix/configure.in:
+	* unix/configure:
+	* unix/tclUnixCompat.c:
+
+2012-04-18  Kevin B. Kenny  <kennykb@acm.org>
+
+	* library/tzdata/Africa/Casablanca:
+	* library/tzdata/America/Port-au-Prince:
+	* library/tzdata/Asia/Damascus:
+	* library/tzdata/Asia/Gaza:
+	* library/tzdata/Asia/Hebron: tzdata2012c
+
+2012-04-16  Donal K. Fellows  <dkf@users.sf.net>
+
+	* doc/FileSystem.3 (Tcl_FSOpenFileChannelProc): [Bug 3518244]: Fixed
+	documentation of this filesystem callback function; it must not
+	register its created channel - that's the responsibility of the caller
+	of Tcl_FSOpenFileChannel - as that leads to reference leaks.
+
+2012-04-11  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* win/tclWinInit.c:     [Bug 3448512] [clock scan 1958-01-01] fails
+	* win/tcl.m4:           in debug compilation.
+	* win/configure:
+	* unix/tcl.m4:          Use NDEBUG consistantly meaning: no debugging.
+	* unix/configure:
+
+2012-04-04  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* win/tclWinSock.c:	[Bug 510001] TclSockMinimumBuffers needs
+	* generic/tclIOSock.c:	platform implementation.
+	* generic/tclInt.decls:
+	* generic/tclIntDecls.h:
+	* generic/tclStubInit.c:
+
+2012-04-03  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/tclStubInit.c:	Remove the TclpGetTZName implementation
+	* generic/tclIntDecls.h:	for Cygwin (from previous commit) ,
+	* generic/tclIntPlatDecls.h:	re-generated
+	* generic/tcl.decls:		cleanup unnecessary "generic" argument
+
+2012-03-30  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/tclInt.decls:		[Bug 3508771] load tclreg.dll in cygwin
+	* generic/tclIntPlatDecls.h:	tclsh.  Implement TclWinGetTclInstance,
+	* generic/tclStubInit.c:	TclpGetTZName, and various more
+	win32-specific internal functions for Cygwin, so win32 extensions
+	using those can be loaded in the cygwin version of tclsh.
+
+2012-03-30  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* unix/tcl.m4:               [Bug 3511806] Compiler checks too early
+	* unix/configure.in:         This change allows to build the cygwin
+	* unix/tclUnixPort.h:        and mingw32 ports of Tcl/Tk to build
+	* win/tcl.m4:                out-of-the-box using a native or cross-
+	* win/configure.in:          compiler.
+	* win/tclWinPort.h:          (autoconf still to be run!)
+
+2012-03-27  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/tcl.h:	[Bug 3508771] Wrong Tcl_StatBuf used on MinGW
+	* generic/tclFCmd.c:	[Bug 2015723] duplicate inodes from file stat
+	on windows (but now for cygwin as well)
+
+2012-03-25  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/tclInt.decls:		[Bug 3508771] load tclreg.dll in cygwin
+	* generic/tclIntPlatDecls.h:	tclsh.  Implement TclWinConvertError,
+	* generic/tclStubInit.c:	TclWinConvertWSAError, and various more
+	* unix/Makefile.in:		win32-specific internal functions for
+	* unix/tcl.m4:			Cygwin, so win32 extensions using those
+	* unix/configure:		can be loaded in the cygwin version
+	* win/tclWinError.c:		of tclsh.
+
+2012-03-23  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/tclInt.decls:		Revert some cygwin-related signature
+	* generic/tclIntPlatDecls.h:	changes from [835f8e1e9d] (2010-02-01).
+	* win/tclWinError.c:		They were an attempt to make the cygwin
+	port compile again, but since cygwin is based on unix this serves no
+	purpose any more.
+
+	* unix/Makefile.in:		Add tclWinError.c to the CYGWIN build.
+	* unix/tcl.m4:
+	* unix/configure:
+
+2012-03-20  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/tcl.decls:		[Bug 3508771] load tclreg.dll in cygwin
+	* generic/tclInt.decls:		tclsh. Implement TclWinGetPlatformId,
+	* generic/tclIntPlatDecls.h:	Tcl_WinUtfToTChar, Tcl_WinTCharToUtf
+	* generic/tclPlatDecls.h:	(and a dummy TclWinCPUID) for Cygwin,
+	* generic/tclStubInit.c:	so win32 extensions using those can be
+	* unix/tclUnixCompat.c:		loaded in the cygwin version of tclsh.
+
+2012-03-19  Venkat Iyer <venkat@comit.com>
+
+	* library/tzdata/America/Atikokan: Update to tzdata2012b.
+	* library/tzdata/America/Blanc-Sablon
+	* library/tzdata/America/Dawson_Creek
+	* library/tzdata/America/Edmonton
+	* library/tzdata/America/Glace_Bay
+	* library/tzdata/America/Goose_Bay
+	* library/tzdata/America/Halifax
+	* library/tzdata/America/Havana
+	* library/tzdata/America/Moncton
+	* library/tzdata/America/Montreal
+	* library/tzdata/America/Nipigon
+	* library/tzdata/America/Rainy_River
+	* library/tzdata/America/Regina
+	* library/tzdata/America/Santiago
+	* library/tzdata/America/St_Johns
+	* library/tzdata/America/Swift_Current
+	* library/tzdata/America/Toronto
+	* library/tzdata/America/Vancouver
+	* library/tzdata/America/Winnipeg
+	* library/tzdata/Antarctica/Casey
+	* library/tzdata/Antarctica/Davis
+	* library/tzdata/Antarctica/Palmer
+	* library/tzdata/Asia/Yerevan
+	* library/tzdata/Atlantic/Stanley
+	* library/tzdata/Pacific/Easter
+	* library/tzdata/Pacific/Fakaofo
+	* library/tzdata/America/Creston: (new)
+
+2012-03-15  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/tcl.h: [Bug 3288345] Wrong Tcl_StatBuf used on Cygwin
+	* unix/tclUnixFile.c
+	* unix/tclUnixPort.h
+	* win/cat.c:           Remove cygwin stuff no longer needed
+	* win/tclWinFile.c
+	* win/tclWinPort.h
+
+2012-03-12  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* win/tclWinFile.c: [Bug 3388350] mingw64 compiler warnings
+
+2012-03-07  Andreas Kupries  <andreask@activestate.com>
+
+	* library/http/http.tcl: [Bug 3498327]: Generate upper-case
+	* library/http/pkgIndex.tcl: hexadecimal output for compliance
+	* tests/http.test: with RFC 3986. Bumped version to 2.7.9.
+	* unix/Makefile.in:
+	* win/Makefile.in:
+
+2012-03-06  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* win/tclWinPort.h: Compatibility with older Visual Studio versions.
+
+2012-03-04  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/tclLoad.c: Patch from the cygwin folks
+	* unix/tcl.m4:
+	* unix/configure: (re-generated)
+
+2012-02-29  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/tclIOUtil.c:	[Bug 3466099] BOM in Unicode
+	* generic/tclEncoding.c:
+	* tests/source.test
+
+2012-02-23  Donal K. Fellows  <dkf@users.sf.net>
+
+	* tests/reg.test (14.21-23): Add tests relating to bug 1115587. Actual
+	bug is characterised by test marked with 'knownBug'.
+
+2012-02-17  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/tclIOUtil.c: [Bug 2233954]: AIX: compile error
+	* unix/tclUnixPort.h:
+
+2012-02-15  Donal K. Fellows  <dkf@users.sf.net>
+
+	* generic/tclCompCmds.c (TclCompileDictForCmd): [Bug 3487626]: Fix
+	crash in compilation of [dict for] when its implementation command is
+	used directly rather than through the ensemble.
+
+2012-02-09  Don Porter  <dgp@users.sourceforge.net>
+
+	* generic/tclStringObj.c:	[Bug 3484402]: Correct Off-By-One
+	error appending unicode. Thanks to Poor Yorick. Also corrected test
+	for when growth is needed.
+
+2012-02-06  Don Porter  <dgp@users.sourceforge.net>
+
+	* generic/tclCompCmds.c: [Bug 3485022]: TclCompileEnsemble() avoid
+	* tests/trace.test:	compile when exec traces set.
+
+2012-02-06  Miguel Sofer  <msofer@users.sf.net>
+
+	* generic/tclTrace.c:  Fix for [Bug 3484621]: insure that
+	* tests/trace.test:    execution traces on bytecoded commands bump
+	the interp's compile epoch.
+
+2012-02-02  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/tclUniData.c: [FRQ 3464401]: Support Unicode 6.1
+	* generic/regc_locale.c:
+
+2012-02-02  Don Porter  <dgp@users.sourceforge.net>
+
+	* win/tclWinFile.c:	[Bugs 2974459,2879351,1951574,1852572,
+	1661378,1613456]: Revisions to the NativeAccess() routine that
+	queries file permissions on Windows native filesystems.  Meant to
+	fix numerous bugs where [file writable|readable|executable] "lies"
+	about what operations are possible, especially when the file resides
+	on a Samba share.  Patch merged from the fix-win-native-access branch.
+
+2012-02-01  Donal K. Fellows  <dkf@users.sf.net>
+
+	* doc/AddErrInfo.3: [Bug 3482614]: Documentation nit.
+
+2012-01-26  Don Porter  <dgp@users.sourceforge.net>
+
+	* generic/tclPathObj.c:	[Bug 3475569]: Add checks for unshared values
+	before calls demanding them.  [Bug 3479689]: Stop memory corruption
+	when shimmering 0-refCount value to "path" type.
+
+2012-01-22  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* tools/uniClass.tcl:    [Frq 3473670]: Various Unicode-related
+	* tools/uniParse.tcl:    speedups/robustness. Enhanced tools to
+	* generic/tclUniData.c:  be able to handle characters > 0xffff
+	* generic/tclUtf.c:      Done in all branches in order to simplify
+	* generic/regc_locale.c: merges for new Unicode versions (such as 6.1)
+
+2012-01-22  Donal K. Fellows  <dkf@users.sf.net>
+
+	* generic/tclDictObj.c (DictExistsCmd): [Bug 3475264]: Ensure that
+	errors only ever happen when insufficient arguments are supplied, and
+	not when a path doesn't exist or a dictionary is poorly formatted (the
+	two cases can't be easily distinguished).
+
+2012-01-21  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/tcl.h:        [Bug 3474726]: Eliminate detection of struct
+	* generic/tclWinPort.h: _stat32i64, just use _stati64 in combination
+	* generic/tclFCmd.c:    with _USE_32BIT_TIME_T, which is the same then.
+	* generic/tclTest.c:    Only keep _stat32i64 usage for cygwin, so it
+	* win/configure.in:     will not conflict with cygwin's own struct stat.
+	* win/configure:
+
+2012-01-21  Don Porter  <dgp@users.sourceforge.net>
+
+	* generic/tclCmdMZ.c:	[Bug 3475667]: Prevent buffer read overflow.
+	Thanks to "sebres" for the report and fix.
+
+2012-01-17  Donal K. Fellows  <dkf@users.sf.net>
+
+	* doc/dict.n (dict with): [Bug 3474512]: Explain better what is going
+	on when a dictionary key and the dictionary variable collide.
+
+2012-01-17  Don Porter  <dgp@users.sourceforge.net>
+
+	* library/http/http.tcl:	Bump to version 2.7.8
+	* library/http/pkgIndex.tcl:
+	* unix/Makefile.in:
+	* win/Makefile.in:
+
+2012-01-13  Donal K. Fellows  <dkf@users.sf.net>
+
+	* library/http/http.tcl (http::Connect): [Bug 3472316]: Ensure that we
+	only try to read the socket error exactly once.
+
+2012-01-09  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/tclUtf.c:      [Bug 3464428]: string is graph \u0120 is wrong
+	* generic/regc_locale.c: Add table for Unicode [:cntrl:] class
+	* tools/uniClass.tcl:    Generate Unicode [:cntrl:] class table
+	* tests/utf.test:
+
+2012-01-08  Kevin B. Kenny  <kennykb@acm.org>
+
+	* library/clock.tcl (ReadZoneinfoFile): Corrected a bug where loading
+	* tests/clock.test (clock-56.4):        zoneinfo would fail if one
+	timezone abbreviation was a proper tail of another, and zic used the
+	same bytes of the file to represent both of them.  Added a test case
+	for the bug, using the same data that caused the observed failure
+	"in the wild." [Bug 3470928]
+
+2011-12-30  Venkat Iyer <venkat@comit.com>
+
+	* library/tzdata/America/Bahia : Update to Olson's tzdata2011n
+	* library/tzdata/America/Havana
+	* library/tzdata/Europe/Kiev
+	* library/tzdata/Europe/Simferopol
+	* library/tzdata/Europe/Uzhgorod
+	* library/tzdata/Europe/Zaporozhye
+	* library/tzdata/Pacific/Fiji
+
+2011-12-23  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/tclUtf.c:     [Bug 3464428] string is graph \u0120 is wrong
+	* generic/tclUniData.c:
+	* generic/regc_locale.c:
+	* tests/utf.test:
+	* tools/uniParse.tcl:   clean up some unused stuff, and be more robust
+	against changes in UnicodeData.txt syntax
+
+2011-12-11  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* generic/regc_locale.c: [Bug 3457031]: Some Unicode 6.0 chars not
+	* tests/utf.test:        in [:print:] class
+
+2011-12-07  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* tools/uniParse.tcl:    [Bug 3444754] string tolower \u01c5 is wrong
+	* generic/tclUniData.c:
+	* tests/utf.test:
+
+2011-11-30  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* library/tcltest/tcltest.tcl: [Bug 967195]: Make tcltest work
+	when tclsh is compiled without using the setargv() function on mingw.
+
+2011-11-29  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* doc/tclsh.1:  Use the same shebang comment everywhere.
+	* tools/str2c
+	* tools/tcltk-man2html.tcl
+	* win/Makefile.in: don't install tommath_(super)?class.h
+	* unix/Makefile.in: don't install directories like 8.2 and 8.3
+
+2011-11-22  Jan Nijtmans  <nijtmans@users.sf.net>
+
+	* win/tclWinPort.h:   [Bug 2935503] Windows: file mtime
+	* win/tclWinFile.c:  sets wrong time (VS2005+ only)
+	* generic/tclTest.c:
+
 2011-11-04  Don Porter  <dgp@users.sourceforge.net>
 
 	*** 8.5.11 TAGGED FOR RELEASE ***
@@ -373,7 +950,7 @@
 	* generic/tclListObj.c:	of a boolean var, where the caller can be told
 	* generic/tclParse.c:	whether or not the parsed list element was
 	* generic/tclUtil.c:	enclosed in braces.  In practice, no callers
-	really care about that.  What the callers really want to know is 
+	really care about that.  What the callers really want to know is
 	whether the list element value exists as a literal substring of the
 	string being parsed, or whether a call to TclCopyAndCollpase() is
 	needed to produce the list element value.  Now the final argument
@@ -411,7 +988,7 @@
 	* generic/tclStrToD.c:
 	* generic/tclUtf.c:
 	* unix/tclUnixFile.c:
-	
+
 2011-04-27  Don Porter  <dgp@users.sourceforge.net>
 
 	* generic/tclListObj.c:	FreeListInternalRep() cleanup.
@@ -548,6 +1125,10 @@
 
 	* unix/tclLoadDl.c:    [Bug #3216070]: Loading extension libraries
 	* unix/tclLoadDyld.c:  from embedded Tcl applications.
+	***POTENTIAL INCOMPATIBILITY***
+	For extensions which rely on symbols from other extensions being
+	present in the global symbol table. For an example and some discussion
+	of workarounds, see http://stackoverflow.com/q/8330614/301832
 
 2011-03-16  Jan Nijtmans  <nijtmans@users.sf.net>
 
@@ -870,7 +1451,7 @@
 
 2010-09-23  Don Porter  <dgp@users.sourceforge.net>
 
-	* generic/tclCmdAH.c:	Fix cases where value returned by 
+	* generic/tclCmdAH.c:	Fix cases where value returned by
 	* generic/tclEvent.c:	Tcl_GetReturnOptions() was leaked.
 	* generic/tclMain.c:	Thanks to Jeff Hobbs for discovery of the
 	anti-pattern to seek and destroy.
@@ -1169,7 +1750,7 @@
 
 	* library/platform/platform.tcl: Fix cpu name for Solaris/Intel 64bit.
 	* library/platform/pkgIndex.tcl: Package updated to version 1.0.8.
-	* unix/Makefile.in:		
+	* unix/Makefile.in:
 	* win/Makefile.in:
 
 2010-04-30  Don Porter  <dgp@users.sourceforge.net>
@@ -1205,7 +1786,7 @@
 	* library/tzdata/Pacific/Apia:
 	* library/tzdata/Pacific/Easter:
 	* library/tzdata/Pacific/Fiji:   Olson's tzdata2010i.
-	
+
 2010-04-19  Jan Nijtmans  <nijtmans@users.sf.net>
 
 	* win/tclWinPort.h: [Patch 2986105]: Conditionally defining
@@ -1541,9 +2122,9 @@
 
 2009-11-27  Donal K. Fellows  <dkf@users.sf.net>
 
-	* doc/BoolObj.3, doc/CrtChannel.3, doc/DictObj.3, doc/DoubleObj.3: 
-	* doc/Ensemble.3, doc/Environment.3, doc/FileSystem.3, doc/Hash.3: 
-	* doc/IntObj.3, doc/Limit.3, doc/ObjectType.3, doc/PkgRequire.3: 
+	* doc/BoolObj.3, doc/CrtChannel.3, doc/DictObj.3, doc/DoubleObj.3:
+	* doc/Ensemble.3, doc/Environment.3, doc/FileSystem.3, doc/Hash.3:
+	* doc/IntObj.3, doc/Limit.3, doc/ObjectType.3, doc/PkgRequire.3:
 	* doc/SetChanErr.3, doc/SetResult.3: [Patch 2903921]: Many small
 	spelling fixes from Larry Virden.
 
@@ -1559,7 +2140,7 @@
 
 	* generic/tclEncoding.c: Fix [Bug 2891556] and improve test to detect
 	* tests/decoding.test:   similar manifestations in the future.
-	
+
 2009-11-12  Don Porter  <dgp@users.sourceforge.net>
 
 	*** 8.5.8 TAGGED FOR RELEASE ***
@@ -1588,7 +2169,7 @@
 	* library/http/http.tcl:	[Bug 2891171]: Update the URL syntax
 	check to RFC 3986 compliance on the subject of non-encoded question
 	mark characters.
-	
+
 	* library/http/pkgIndex.tcl:	Bump to http 2.7.5 to avoid any
 	* unix/Makefile.in:		confusion with snapshot "releases"
 	* win/Makefile.in:		that might be in ActiveTcl, etc.
@@ -1614,7 +2195,7 @@
 
 2009-11-09  Don Porter  <dgp@users.sourceforge.net>
 
-	* generic/tclBasic.c (TclEvalObjEx):	Plug memory leak in 
+	* generic/tclBasic.c (TclEvalObjEx):	Plug memory leak in
 	TCL_EVAL_DIRECT evaluation.
 
 	* tests/info.test:	Resolve ambiguous resolution of variable "res".
@@ -1643,7 +2224,7 @@
 	subdirectories.
 
 2009-11-03  Kevin B. Kenny  <kennykb@acm.org>
-	
+
 	* library/tzdata/Asia/Novokuznetsk: New tzdata locale for Kemerovo
 	oblast', which now keeps Novosibirsk time and not Kranoyarsk time.
 	* library/tzdata/Asia/Damascus: Syrian DST changes.
@@ -2145,7 +2726,7 @@
 
 	* unix/tclUnixChan.c:		TclUnixWaitForFile(): use FD_* macros
 	* macosx/tclMacOSXNotify.c:	to manipulate select masks (Cassoff).
-					[Bug 1960647]
+					[Freq 1960647] [Bug 3486554]
 
 	* unix/tclLoadDyld.c:		use RTLD_GLOBAL instead of RTLD_LOCAL.
 					[Bug 1961211]

@@ -44,7 +44,7 @@ Tcl_PwdObjCmd(
     ClientData dummy,		/* Not used. */
     Tcl_Interp *interp,		/* Current interpreter. */
     int objc,			/* Number of arguments. */
-    Tcl_Obj *CONST objv[])	/* Argument objects. */
+    Tcl_Obj *const objv[])	/* Argument objects. */
 {
     Tcl_Obj *retVal;
 
@@ -84,14 +84,14 @@ Tcl_RegexpObjCmd(
     ClientData dummy,		/* Not used. */
     Tcl_Interp *interp,		/* Current interpreter. */
     int objc,			/* Number of arguments. */
-    Tcl_Obj *CONST objv[])	/* Argument objects. */
+    Tcl_Obj *const objv[])	/* Argument objects. */
 {
     int i, indices, match, about, offset, all, doinline, numMatchesSaved;
     int cflags, eflags, stringLength, matchLength;
     Tcl_RegExp regExpr;
     Tcl_Obj *objPtr, *startIndex = NULL, *resultPtr = NULL;
     Tcl_RegExpInfo info;
-    static CONST char *options[] = {
+    static const char *options[] = {
 	"-all",		"-about",	"-indices",	"-inline",
 	"-expanded",	"-line",	"-linestop",	"-lineanchor",
 	"-nocase",	"-start",	"--",		NULL
@@ -264,8 +264,11 @@ Tcl_RegexpObjCmd(
 	 * start of the string unless the previous character is a newline.
 	 */
 
-	if ((offset == 0) || ((offset > 0) &&
-		(Tcl_GetUniChar(objPtr, offset-1) == (Tcl_UniChar)'\n'))) {
+	if (offset == 0) {
+	    eflags = 0;
+	} else if (offset > stringLength) {
+	    eflags = TCL_REG_NOTBOL;
+	} else if (Tcl_GetUniChar(objPtr, offset-1) == (Tcl_UniChar)'\n') {
 	    eflags = 0;
 	} else {
 	    eflags = TCL_REG_NOTBOL;
@@ -442,7 +445,7 @@ Tcl_RegsubObjCmd(
     ClientData dummy,		/* Not used. */
     Tcl_Interp *interp,		/* Current interpreter. */
     int objc,			/* Number of arguments. */
-    Tcl_Obj *CONST objv[])	/* Argument objects. */
+    Tcl_Obj *const objv[])	/* Argument objects. */
 {
     int idx, result, cflags, all, wlen, wsublen, numMatches, offset;
     int start, end, subStart, subEnd, match;
@@ -451,7 +454,7 @@ Tcl_RegsubObjCmd(
     Tcl_Obj *resultPtr, *subPtr, *objPtr, *startIndex = NULL;
     Tcl_UniChar ch, *wsrc, *wfirstChar, *wstring, *wsubspec, *wend;
 
-    static CONST char *options[] = {
+    static const char *options[] = {
 	"-all",		"-nocase",	"-expanded",
 	"-line",	"-linestop",	"-lineanchor",	"-start",
 	"--",		NULL
@@ -552,7 +555,7 @@ Tcl_RegsubObjCmd(
 	 */
 
 	int slen, nocase;
-	int (*strCmpFn)(CONST Tcl_UniChar*,CONST Tcl_UniChar*,unsigned long);
+	int (*strCmpFn)(const Tcl_UniChar*,const Tcl_UniChar*,unsigned long);
 	Tcl_UniChar *p, wsrclc;
 
 	numMatches = 0;
@@ -851,7 +854,7 @@ Tcl_RenameObjCmd(
     ClientData dummy,		/* Arbitrary value passed to the command. */
     Tcl_Interp *interp,		/* Current interpreter. */
     int objc,			/* Number of arguments. */
-    Tcl_Obj *CONST objv[])	/* Argument objects. */
+    Tcl_Obj *const objv[])	/* Argument objects. */
 {
     char *oldName, *newName;
 
@@ -887,7 +890,7 @@ Tcl_ReturnObjCmd(
     ClientData dummy,		/* Not used. */
     Tcl_Interp *interp,		/* Current interpreter. */
     int objc,			/* Number of arguments. */
-    Tcl_Obj *CONST objv[])	/* Argument objects. */
+    Tcl_Obj *const objv[])	/* Argument objects. */
 {
     int code, level;
     Tcl_Obj *returnOpts;
@@ -934,9 +937,9 @@ Tcl_SourceObjCmd(
     ClientData dummy,		/* Not used. */
     Tcl_Interp *interp,		/* Current interpreter. */
     int objc,			/* Number of arguments. */
-    Tcl_Obj *CONST objv[])	/* Argument objects. */
+    Tcl_Obj *const objv[])	/* Argument objects. */
 {
-    CONST char *encodingName = NULL;
+    const char *encodingName = NULL;
     Tcl_Obj *fileName;
 
     if (objc != 2 && objc !=4) {
@@ -947,7 +950,7 @@ Tcl_SourceObjCmd(
     fileName = objv[objc-1];
 
     if (objc == 4) {
-	static CONST char *options[] = {
+	static const char *options[] = {
 	    "-encoding", NULL
 	};
 	int index;
@@ -984,7 +987,7 @@ Tcl_SplitObjCmd(
     ClientData dummy,		/* Not used. */
     Tcl_Interp *interp,		/* Current interpreter. */
     int objc,			/* Number of arguments. */
-    Tcl_Obj *CONST objv[])	/* Argument objects. */
+    Tcl_Obj *const objv[])	/* Argument objects. */
 {
     Tcl_UniChar ch;
     int len;
@@ -3272,7 +3275,7 @@ TclInitStringCmd(
 	{"trimright",	StringTrimRCmd,	NULL},
 	{"wordend",	StringEndCmd,	NULL},
 	{"wordstart",	StringStartCmd,	NULL},
-	{NULL}
+	{NULL, NULL, NULL}
     };
 
     return TclMakeEnsemble(interp, "string", stringImplMap);
@@ -3301,9 +3304,9 @@ Tcl_SubstObjCmd(
     ClientData dummy,		/* Not used. */
     Tcl_Interp *interp,		/* Current interpreter. */
     int objc,			/* Number of arguments. */
-    Tcl_Obj *CONST objv[])	/* Argument objects. */
+    Tcl_Obj *const objv[])	/* Argument objects. */
 {
-    static CONST char *substOptions[] = {
+    static const char *substOptions[] = {
 	"-nobackslashes", "-nocommands", "-novariables", NULL
     };
     enum substOptions {
@@ -3379,13 +3382,13 @@ Tcl_SwitchObjCmd(
     ClientData dummy,		/* Not used. */
     Tcl_Interp *interp,		/* Current interpreter. */
     int objc,			/* Number of arguments. */
-    Tcl_Obj *CONST objv[])	/* Argument objects. */
+    Tcl_Obj *const objv[])	/* Argument objects. */
 {
     int i,j, index, mode, foundmode, result, splitObjs, numMatchesSaved;
     int noCase, patternLength;
     char *pattern;
     Tcl_Obj *stringObj, *indexVarObj, *matchVarObj;
-    Tcl_Obj *CONST *savedObjv = objv;
+    Tcl_Obj *const *savedObjv = objv;
     Tcl_RegExp regExpr = NULL;
     Interp *iPtr = (Interp *) interp;
     int pc = 0;
@@ -3399,7 +3402,7 @@ Tcl_SwitchObjCmd(
      * -glob, you *must* fix TclCompileSwitchCmd's option parser as well.
      */
 
-    static CONST char *options[] = {
+    static const char *options[] = {
 	"-exact", "-glob", "-indexvar", "-matchvar", "-nocase", "-regexp",
 	"--", NULL
     };
@@ -3676,8 +3679,12 @@ Tcl_SwitchObjCmd(
 	    if (indexVarObj != NULL) {
 		Tcl_Obj *rangeObjAry[2];
 
-		rangeObjAry[0] = Tcl_NewLongObj(info.matches[j].start);
-		rangeObjAry[1] = Tcl_NewLongObj(info.matches[j].end);
+		if (info.matches[j].end > 0) {
+		    rangeObjAry[0] = Tcl_NewLongObj(info.matches[j].start);
+		    rangeObjAry[1] = Tcl_NewLongObj(info.matches[j].end-1);
+		} else {
+		    rangeObjAry[0] = rangeObjAry[1] = Tcl_NewIntObj(-1);
+		}
 
 		/*
 		 * Never fails; the object is always clean at this point.
@@ -3859,7 +3866,7 @@ Tcl_TimeObjCmd(
     ClientData dummy,		/* Not used. */
     Tcl_Interp *interp,		/* Current interpreter. */
     int objc,			/* Number of arguments. */
-    Tcl_Obj *CONST objv[])	/* Argument objects. */
+    Tcl_Obj *const objv[])	/* Argument objects. */
 {
     register Tcl_Obj *objPtr;
     Tcl_Obj *objs[4];
@@ -3955,7 +3962,7 @@ Tcl_WhileObjCmd(
     ClientData dummy,		/* Not used. */
     Tcl_Interp *interp,		/* Current interpreter. */
     int objc,			/* Number of arguments. */
-    Tcl_Obj *CONST objv[])	/* Argument objects. */
+    Tcl_Obj *const objv[])	/* Argument objects. */
 {
     int result, value;
     Interp *iPtr = (Interp *) interp;
@@ -4021,10 +4028,10 @@ TclListLines(
     Tcl_Obj* const* elems)      /* The list elems as Tcl_Obj*, in need of
 				 * derived continuation data */
 {
-    CONST char*  listStr  = Tcl_GetString (listObj);
-    CONST char*  listHead = listStr;
+    const char*  listStr  = Tcl_GetString (listObj);
+    const char*  listHead = listStr;
     int i, length = strlen(listStr);
-    CONST char *element = NULL, *next = NULL;
+    const char *element = NULL, *next = NULL;
     ContLineLoc* clLocPtr = TclContinuationsGet(listObj);
     int* clNext   = (clLocPtr ? &clLocPtr->loc[0] : NULL);
 

@@ -10,8 +10,6 @@
  *
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
- *
- * RCS: @(#) $Id: tclAsync.c,v 1.17 2008/10/26 18:34:03 dkf Exp $
  */
 
 #include "tclInt.h"
@@ -120,7 +118,7 @@ Tcl_AsyncCreate(
     AsyncHandler *asyncPtr;
     ThreadSpecificData *tsdPtr = TCL_TSD_INIT(&dataKey);
 
-    asyncPtr = (AsyncHandler *) ckalloc(sizeof(AsyncHandler));
+    asyncPtr = ckalloc(sizeof(AsyncHandler));
     asyncPtr->ready = 0;
     asyncPtr->nextPtr = NULL;
     asyncPtr->proc = proc;
@@ -262,7 +260,7 @@ Tcl_AsyncInvoke(
  *	Failure to locate the handler in current thread private list
  *	of async handlers will result in panic; exception: the list
  *	is already empty (potential trouble?).
- *	Consequently, threads should create and delete handlers 
+ *	Consequently, threads should create and delete handlers
  *	themselves.  I.e. a handler created by one should not be
  *	deleted by some other thread.
  *
@@ -306,13 +304,13 @@ Tcl_AsyncDelete(
 	    tsdPtr->firstHandler = asyncPtr->nextPtr;
 	} else {
 	    prevPtr->nextPtr = asyncPtr->nextPtr;
-        }
+	}
 	if (asyncPtr == tsdPtr->lastHandler) {
 	    tsdPtr->lastHandler = prevPtr;
 	}
     }
     Tcl_MutexUnlock(&tsdPtr->asyncMutex);
-    ckfree((char *) asyncPtr);
+    ckfree(asyncPtr);
 }
 
 /*

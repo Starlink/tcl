@@ -16,7 +16,7 @@
  */
 
 /* shift right by a certain bit count (store quotient in c, optional remainder in d) */
-int mp_div_2d (mp_int * a, int b, mp_int * c, mp_int * d)
+int mp_div_2d (const mp_int * a, int b, mp_int * c, mp_int * d)
 {
   mp_digit D, r, rr;
   int     x, res;
@@ -91,7 +91,3 @@ int mp_div_2d (mp_int * a, int b, mp_int * c, mp_int * d)
   return MP_OKAY;
 }
 #endif
-
-/* $Source: /cvsroot/tcl/libtommath/bn_mp_div_2d.c,v $ */
-/* $Revision: 1.1.1.3 $ */
-/* $Date: 2006/12/01 00:08:11 $ */

@@ -9,8 +9,6 @@
  *
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
- *
- * RCS: @(#) $Id: tclThreadStorage.c,v 1.18 2008/11/29 12:18:35 dkf Exp $
  */
 
 #include "tclInt.h"
@@ -43,7 +41,7 @@ static struct TSDMaster {
 				 * increasing value. */
     Tcl_Mutex mutex;		/* Protection for the rest of this structure,
 				 * which holds per-process data. */
-} tsdMaster = { NULL, 0 };
+} tsdMaster = { NULL, 0, NULL };
 
 /*
  * The type of the data held per thread in a system TSD.
@@ -110,6 +108,19 @@ static void
 TSDTableDelete(
     TSDTable *tsdTablePtr)
 {
+    sig_atomic_t i;
+
+    for (i=0 ; i<tsdTablePtr->allocated ; i++) {
+	if (tsdTablePtr->tablePtr[i] != NULL) {
+	    /*
+	     * These values were allocated in Tcl_GetThreadData in tclThread.c
+	     * and must now be deallocated or they will leak.
+	     */
+
+	    ckfree(tsdTablePtr->tablePtr[i]);
+	}
+    }
+
     TclpSysFree(tsdTablePtr->tablePtr);
     TclpSysFree(tsdTablePtr);
 }

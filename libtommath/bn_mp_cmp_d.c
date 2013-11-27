@@ -16,7 +16,7 @@
  */
 
 /* compare a digit */
-int mp_cmp_d(mp_int * a, mp_digit b)
+int mp_cmp_d(const mp_int * a, mp_digit b)
 {
   /* compare based on sign */
   if (a->sign == MP_NEG) {
@@ -38,7 +38,3 @@ int mp_cmp_d(mp_int * a, mp_digit b)
   }
 }
 #endif
-
-/* $Source: /cvsroot/tcl/libtommath/bn_mp_cmp_d.c,v $ */
-/* $Revision: 1.1.1.3 $ */
-/* $Date: 2006/12/01 00:08:11 $ */

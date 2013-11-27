@@ -9,8 +9,6 @@
  *
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
- *
- * RCS: @(#) $Id: tclIO.h,v 1.15 2008/12/18 23:48:39 andreas_kupries Exp $
  */
 
 /*
@@ -42,8 +40,8 @@ typedef struct CopyState {
     struct Channel *writePtr;	/* Pointer to output channel. */
     int readFlags;		/* Original read channel flags. */
     int writeFlags;		/* Original write channel flags. */
-    int toRead;			/* Number of bytes to copy, or -1. */
-    int total;			/* Total bytes transferred (written). */
+    Tcl_WideInt toRead;		/* Number of bytes to copy, or -1. */
+    Tcl_WideInt total;		/* Total bytes transferred (written). */
     Tcl_Interp *interp;		/* Interp that started the copy. */
     Tcl_Obj *cmdPtr;		/* Command to be invoked at completion. */
     int bufSize;		/* Size of appended buffer. */
@@ -65,13 +63,13 @@ typedef struct ChannelBuffer {
     int bufLength;		/* How big is the buffer? */
     struct ChannelBuffer *nextPtr;
     				/* Next buffer in chain. */
-    char buf[4];		/* Placeholder for real buffer. The real
-				 * buffer occuppies this space + bufSize-4
+    char buf[1];		/* Placeholder for real buffer. The real
+				 * buffer occuppies this space + bufSize-1
 				 * bytes. This must be the last field in the
 				 * structure. */
 } ChannelBuffer;
 
-#define CHANNELBUFFER_HEADER_SIZE	(sizeof(ChannelBuffer) - 4)
+#define CHANNELBUFFER_HEADER_SIZE	TclOffset(ChannelBuffer, buf)
 
 /*
  * How much extra space to allocate in buffer to hold bytes from previous
@@ -132,7 +130,7 @@ typedef struct Channel {
     struct ChannelState *state; /* Split out state information */
     ClientData instanceData;	/* Instance-specific data provided by creator
 				 * of channel. */
-    CONST86 Tcl_ChannelType *typePtr; /* Pointer to channel type structure. */
+    const Tcl_ChannelType *typePtr; /* Pointer to channel type structure. */
     struct Channel *downChanPtr;/* Refers to channel this one was stacked
 				 * upon. This reference is NULL for normal
 				 * channels. See Tcl_StackChannel. */
@@ -425,6 +423,13 @@ typedef struct GetsState {
 				 * appended to objPtr so far, just before the
 				 * last call to FilterInputBytes(). */
 } GetsState;
+
+/*
+ * The length of time to wait between synthetic timer events. Must be zero or
+ * bad things tend to happen.
+ */
+
+#define SYNTHETIC_EVENT_TIME	0
 
 /*
  * Local Variables:

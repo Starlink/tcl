@@ -3,8 +3,6 @@
 # Default system startup file for Tcl-based applications.  Defines
 # "unknown" procedure and auto-load facilities.
 #
-# RCS: @(#) $Id: init.tcl,v 1.118 2008/12/19 03:54:44 dgp Exp $
-#
 # Copyright (c) 1991-1993 The Regents of the University of California.
 # Copyright (c) 1994-1996 Sun Microsystems, Inc.
 # Copyright (c) 1998-1999 Scriptics Corporation.
@@ -17,7 +15,7 @@
 if {[info commands package] == ""} {
     error "version mismatch: library\nscripts expect Tcl version 7.5b1 or later but the loaded version is\nonly [info patchlevel]"
 }
-package require -exact Tcl 8.6b1
+package require -exact Tcl 8.6.0
 
 # Compute the auto path to use in this interpreter.
 # The values on the path come from several locations:
@@ -78,7 +76,7 @@ namespace eval tcl {
     # TIP #255 min and max functions
     namespace eval mathfunc {
 	proc min {args} {
-	    if {[llength $args] == 0} {
+	    if {![llength $args]} {
 		return -code error \
 		    "too few arguments to math function \"min\""
 	    }
@@ -89,12 +87,12 @@ namespace eval tcl {
 		if {[catch {expr {double($arg)}} err]} {
 		    return -code error $err
 		}
-		if {$arg < $val} { set val $arg }
+		if {$arg < $val} {set val $arg}
 	    }
 	    return $val
 	}
 	proc max {args} {
-	    if {[llength $args] == 0} {
+	    if {![llength $args]} {
 		return -code error \
 		    "too few arguments to math function \"max\""
 	    }
@@ -105,208 +103,13 @@ namespace eval tcl {
 		if {[catch {expr {double($arg)}} err]} {
 		    return -code error $err
 		}
-		if {$arg > $val} { set val $arg }
+		if {$arg > $val} {set val $arg}
 	    }
 	    return $val
 	}
 	namespace export min max
     }
 }
-
-# TIP #329: [try] and [throw]
-# These are *temporary* implementations, to be replaced with ones in C and
-# bytecode at a later date before 8.6.0
-namespace eval ::tcl::control {
-    # These are not local, since this allows us to [uplevel] a [catch] rather
-    # than [catch] the [uplevel]ing of something, resulting in a cleaner
-    # -errorinfo:
-    variable em {}
-    variable opts {}
-
-    variable magicCodes { ok 0 error 1 return 2 break 3 continue 4 }
-
-    namespace export throw try
-
-    # ::tcl::control::throw --
-    #
-    #	Creates an error with machine-readable "code" parts and
-    #	human-readable "message" parts.
-    #
-    # Arguments:
-    #	throw -		list describing errorcode
-    #	message -	Human-readable version of error
-    proc throw {type message} {
-	return -code error -errorcode $type -errorinfo $message -level 1 \
-	    $message
-    }
-
-    # ::tcl::control::try --
-    #
-    #	Advanced error handling construct.
-    #
-    # Arguments:
-    #	See try(n) for details
-    proc try {args} {
-	variable magicCodes
-
-	# ----- Parse arguments -----
-
-	set trybody [lindex $args 0]
-	set finallybody {}
-	set handlers [list]
-	set i 1
-
-	while {$i < [llength $args]} {
-	    switch -- [lindex $args $i] {
-		"on" {
-		    incr i
-		    set code [lindex $args $i]
-		    if {[dict exists $magicCodes $code]} {
-			set code [dict get $magicCodes $code]
-		    } elseif {![string is integer -strict $code]} {
-			set msgPart [join [dict keys $magicCodes] {", "}]
-			error "bad code '[lindex $args $i]': must be\
-			    integer or \"$msgPart\""
-		    }
-		    lappend handlers [lrange $args $i $i] \
-			[format %d $code] {} {*}[lrange $args $i+1 $i+2]
-		    incr i 3
-		}
-		"trap" {
-		    incr i
-		    if {![string is list [lindex $args $i]]} {
-			error "bad prefix '[lindex $args $i]':\
-			    must be a list"
-		    }
-		    lappend handlers [lrange $args $i $i] 1 \
-			{*}[lrange $args $i $i+2]
-		    incr i 3
-		}
-		"finally" {
-		    incr i
-		    set finallybody [lindex $args $i]
-		    incr i
-		    break
-		}
-		default {
-		    error "bad handler '[lindex $args $i]': must be\
-			\"on code varlist body\", or\
-			\"trap prefix varlist body\""
-		}
-	    }
-	}
-
-	if {($i != [llength $args]) || ([lindex $handlers end] eq "-")} {
-	    error "wrong # args: should be\
-		\"try body ?handler ...? ?finally body?\""
-	}
-
-	# ----- Execute 'try' body -----
-
-	variable em
-	variable opts
-	set EMVAR  [namespace which -variable em]
-	set OPTVAR [namespace which -variable opts]
-	set code [uplevel 1 [list ::catch $trybody $EMVAR $OPTVAR]]
-
-	if {$code == 1} {
-	    set line [dict get $opts -errorline]
-	    dict append opts -errorinfo \
-		"\n    (\"[lindex [info level 0] 0]\" body line $line)"
-	}
-
-	# Keep track of the original error message & options
-	set _em $em
-	set _opts $opts
-
-	# ----- Find and execute handler -----
-
-	set errorcode {}
-	if {[dict exists $opts -errorcode]} {
-	    set errorcode [dict get $opts -errorcode]
-	}
-	set found false
-	foreach {descrip oncode pattern varlist body} $handlers {
-	    if {!$found} {
-		if {
-		    ($code != $oncode) || ([lrange $pattern 0 end] ne
-		    [lrange $errorcode 0 [llength $pattern]-1] )
-		} then {
-		    continue
-		}
-	    }
-	    set found true
-	    if {$body eq "-"} {
-		continue
-	    }
-
-	    # Handler found ...
-
-	    # Assign trybody results into variables
-	    lassign $varlist resultsVarName optionsVarName
-	    if {[llength $varlist] >= 1} {
-		upvar 1 $resultsVarName resultsvar
-		set resultsvar $em
-	    }
-	    if {[llength $varlist] >= 2} {
-		upvar 1 $optionsVarName optsvar
-		set optsvar $opts
-	    }
-
-	    # Execute the handler
-	    set code [uplevel 1 [list ::catch $body $EMVAR $OPTVAR]]
-
-	    if {$code == 1} {
-		set line [dict get $opts -errorline]
-		dict append opts -errorinfo \
-		    "\n    (\"[lindex [info level 0] 0] ... $descrip\"\
-		    body line $line)"
-		# On error chain to original outcome
-		dict set opts -during $_opts
-	    }
-
-	    # Handler result replaces the original result (whether success or
-	    # failure); capture context of original exception for reference.
-	    set _em $em
-	    set _opts $opts
-
-	    # Handler has been executed - stop looking for more
-	    break
-	}
-
-	# No catch handler found -- error falls through to caller
-	# OR catch handler executed -- result falls through to caller
-
-	# ----- If we have a finally block then execute it -----
-
-	if {$finallybody ne {}} {
-	    set code [uplevel 1 [list ::catch $finallybody $EMVAR $OPTVAR]]
-
-	    # Finally result takes precedence except on success
-
-	    if {$code == 1} {
-		set line [dict get $opts -errorline]
-		dict append opts -errorinfo \
-		    "\n    (\"[lindex [info level 0] 0] ... finally\"\
-		    body line $line)"
-		# On error chain to original outcome
-		dict set opts -during $_opts
-	    }
-	    if {$code != 0} {
-		set _em $em
-		set _opts $opts
-	    }
-
-	    # Otherwise our result is not affected
-	}
-
-	# Propagate the error or the result of the executed catch body to the
-	# caller.
-	dict incr _opts -level
-	return -options $_opts $_em
-    }
-}
-namespace import ::tcl::control::*
 
 # Windows specific end of initialization
 
@@ -432,8 +235,13 @@ proc unknown args {
     variable ::tcl::UnknownPending
     global auto_noexec auto_noload env tcl_interactive
 
-    catch {set savedErrorInfo $::errorInfo}
-    catch {set savedErrorCode $::errorCode}
+
+    if {[info exists ::errorInfo]} {
+	set savedErrorInfo $::errorInfo
+    }
+    if {[info exists ::errorCode]} {
+	set savedErrorCode $::errorCode
+    }
 
     set name [lindex $args 0]
     if {![info exists auto_noload]} {
@@ -442,13 +250,13 @@ proc unknown args {
 	#
 	if {[info exists UnknownPending($name)]} {
 	    return -code error "self-referential recursion\
-		    in \"unknown\" for command \"$name\"";
+		    in \"unknown\" for command \"$name\""
 	}
-	set UnknownPending($name) pending;
+	set UnknownPending($name) pending
 	set ret [catch {
 		auto_load $name [uplevel 1 {::namespace current}]
 	} msg opts]
-	unset UnknownPending($name);
+	unset UnknownPending($name)
 	if {$ret != 0} {
 	    dict append opts -errorinfo "\n    (autoloading \"$name\")"
 	    return -options $opts $msg
@@ -736,14 +544,14 @@ proc auto_qualify {cmd namespace} {
 
     # Before each return case we give an example of which category it is
     # with the following form :
-    # ( inputCmd, inputNameSpace) -> output
+    # (inputCmd, inputNameSpace) -> output
 
     if {[string match ::* $cmd]} {
 	if {$n > 1} {
-	    # ( ::foo::bar , * ) -> ::foo::bar
+	    # (::foo::bar , *) -> ::foo::bar
 	    return [list $cmd]
 	} else {
-	    # ( ::global , * ) -> global
+	    # (::global , *) -> global
 	    return [list [string range $cmd 2 end]]
 	}
     }
@@ -753,17 +561,17 @@ proc auto_qualify {cmd namespace} {
 
     if {$n == 0} {
 	if {$namespace eq "::"} {
-	    # ( nocolons , :: ) -> nocolons
+	    # (nocolons , ::) -> nocolons
 	    return [list $cmd]
 	} else {
-	    # ( nocolons , ::sub ) -> ::sub::nocolons nocolons
+	    # (nocolons , ::sub) -> ::sub::nocolons nocolons
 	    return [list ${namespace}::$cmd $cmd]
 	}
     } elseif {$namespace eq "::"} {
-	#  ( foo::bar , :: ) -> ::foo::bar
+	#  (foo::bar , ::) -> ::foo::bar
 	return [list ::$cmd]
     } else {
-	# ( foo::bar , ::sub ) -> ::sub::foo::bar ::foo::bar
+	# (foo::bar , ::sub) -> ::sub::foo::bar ::foo::bar
 	return [list ${namespace}::$cmd ::$cmd]
     }
 }
@@ -840,10 +648,10 @@ proc auto_execok name {
 	# Add an initial ; to have the {} extension check first.
 	set execExtensions [split ";$env(PATHEXT)" ";"]
     } else {
-	set execExtensions [list {} .com .exe .bat]
+	set execExtensions [list {} .com .exe .bat .cmd]
     }
 
-    if {$name in $shellBuiltins} {
+    if {[string tolower $name] in $shellBuiltins} {
 	# When this is command.com for some reason on Win2K, Tcl won't
 	# exec it unless the case is right, which this corrects.  COMSPEC
 	# may not point to a real file, so do the check.
@@ -881,11 +689,14 @@ proc auto_execok name {
 	}
     }
 
-    foreach dir [split $path {;}] {
-	# Skip already checked directories
-	if {[info exists checked($dir)] || ($dir eq {})} { continue }
-	set checked($dir) {}
-	foreach ext $execExtensions {
+    foreach ext $execExtensions {
+	unset -nocomplain checked
+	foreach dir [split $path {;}] {
+	    # Skip already checked directories
+	    if {[info exists checked($dir)] || ($dir eq "")} {
+		continue
+	    }
+	    set checked($dir) {}
 	    set file [file join $dir ${name}${ext}]
 	    if {[file exists $file] && ![file isdirectory $file]} {
 		return [set auto_execs($name) [list $file]]
@@ -1010,4 +821,32 @@ proc tcl::CopyDirectory {action src dest} {
 	}
     }
     return
+}
+
+# TIP 131
+if 0 {
+proc tcl::rmmadwiw {} {
+    set magic {
+        42 83 fe f6 ff f8 f1 e5 c6 f9 eb fd ff fb f1 e5 cc f5 ec f5 e3 fd fe
+        ff f5 fa f3 e1 c7 f9 f2 fd ff f9 fe f9 ed f4 fa f6 e6 f9 f2 e6 fd f9
+        ff f9 f6 e6 fa fd ff fc fb fc f9 f1 ed
+    }
+    foreach mystic [lassign $magic tragic] {
+        set comic [expr (0x$mystic ^ 0x$tragic) - 255 + 0x$tragic]
+        append logic [format %x $comic]
+        set tragic $mystic
+    }
+    binary format H* $logic
+}
+
+proc tcl::mathfunc::rmmadwiw {} {
+    set age [expr {9*6}]
+    set mind ""
+    while {$age} {
+        lappend mind [expr {$age%13}]
+        set age [expr {$age/13}]
+    }
+    set matter [lreverse $mind]
+    return [join $matter ""]
+}
 }

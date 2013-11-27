@@ -9,11 +9,18 @@
  *
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
- *
- * RCS: @(#) $Id: pkgb.c,v 1.10 2008/04/27 22:41:47 dkf Exp $
  */
 
+#undef STATIC_BUILD
 #include "tcl.h"
+
+/*
+ * TCL_STORAGE_CLASS is set unconditionally to DLLEXPORT because the
+ * Pkgb_Init declaration is in the source file itself, which is only
+ * accessed when we are building a library.
+ */
+#undef TCL_STORAGE_CLASS
+#define TCL_STORAGE_CLASS DLLEXPORT
 
 /*
  * Prototypes for procedures defined later in this file:
@@ -22,6 +29,8 @@
 static int    Pkgb_SubObjCmd(ClientData clientData,
 		Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]);
 static int    Pkgb_UnsafeObjCmd(ClientData clientData,
+		Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]);
+static int    Pkgb_DemoObjCmd(ClientData clientData,
 		Tcl_Interp *interp, int objc, Tcl_Obj *const objv[]);
 
 /*
@@ -86,7 +95,33 @@ Pkgb_UnsafeObjCmd(
     int objc,			/* Number of arguments. */
     Tcl_Obj *const objv[])	/* Argument objects. */
 {
-    Tcl_SetObjResult(interp, Tcl_NewStringObj("unsafe command invoked", -1));
+    return Tcl_EvalEx(interp, "list unsafe command invoked", -1, TCL_EVAL_GLOBAL);
+}
+
+#if (TCL_MAJOR_VERSION > 8)
+const char *Tcl_GetDefaultEncodingDir(void)
+{
+    int numDirs;
+    Tcl_Obj *first, *searchPath = Tcl_GetEncodingSearchPath();
+
+    Tcl_ListObjLength(NULL, searchPath, &numDirs);
+    if (numDirs == 0) {
+        return NULL;
+    }
+    Tcl_ListObjIndex(NULL, searchPath, 0, &first);
+
+    return Tcl_GetString(first);
+}
+#endif
+
+static int
+Pkgb_DemoObjCmd(
+    ClientData dummy,		/* Not used. */
+    Tcl_Interp *interp,		/* Current interpreter. */
+    int objc,			/* Number of arguments. */
+    Tcl_Obj *const objv[])	/* Argument objects. */
+{
+    Tcl_SetObjResult(interp, Tcl_NewStringObj(Tcl_GetDefaultEncodingDir(), -1));
     return TCL_OK;
 }
 
@@ -107,24 +142,23 @@ Pkgb_UnsafeObjCmd(
  *----------------------------------------------------------------------
  */
 
-int
+EXTERN int
 Pkgb_Init(
     Tcl_Interp *interp)		/* Interpreter in which the package is to be
 				 * made available. */
 {
     int code;
 
-    if (Tcl_InitStubs(interp, TCL_VERSION, 0) == NULL) {
+    if (Tcl_InitStubs(interp, "8.5-9.1", 0) == NULL) {
 	return TCL_ERROR;
     }
-    code = Tcl_PkgProvide(interp, "Pkgb", "2.3");
+    code = Tcl_PkgProvideEx(interp, "Pkgb", "2.3", NULL);
     if (code != TCL_OK) {
 	return code;
     }
-    Tcl_CreateObjCommand(interp, "pkgb_sub", Pkgb_SubObjCmd,
-	    (ClientData) 0, (Tcl_CmdDeleteProc *) NULL);
-    Tcl_CreateObjCommand(interp, "pkgb_unsafe", Pkgb_UnsafeObjCmd,
-	    (ClientData) 0, (Tcl_CmdDeleteProc *) NULL);
+    Tcl_CreateObjCommand(interp, "pkgb_sub", Pkgb_SubObjCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "pkgb_unsafe", Pkgb_UnsafeObjCmd, NULL, NULL);
+    Tcl_CreateObjCommand(interp, "pkgb_demo", Pkgb_DemoObjCmd, NULL, NULL);
     return TCL_OK;
 }
 
@@ -145,21 +179,20 @@ Pkgb_Init(
  *----------------------------------------------------------------------
  */
 
-int
+EXTERN int
 Pkgb_SafeInit(
     Tcl_Interp *interp)		/* Interpreter in which the package is to be
 				 * made available. */
 {
     int code;
 
-    if (Tcl_InitStubs(interp, TCL_VERSION, 0) == NULL) {
+    if (Tcl_InitStubs(interp, "8.5-9.1", 0) == NULL) {
 	return TCL_ERROR;
     }
-    code = Tcl_PkgProvide(interp, "Pkgb", "2.3");
+    code = Tcl_PkgProvideEx(interp, "Pkgb", "2.3", NULL);
     if (code != TCL_OK) {
 	return code;
     }
-    Tcl_CreateObjCommand(interp, "pkgb_sub", Pkgb_SubObjCmd, (ClientData) 0,
-	    (Tcl_CmdDeleteProc *) NULL);
+    Tcl_CreateObjCommand(interp, "pkgb_sub", Pkgb_SubObjCmd, NULL, NULL);
     return TCL_OK;
 }

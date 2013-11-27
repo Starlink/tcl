@@ -16,7 +16,7 @@
  */
 
 /* compare maginitude of two ints (unsigned) */
-int mp_cmp_mag (mp_int * a, mp_int * b)
+int mp_cmp_mag (const mp_int * a, const mp_int * b)
 {
   int     n;
   mp_digit *tmpa, *tmpb;
@@ -49,7 +49,3 @@ int mp_cmp_mag (mp_int * a, mp_int * b)
   return MP_EQ;
 }
 #endif
-
-/* $Source: /cvsroot/tcl/libtommath/bn_mp_cmp_mag.c,v $ */
-/* $Revision: 1.1.1.3 $ */
-/* $Date: 2006/12/01 00:08:11 $ */

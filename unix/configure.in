@@ -25,7 +25,7 @@ m4_ifdef([SC_USE_CONFIG_HEADERS], [
 TCL_VERSION=8.5
 TCL_MAJOR_VERSION=8
 TCL_MINOR_VERSION=5
-TCL_PATCH_LEVEL=".10"
+TCL_PATCH_LEVEL=".11"
 VERSION=${TCL_VERSION}
 
 #------------------------------------------------------------------------
@@ -705,10 +705,12 @@ AC_CACHE_CHECK([if the C stack grows upwards in memory], tcl_cv_stack_grows_up, 
     AC_TRY_RUN([
 	int StackGrowsUp(int *parent) {
 	    int here;
+	    volatile int result;
 	    if (parent)
-		return (&here < parent);
+		result = (&here < parent);
 	    else
-		return StackGrowsUp(&here);
+		result = StackGrowsUp(&here);
+	    return result;
 	}
 	int main (int argc, char *argv[]) {
 	    return StackGrowsUp(0);

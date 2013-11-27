@@ -1352,6 +1352,10 @@ DeleteInterpProc(
     if (iPtr->execEnvPtr != NULL) {
 	TclDeleteExecEnv(iPtr->execEnvPtr);
     }
+    if (iPtr->scriptFile) {
+	Tcl_DecrRefCount(iPtr->scriptFile);
+	iPtr->scriptFile = NULL;
+    }
     Tcl_DecrRefCount(iPtr->emptyObjPtr);
     iPtr->emptyObjPtr = NULL;
 
@@ -6746,7 +6750,7 @@ ExprRandFunc(
 	 * to insure different seeds in different threads (bug #416643)
 	 */
 
-	iPtr->randSeed = TclpGetClicks() + ((long)Tcl_GetCurrentThread()<<12);
+	iPtr->randSeed = TclpGetClicks() + (PTR2INT(Tcl_GetCurrentThread())<<12);
 
 	/*
 	 * Make sure 1 <= randSeed <= (2^31) - 2. See below.

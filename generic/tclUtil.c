@@ -1253,7 +1253,7 @@ int TclConvertElement(
 	    p[1] = '#';
 	    p += 2;
 	    src++;
-	    length--;
+	    length -= (length > 0);
 	} else {
 	    conversion = CONVERT_BRACE;
 	}
@@ -3165,7 +3165,8 @@ TclFormatInt(buffer, n)
      * negating it produces the same value.
      */
 
-    if (n == -n) {
+    intVal = -n;			/* [Bug 3390638] Workaround for*/
+    if (n == -n || intVal == n) {	/* broken compiler optimizers. */
 	return sprintf(buffer, "%ld", n);
     }
 

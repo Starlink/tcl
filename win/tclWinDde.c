@@ -135,14 +135,11 @@ int
 Dde_Init(
     Tcl_Interp *interp)
 {
-    ThreadSpecificData *tsdPtr;
-
     if (!Tcl_InitStubs(interp, "8.0", 0)) {
 	return TCL_ERROR;
     }
 
     Tcl_CreateObjCommand(interp, "dde", Tcl_DdeObjCmd, NULL, NULL);
-    tsdPtr = TCL_TSD_INIT(&dataKey);
     Tcl_CreateExitHandler(DdeExitProc, NULL);
     return Tcl_PkgProvide(interp, TCL_DDE_PACKAGE_NAME, TCL_DDE_VERSION);
 }
@@ -214,7 +211,7 @@ Initialize(void)
     if (ddeInstance == 0) {
 	Tcl_MutexLock(&ddeMutex);
 	if (ddeInstance == 0) {
-	    if (DdeInitialize(&ddeInstance, DdeServerProc,
+	    if (DdeInitialize(&ddeInstance, (PFNCALLBACK) DdeServerProc,
 		    CBF_SKIP_REGISTRATIONS | CBF_SKIP_UNREGISTRATIONS
 		    | CBF_FAIL_POKES, 0) != DMLERR_NO_ERROR) {
 		ddeInstance = 0;
@@ -960,7 +957,7 @@ DdeClientWindowProc(
 		(struct DdeEnumServices *) lpcs->lpCreateParams;
 
 #ifdef _WIN64
-	SetWindowLongPtr(hwnd, GWLP_USERDATA, (long)es);
+	SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR) es);
 #else
 	SetWindowLong(hwnd, GWL_USERDATA, (long)es);
 #endif
@@ -1035,7 +1032,7 @@ DdeEnumWindowsCallback(
     HWND hwndTarget,
     LPARAM lParam)
 {
-    DWORD dwResult = 0;
+    DWORD_PTR dwResult = 0;
     struct DdeEnumServices *es = (struct DdeEnumServices *) lParam;
 
     SendMessageTimeout(hwndTarget, WM_DDE_INITIATE, (WPARAM)es->hwnd,

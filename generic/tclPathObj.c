@@ -1367,37 +1367,20 @@ AppendPath(
     const char *bytes;
     Tcl_Obj *copy = Tcl_DuplicateObj(head);
 
-    bytes = Tcl_GetStringFromObj(copy, &numBytes);
-
     /*
-     * Should we perhaps use 'Tcl_FSPathSeparator'? But then what about the
-     * Windows special case? Perhaps we should just check if cwd is a root
-     * volume. We should never get numBytes == 0 in this code path.
+     * This is likely buggy when dealing with virtual filesystem drivers
+     * that use some character other than "/" as a path separator.  I know
+     * of no evidence that such a foolish thing exists.  This solution was
+     * chosen so that "JoinPath" operations that pass through either path
+     * intrep produce the same results; that is, bugward compatibility.  If
+     * we need to fix that bug here, it needs fixing in Tcl_FSJoinPath() too.
      */
-
-    switch (tclPlatform) {
-    case TCL_PLATFORM_UNIX:
-	if (bytes[numBytes-1] != '/') {
-	    Tcl_AppendToObj(copy, "/", 1);
-	}
-	break;
-
-    case TCL_PLATFORM_WINDOWS:
-	/*
-	 * We need the extra 'numBytes != 2', and ':' checks because a volume
-	 * relative path doesn't get a '/'. For example 'glob C:*cat*.exe'
-	 * will return 'C:cat32.exe'
-	 */
-
-	if (bytes[numBytes-1] != '/' && bytes[numBytes-1] != '\\') {
-	    if (numBytes!= 2 || bytes[1] != ':') {
-		Tcl_AppendToObj(copy, "/", 1);
-	    }
-	}
-	break;
+    bytes = Tcl_GetStringFromObj(tail, &numBytes);
+    if (numBytes == 0) {
+	Tcl_AppendToObj(copy, "/", 1);
+    } else {
+	TclpNativeJoinPath(copy, bytes);
     }
-
-    Tcl_AppendObjToObj(copy, tail);
     return copy;
 }
 
@@ -2669,29 +2652,29 @@ DupFsPathInternalRep(
 
     SETPATHOBJ(copyPtr, copyFsPathPtr);
 
-    if (srcFsPathPtr->translatedPathPtr != NULL) {
+    if (srcFsPathPtr->translatedPathPtr == srcPtr) {
+	/* Cycle in src -> make cycle in copy. */
+	copyFsPathPtr->translatedPathPtr = copyPtr;
+    } else {
 	copyFsPathPtr->translatedPathPtr = srcFsPathPtr->translatedPathPtr;
-	if (copyFsPathPtr->translatedPathPtr != copyPtr) {
+	if (copyFsPathPtr->translatedPathPtr != NULL) {
 	    Tcl_IncrRefCount(copyFsPathPtr->translatedPathPtr);
 	}
-    } else {
-	copyFsPathPtr->translatedPathPtr = NULL;
     }
 
-    if (srcFsPathPtr->normPathPtr != NULL) {
+    if (srcFsPathPtr->normPathPtr == srcPtr) {
+	/* Cycle in src -> make cycle in copy. */
+	copyFsPathPtr->normPathPtr = copyPtr;
+    } else {
 	copyFsPathPtr->normPathPtr = srcFsPathPtr->normPathPtr;
-	if (copyFsPathPtr->normPathPtr != copyPtr) {
+	if (copyFsPathPtr->normPathPtr != NULL) {
 	    Tcl_IncrRefCount(copyFsPathPtr->normPathPtr);
 	}
-    } else {
-	copyFsPathPtr->normPathPtr = NULL;
     }
 
-    if (srcFsPathPtr->cwdPtr != NULL) {
-	copyFsPathPtr->cwdPtr = srcFsPathPtr->cwdPtr;
+    copyFsPathPtr->cwdPtr = srcFsPathPtr->cwdPtr;
+    if (copyFsPathPtr->cwdPtr != NULL) {
 	Tcl_IncrRefCount(copyFsPathPtr->cwdPtr);
-    } else {
-	copyFsPathPtr->cwdPtr = NULL;
     }
 
     copyFsPathPtr->flags = srcFsPathPtr->flags;

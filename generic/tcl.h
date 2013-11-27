@@ -58,10 +58,10 @@ extern "C" {
 #define TCL_MAJOR_VERSION   8
 #define TCL_MINOR_VERSION   5
 #define TCL_RELEASE_LEVEL   TCL_FINAL_RELEASE
-#define TCL_RELEASE_SERIAL  10
+#define TCL_RELEASE_SERIAL  11
 
 #define TCL_VERSION	    "8.5"
-#define TCL_PATCH_LEVEL	    "8.5.10"
+#define TCL_PATCH_LEVEL	    "8.5.11"
 
 /*
  * The following definitions set up the proper options for Windows compilers.
@@ -2135,7 +2135,7 @@ typedef struct Tcl_Parse {
  * reflected in regcustom.h.
  */
 
-#if TCL_UTF_MAX > 3
+#if TCL_UTF_MAX > 4
     /*
      * unsigned int isn't 100% accurate as it should be a strict 4-byte value
      * (perhaps wchar_t). 64-bit systems may have troubles. The size of this

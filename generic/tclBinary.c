@@ -124,9 +124,9 @@ typedef struct ByteArray {
 #define BYTEARRAY_SIZE(len) \
 		((unsigned) (sizeof(ByteArray) - 4 + (len)))
 #define GET_BYTEARRAY(objPtr) \
-		((ByteArray *) (objPtr)->internalRep.otherValuePtr)
+		((ByteArray *) (objPtr)->internalRep.twoPtrValue.ptr1)
 #define SET_BYTEARRAY(objPtr, baPtr) \
-		(objPtr)->internalRep.otherValuePtr = (VOID *) (baPtr)
+		(objPtr)->internalRep.twoPtrValue.ptr1 = (VOID *) (baPtr)
 
 
 /*
@@ -271,7 +271,7 @@ Tcl_SetByteArrayObj(
 	Tcl_Panic("%s called with shared object", "Tcl_SetByteArrayObj");
     }
     TclFreeIntRep(objPtr);
-    Tcl_InvalidateStringRep(objPtr);
+    TclInvalidateStringRep(objPtr);
 
     if (length < 0) {
 	length = 0;
@@ -367,7 +367,7 @@ Tcl_SetByteArrayLength(
 	byteArrayPtr->allocated = length;
 	SET_BYTEARRAY(objPtr, byteArrayPtr);
     }
-    Tcl_InvalidateStringRep(objPtr);
+    TclInvalidateStringRep(objPtr);
     byteArrayPtr->used = length;
     return byteArrayPtr->bytes;
 }

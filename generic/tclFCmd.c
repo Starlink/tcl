@@ -10,11 +10,6 @@
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  */
 
-#ifndef _WIN64
-/* See [Bug 3354324]: file mtime sets wrong time */
-#   define _USE_32BIT_TIME_T
-#endif
-
 #include "tclInt.h"
 
 /*
@@ -747,17 +742,14 @@ CopyRenameOneFile(
 	     */
 
 	    errfile = target;
-
-	    /*
-	     * We now need to reset the result, because the above call, if it
-	     * failed, may have put an error message in place. (Ideally we
-	     * would prefer not to pass an interpreter in above, but the
-	     * channel IO code used by TclCrossFilesystemCopy currently
-	     * requires one).
-	     */
-
-	    Tcl_ResetResult(interp);
 	}
+	/* 
+	 * We now need to reset the result, because the above call,
+	 * may have left set it.  (Ideally we would prefer not to pass
+	 * an interpreter in above, but the channel IO code used by
+	 * TclCrossFilesystemCopy currently requires one)
+	 */
+	Tcl_ResetResult(interp);
     }
     if ((copyFlag == 0) && (result == TCL_OK)) {
 	if (S_ISDIR(sourceStatBuf.st_mode)) {

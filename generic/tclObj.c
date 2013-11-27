@@ -993,7 +993,12 @@ Tcl_ConvertToType(
      */
 
     if (typePtr->setFromAnyProc == NULL) {
-	Tcl_Panic("may not convert object to type %s", typePtr->name);
+	if (interp) {
+	    Tcl_SetObjResult(interp, Tcl_ObjPrintf(
+		    "can't convert value to type %s", typePtr->name));
+	    Tcl_SetErrorCode(interp, "TCL", "API_ABUSE", NULL);
+	}
+	return TCL_ERROR;
     }
 
     return typePtr->setFromAnyProc(interp, objPtr);
@@ -1243,7 +1248,7 @@ Tcl_DbNewObj(
  * Side effects:
  *	tclFreeObjList, the head of the list of free Tcl_Objs, is set to the
  *	first of a number of free Tcl_Obj's linked together by their
- *	internalRep.otherValuePtrs.
+ *	internalRep.twoPtrValue.ptr1's.
  *
  *----------------------------------------------------------------------
  */
@@ -1272,7 +1277,7 @@ TclAllocateFreeObjects(void)
     prevPtr = NULL;
     objPtr = (Tcl_Obj *) basePtr;
     for (i = 0; i < OBJS_TO_ALLOC_EACH_TIME; i++) {
-	objPtr->internalRep.otherValuePtr = (void *) prevPtr;
+	objPtr->internalRep.twoPtrValue.ptr1 = (void *) prevPtr;
 	prevPtr = objPtr;
 	objPtr++;
     }
@@ -1317,9 +1322,21 @@ TclFreeObj(
 
     ObjInitDeletionContext(context);
 
+    /*
+     * Check for a double free of the same value.  This is slightly tricky
+     * because it is customary to free a Tcl_Obj when its refcount falls
+     * either from 1 to 0, or from 0 to -1.  Falling from -1 to -2, though,
+     * and so on, is always a sign of a botch in the caller.
+     */
     if (objPtr->refCount < -1) {
 	Tcl_Panic("Reference count for %lx was negative", objPtr);
     }
+    /*
+     * Now, in case we just approved drop from 1 to 0 as acceptable, make
+     * sure we do not accept a second free when falling from 0 to -1.
+     * Skip that possibility so any double free will trigger the panic.
+     */
+    objPtr->refCount = -1;
 
     /* Invalidate the string rep first so we can use the bytes value 
      * for our pointer chain, and signal an obj deletion (as opposed
@@ -4288,7 +4305,7 @@ SetCmdNameFromAny(
 
     if (cmdPtr) {
 	cmdPtr->refCount++;
-	resPtr = (ResolvedCmdName *) objPtr->internalRep.otherValuePtr;
+	resPtr = (ResolvedCmdName *) objPtr->internalRep.twoPtrValue.ptr1;
 	if ((objPtr->typePtr == &tclCmdNameType)
 		&& resPtr && (resPtr->refCount == 1)) {
 	    /*

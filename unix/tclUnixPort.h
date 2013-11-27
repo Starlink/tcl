@@ -22,10 +22,6 @@
 
 #ifndef _TCLUNIXPORT
 #define _TCLUNIXPORT
-
-#ifndef MODULE_SCOPE
-#define MODULE_SCOPE extern
-#endif
 
 /*
  *---------------------------------------------------------------------------
@@ -89,22 +85,22 @@ typedef off_t		Tcl_SeekOffset;
 #   define HINSTANCE void *
 #   define SOCKET unsigned int
 #   define WSAEWOULDBLOCK 10035
-    DLLIMPORT extern __stdcall int GetModuleHandleExW(unsigned int, const char *, void *);
-    DLLIMPORT extern __stdcall int GetModuleFileNameW(void *, const char *, int);
-    DLLIMPORT extern __stdcall int WideCharToMultiByte(int, int, const char *, int,
+    __declspec(dllimport) extern __stdcall int GetModuleHandleExW(unsigned int, const char *, void *);
+    __declspec(dllimport) extern __stdcall int GetModuleFileNameW(void *, const char *, int);
+    __declspec(dllimport) extern __stdcall int WideCharToMultiByte(int, int, const char *, int,
 	    const char *, int, const char *, const char *);
 
-    DLLIMPORT extern int cygwin_conv_path(int, const void *, void *, int);
-    DLLIMPORT extern int cygwin_conv_path_list(int, const void *, void *, int);
+    __declspec(dllimport) extern int cygwin_conv_path(int, const void *, void *, int);
+    __declspec(dllimport) extern int cygwin_conv_path_list(int, const void *, void *, int);
 #   define USE_PUTENV 1
 #   define USE_PUTENV_FOR_UNSET 1
 /* On Cygwin, the environment is imported from the Cygwin DLL. */
 #   define environ __cygwin_environ
 #   define timezone _timezone
-    DLLIMPORT extern char **__cygwin_environ;
-    MODULE_SCOPE int TclOSstat(const char *name, Tcl_StatBuf *statBuf);
-    MODULE_SCOPE int TclOSlstat(const char *name, Tcl_StatBuf *statBuf);
-#elif defined(HAVE_STRUCT_STAT64)
+    extern char **__cygwin_environ;
+    extern int TclOSstat(const char *name, void *statBuf);
+    extern int TclOSlstat(const char *name, void *statBuf);
+#elif defined(HAVE_STRUCT_STAT64) && !defined(__APPLE__)
 #   define TclOSstat		stat64
 #   define TclOSlstat		lstat64
 #else
@@ -116,9 +112,7 @@ typedef off_t		Tcl_SeekOffset;
 #ifdef HAVE_SYS_SELECT_H
 #   include <sys/select.h>
 #endif
-#ifdef HAVE_SYS_STAT_H
-#   include <sys/stat.h>
-#endif
+#include <sys/stat.h>
 #if TIME_WITH_SYS_TIME
 #   include <sys/time.h>
 #   include <time.h>
@@ -149,7 +143,7 @@ typedef off_t		Tcl_SeekOffset;
 #   include "../compat/unistd.h"
 #endif
 
-MODULE_SCOPE int TclUnixSetBlockingMode(int fd, int mode);
+extern int TclUnixSetBlockingMode(int fd, int mode);
 
 #include <utime.h>
 
@@ -283,7 +277,7 @@ MODULE_SCOPE int TclUnixSetBlockingMode(int fd, int mode);
 #endif
 
 #ifdef GETTOD_NOT_DECLARED
-EXTERN int		gettimeofday (struct timeval *tp,
+extern int		gettimeofday (struct timeval *tp,
 			    struct timezone *tzp);
 #endif
 
@@ -627,8 +621,6 @@ typedef int socklen_t;
 
 #ifdef TCL_THREADS
 #  include <pthread.h>
-EXTERN struct tm *TclpLocaltime(CONST time_t *);
-EXTERN struct tm *TclpGmtime(CONST time_t *);
 /* #define localtime(x)	TclpLocaltime(x)
  * #define gmtime(x)	TclpGmtime(x)    */
 #   undef inet_ntoa
@@ -646,7 +638,7 @@ EXTERN struct tm *TclpGmtime(CONST time_t *);
 #	ifdef HAVE_PTHREAD_GETATTR_NP
 #	    define TclpPthreadGetAttrs	pthread_getattr_np
 #	    ifdef GETATTRNP_NOT_DECLARED
-EXTERN int pthread_getattr_np (pthread_t, pthread_attr_t *);
+extern int pthread_getattr_np (pthread_t, pthread_attr_t *);
 #	    endif
 #	endif /* HAVE_PTHREAD_GETATTR_NP */
 #   endif /* HAVE_PTHREAD_ATTR_GET_NP */
@@ -662,11 +654,11 @@ EXTERN int pthread_getattr_np (pthread_t, pthread_attr_t *);
 
 #include <grp.h>
 
-MODULE_SCOPE struct passwd*  TclpGetPwNam(const char *name);
-MODULE_SCOPE struct group*   TclpGetGrNam(const char *name);
-MODULE_SCOPE struct passwd*  TclpGetPwUid(uid_t uid);
-MODULE_SCOPE struct group*   TclpGetGrGid(gid_t gid);
-MODULE_SCOPE struct hostent* TclpGetHostByName(const char *name);
-MODULE_SCOPE struct hostent* TclpGetHostByAddr(const char *addr, int length, int type);
+extern struct passwd*  TclpGetPwNam(const char *name);
+extern struct group*   TclpGetGrNam(const char *name);
+extern struct passwd*  TclpGetPwUid(uid_t uid);
+extern struct group*   TclpGetGrGid(gid_t gid);
+extern struct hostent* TclpGetHostByName(const char *name);
+extern struct hostent* TclpGetHostByAddr(const char *addr, int length, int type);
 
 #endif /* _TCLUNIXPORT */

@@ -2108,6 +2108,9 @@ declare 578 {
 declare 579 {
     void Tcl_AppendPrintfToObj(Tcl_Obj *objPtr, const char *format, ...)
 }
+declare 630 {
+    void TclUnusedStubEntry(void)
+}
 
 ##############################################################################
 
@@ -2167,14 +2170,6 @@ export {
 }
 export {
     void Tcl_GetMemoryInfo(Tcl_DString *dsPtr)
-}
-export {
-    const char *Tcl_InitStubs(Tcl_Interp *interp, const char *version,
-	int exact)
-}
-export {
-    const char *TclTomMathInitializeStubs(Tcl_Interp *interp,
-	const char *version, int epoch, int revision)
 }
 
 # Global variables that need to be exported from the tcl shared library.

@@ -15,7 +15,6 @@
 #include "tclWinInt.h"
 #include "tclFileSystem.h"
 #include <winioctl.h>
-#include <sys/stat.h>
 #include <shlobj.h>
 #include <lmaccess.h>		/* For TclpGetUserHome(). */
 
@@ -190,7 +189,7 @@ static unsigned short	NativeStatMode(DWORD attr, int checkLinks,
 			    int isExec);
 static int		NativeIsExec(const TCHAR *path);
 static int		NativeReadReparse(const TCHAR *LinkDirectory,
-			    REPARSE_DATA_BUFFER *buffer);
+			    REPARSE_DATA_BUFFER *buffer, DWORD desiredAccess);
 static int		NativeWriteReparse(const TCHAR *LinkDirectory,
 			    REPARSE_DATA_BUFFER *buffer);
 static int		NativeMatchType(int isDrive, DWORD attr,
@@ -481,7 +480,7 @@ TclWinSymLinkCopyDirectory(
     DUMMY_REPARSE_BUFFER dummy;
     REPARSE_DATA_BUFFER *reparseBuffer = (REPARSE_DATA_BUFFER *) &dummy;
 
-    if (NativeReadReparse(linkOrigPath, reparseBuffer)) {
+    if (NativeReadReparse(linkOrigPath, reparseBuffer, GENERIC_READ)) {
 	return -1;
     }
     return NativeWriteReparse(linkCopyPath, reparseBuffer);
@@ -580,7 +579,7 @@ WinReadLinkDirectory(
     if (!(attr & FILE_ATTRIBUTE_REPARSE_POINT)) {
 	goto invalidError;
     }
-    if (NativeReadReparse(linkDirPath, reparseBuffer)) {
+    if (NativeReadReparse(linkDirPath, reparseBuffer, 0)) {
 	return NULL;
     }
 
@@ -699,12 +698,13 @@ WinReadLinkDirectory(
 static int
 NativeReadReparse(
     const TCHAR *linkDirPath,	/* The junction to read */
-    REPARSE_DATA_BUFFER *buffer)/* Pointer to buffer. Cannot be NULL */
+    REPARSE_DATA_BUFFER *buffer,/* Pointer to buffer. Cannot be NULL */
+    DWORD desiredAccess)
 {
     HANDLE hFile;
     DWORD returnedLength;
 
-    hFile = (*tclWinProcs->createFileProc)(linkDirPath, GENERIC_READ, 0,
+    hFile = (*tclWinProcs->createFileProc)(linkDirPath, desiredAccess, 0,
 	    NULL, OPEN_EXISTING,
 	    FILE_FLAG_OPEN_REPARSE_POINT|FILE_FLAG_BACKUP_SEMANTICS, NULL);
 
@@ -1543,11 +1543,14 @@ NativeAccess(
 
     if (attr == 0xffffffff) {
 	/*
-	 * File doesn't exist.
+	 * File might not exist.
 	 */
 
-	TclWinConvertError(GetLastError());
-	return -1;
+	DWORD lasterror = GetLastError();
+	if (lasterror != ERROR_SHARING_VIOLATION) {
+	    TclWinConvertError(lasterror);
+	    return -1;
+	}
     }
 
     if (mode == F_OK) {
@@ -2046,8 +2049,21 @@ NativeStat(
 
 	if ((*tclWinProcs->getFileAttributesExProc)(nativePath,
 		GetFileExInfoStandard, &data) != TRUE) {
-	    Tcl_SetErrno(ENOENT);
-	    return -1;
+	    HANDLE hFind;
+	    WIN32_FIND_DATAT ffd;
+	    DWORD lasterror = GetLastError();
+
+	    if (lasterror != ERROR_SHARING_VIOLATION) {
+		TclWinConvertError(lasterror);
+		return -1;
+		}
+	    hFind = (*tclWinProcs->findFirstFileProc)(nativePath, &ffd);
+	    if (hFind == INVALID_HANDLE_VALUE) {
+		TclWinConvertError(GetLastError());
+		return -1;
+	    }
+	    memcpy(&data, &ffd, sizeof(data));
+	    FindClose(hFind);
 	}
 
 	attr = data.dwFileAttributes;
@@ -2569,6 +2585,12 @@ TclpObjNormalizePath(
 				}
 				Tcl_DStringAppend(&dsNorm, nativePath, len);
 				lastValidPathEnd = currentPathEndPosition;
+			    } else if (nextCheckpoint == 0) {
+				/* Path starts with a drive designation
+				 * that's not actually on the system.
+				 * We still must normalize up past the
+				 * first separator.  [Bug 3603434] */
+				currentPathEndPosition++;
 			    }
 			}
 			Tcl_DStringFree(&ds);
@@ -2711,6 +2733,12 @@ TclpObjNormalizePath(
 			    Tcl_DStringAppend(&dsNorm, nativePath,
 				    (int)(sizeof(WCHAR) * len));
 			    lastValidPathEnd = currentPathEndPosition;
+			} else if (nextCheckpoint == 0) {
+			    /* Path starts with a drive designation
+			     * that's not actually on the system.
+			     * We still must normalize up past the
+			     * first separator.  [Bug 3603434] */
+			    currentPathEndPosition++;
 			}
 		    }
 		    Tcl_DStringFree(&ds);

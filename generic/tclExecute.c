@@ -1063,7 +1063,7 @@ TclStackFree(
     Tcl_Obj **markerPtr;
 
     if (iPtr == NULL || iPtr->execEnvPtr == NULL) {
-	Tcl_Free((char *) freePtr);
+	ckfree((char *) freePtr);
 	return;
     }
 
@@ -1112,7 +1112,7 @@ TclStackAlloc(
     int numWords = (numBytes + (sizeof(Tcl_Obj *) - 1))/sizeof(Tcl_Obj *);
 
     if (iPtr == NULL || iPtr->execEnvPtr == NULL) {
-	return (void *) Tcl_Alloc(numBytes);
+	return (void *) ckalloc(numBytes);
     }
 
     return (void *) StackAllocWords(interp, numWords);
@@ -1131,7 +1131,7 @@ TclStackRealloc(
     int numWords;
 
     if (iPtr == NULL || iPtr->execEnvPtr == NULL) {
-	return (void *) Tcl_Realloc((char *) ptr, numBytes);
+	return (void *) ckrealloc((char *) ptr, numBytes);
     }
 
     eePtr = iPtr->execEnvPtr;
@@ -1200,7 +1200,7 @@ Tcl_ExprObj(
     if (objPtr->typePtr == &exprCodeType) {
 	Namespace *namespacePtr = iPtr->varFramePtr->nsPtr;
 
-	codePtr = (ByteCode *) objPtr->internalRep.otherValuePtr;
+	codePtr = (ByteCode *) objPtr->internalRep.twoPtrValue.ptr1;
 	if (((Interp *) *codePtr->interpHandle != iPtr)
 		|| (codePtr->compileEpoch != iPtr->compileEpoch)
 		|| (codePtr->nsPtr != namespacePtr)
@@ -1240,7 +1240,7 @@ Tcl_ExprObj(
 	TclInitByteCodeObj(objPtr, &compEnv);
 	objPtr->typePtr = &exprCodeType;
 	TclFreeCompileEnv(&compEnv);
-	codePtr = (ByteCode *) objPtr->internalRep.otherValuePtr;
+	codePtr = (ByteCode *) objPtr->internalRep.twoPtrValue.ptr1;
 #ifdef TCL_COMPILE_DEBUG
 	if (tclTraceCompile == 2) {
 	    TclPrintByteCodeObj(interp, objPtr);
@@ -1338,14 +1338,13 @@ static void
 FreeExprCodeInternalRep(
     Tcl_Obj *objPtr)
 {
-    ByteCode *codePtr = (ByteCode *) objPtr->internalRep.otherValuePtr;
+    ByteCode *codePtr = (ByteCode *) objPtr->internalRep.twoPtrValue.ptr1;
 
     codePtr->refCount--;
     if (codePtr->refCount <= 0) {
 	TclCleanupByteCode(codePtr);
     }
     objPtr->typePtr = NULL;
-    objPtr->internalRep.otherValuePtr = NULL;
 }
 
 /*
@@ -1418,7 +1417,7 @@ TclCompEvalObj(
 	 * here.
 	 */
 
-	codePtr = (ByteCode *) objPtr->internalRep.otherValuePtr;
+	codePtr = (ByteCode *) objPtr->internalRep.twoPtrValue.ptr1;
 	if (((Interp *) *codePtr->interpHandle != iPtr)
 		|| (codePtr->compileEpoch != iPtr->compileEpoch)
 		|| (codePtr->nsPtr != namespacePtr)
@@ -1557,7 +1556,7 @@ TclCompEvalObj(
     iPtr->invokeWord = word;
     tclByteCodeType.setFromAnyProc(interp, objPtr);
     iPtr->invokeCmdFramePtr = NULL;
-    codePtr = (ByteCode *) objPtr->internalRep.otherValuePtr;
+    codePtr = (ByteCode *) objPtr->internalRep.twoPtrValue.ptr1;
     goto runCompiledObj;
 
     done:
@@ -6866,7 +6865,7 @@ TclExecuteByteCode(
 		}
 		result = TclIncrObj(interp, valPtr, incrPtr);
 		if (result == TCL_OK) {
-		    Tcl_InvalidateStringRep(dictPtr);
+		    TclInvalidateStringRep(dictPtr);
 		}
 		TclDecrRefCount(incrPtr);
 	    }

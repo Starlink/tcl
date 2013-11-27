@@ -128,9 +128,9 @@ typedef struct String {
 	(String *) attemptckrealloc((char *) ptr, \
 		(unsigned) STRING_SIZE(STRING_UALLOC(numChars)) )
 #define GET_STRING(objPtr) \
-	((String *) (objPtr)->internalRep.otherValuePtr)
+	((String *) (objPtr)->internalRep.twoPtrValue.ptr1)
 #define SET_STRING(objPtr, stringPtr) \
-	((objPtr)->internalRep.otherValuePtr = (void *) (stringPtr))
+	((objPtr)->internalRep.twoPtrValue.ptr1 = (void *) (stringPtr))
 
 /*
  * TCL STRING GROWTH ALGORITHM
@@ -741,7 +741,7 @@ Tcl_SetStringObj(
      * length bytes starting at "bytes".
      */
 
-    Tcl_InvalidateStringRep(objPtr);
+    TclInvalidateStringRep(objPtr);
     if (length < 0) {
 	length = (bytes? strlen(bytes) : 0);
     }
@@ -815,7 +815,7 @@ Tcl_SetObjLength(
 
 	    if (objPtr->bytes != NULL && objPtr->length != 0) {
 		memcpy(newBytes, objPtr->bytes, (size_t) objPtr->length);
-		Tcl_InvalidateStringRep(objPtr);
+		TclInvalidateStringRep(objPtr);
 	    }
 	    objPtr->bytes = newBytes;
 	}
@@ -943,7 +943,7 @@ Tcl_AttemptSetObjLength(
 	    }
 	    if (objPtr->bytes != NULL && objPtr->length != 0) {
 		memcpy(newBytes, objPtr->bytes, (size_t) objPtr->length);
-		Tcl_InvalidateStringRep(objPtr);
+		TclInvalidateStringRep(objPtr);
 	    }
 	}
 	objPtr->bytes = newBytes;
@@ -1080,7 +1080,7 @@ SetUnicodeObj(
     memcpy(stringPtr->unicode, unicode, uallocated);
     stringPtr->unicode[numChars] = 0;
 
-    Tcl_InvalidateStringRep(objPtr);
+    TclInvalidateStringRep(objPtr);
     objPtr->typePtr = &tclStringType;
     SET_STRING(objPtr, stringPtr);
 }
@@ -1411,7 +1411,7 @@ AppendUnicodeToUnicodeRep(
     stringPtr->numChars = numChars;
     stringPtr->allocated = 0;
 
-    Tcl_InvalidateStringRep(objPtr);
+    TclInvalidateStringRep(objPtr);
 }
 
 /*
@@ -2757,7 +2757,7 @@ TclStringObjReverse(
 	    source[lastCharIdx--] = source[i];
 	    source[i++] = tmp;
 	}
-	Tcl_InvalidateStringRep(objPtr);
+	TclInvalidateStringRep(objPtr);
 	stringPtr->allocated = 0;
 	return objPtr;
     }

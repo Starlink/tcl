@@ -1481,7 +1481,11 @@ TclCheckExecutionTraces(
     }
     iPtr->activeCmdTracePtr = active.nextPtr;
     if (state) {
-	(void) Tcl_RestoreInterpState(interp, state);
+	if (traceCode == TCL_OK) {
+	    (void) Tcl_RestoreInterpState(interp, state);
+	} else {
+	    Tcl_DiscardInterpState(state);
+	}
     }
 
     return(traceCode);

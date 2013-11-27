@@ -369,7 +369,7 @@ struct NamespacePathEntry {
 
 /*
  * The data cached in an ensemble subcommand's Tcl_Obj rep (reference in
- * otherValuePtr field). This structure is not shared between Tcl_Objs
+ * twoPtrValue.ptr1 field). This structure is not shared between Tcl_Objs
  * referring to the same subcommand, even where one is a duplicate of another.
  */
 
@@ -479,30 +479,6 @@ typedef struct ActiveVarTrace {
 				 * deleted, must update pointer to avoid using
 				 * free'd memory. */
 } ActiveVarTrace;
-
-/*
- * The following structure describes an enumerative search in progress on an
- * array variable; this are invoked with options to the "array" command.
- */
-
-typedef struct ArraySearch {
-    int id;			/* Integer id used to distinguish among
-				 * multiple concurrent searches for the same
-				 * array. */
-    struct Var *varPtr;		/* Pointer to array variable that's being
-				 * searched. */
-    Tcl_HashSearch search;	/* Info kept by the hash module about progress
-				 * through the array. */
-    Tcl_HashEntry *nextEntry;	/* Non-null means this is the next element to
-				 * be enumerated (it's leftover from the
-				 * Tcl_FirstHashEntry call or from an "array
-				 * anymore" command). NULL means must call
-				 * Tcl_NextHashEntry to get value to
-				 * return. */
-    struct ArraySearch *nextPtr;/* Next in list of all active searches for
-				 * this variable, or NULL if this is the last
-				 * one. */
-} ArraySearch;
 
 /*
  * The structure below defines a variable, which associates a string name with
@@ -1964,17 +1940,6 @@ typedef struct Interp {
     *((iPtr)->asyncReadyPtr)
 
 /*
- * General list of interpreters. Doubly linked for easier removal of items
- * deep in the list.
- */
-
-typedef struct InterpList {
-    Interp *interpPtr;
-    struct InterpList *prevPtr;
-    struct InterpList *nextPtr;
-} InterpList;
-
-/*
  * Macros for splicing into and out of doubly linked lists. They assume
  * existence of struct items 'prevPtr' and 'nextPtr'.
  *
@@ -2066,35 +2031,6 @@ typedef struct InterpList {
  */
 
 #define MAX_NESTING_DEPTH	1000
-
-/*
- * TIP#143 limit handler internal representation.
- */
-
-struct LimitHandler {
-    int flags;			/* The state of this particular handler. */
-    Tcl_LimitHandlerProc *handlerProc;
-				/* The handler callback. */
-    ClientData clientData;	/* Opaque argument to the handler callback. */
-    Tcl_LimitHandlerDeleteProc *deleteProc;
-				/* How to delete the clientData. */
-    LimitHandler *prevPtr;	/* Previous item in linked list of
-				 * handlers. */
-    LimitHandler *nextPtr;	/* Next item in linked list of handlers. */
-};
-
-/*
- * Values for the LimitHandler flags field.
- *	LIMIT_HANDLER_ACTIVE - Whether the handler is currently being
- *		processed; handlers are never to be entered reentrantly.
- *	LIMIT_HANDLER_DELETED - Whether the handler has been deleted. This
- *		should not normally be observed because when a handler is
- *		deleted it is also spliced out of the list of handlers, but
- *		even so we will be careful.
- */
-
-#define LIMIT_HANDLER_ACTIVE	0x01
-#define LIMIT_HANDLER_DELETED	0x02
 
 /*
  * The macro below is used to modify a "char" value (e.g. by casting it to an
@@ -3539,12 +3475,12 @@ MODULE_SCOPE Tcl_Mutex	tclObjMutex;
 	} \
 	(objPtr) = tclFreeObjList; \
 	tclFreeObjList = (Tcl_Obj *) \
-		tclFreeObjList->internalRep.otherValuePtr; \
+		tclFreeObjList->internalRep.twoPtrValue.ptr1; \
 	Tcl_MutexUnlock(&tclObjMutex)
 
 #  define TclFreeObjStorage(objPtr) \
 	Tcl_MutexLock(&tclObjMutex); \
-	(objPtr)->internalRep.otherValuePtr = (void *) tclFreeObjList; \
+	(objPtr)->internalRep.twoPtrValue.ptr1 = (void *) tclFreeObjList; \
 	tclFreeObjList = (objPtr); \
 	Tcl_MutexUnlock(&tclObjMutex)
 #endif

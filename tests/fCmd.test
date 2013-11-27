@@ -2408,14 +2408,17 @@ test fCmd-28.12 {file link: cd into a link} -setup {
 	return "ok"
     }
 } -cleanup {
+    file delete -force abc.link
     cd [workingDirectory]
 } -result ok
 test fCmd-28.13 {file link} -constraints {linkDirectory} -setup {
     cd [temporaryDirectory]
+    file link abc.link abc.dir
 } -body {
     # duplicate link throws error
     file link abc.link abc.dir
 } -returnCodes error -cleanup {
+    file delete -force abc.link
     cd [workingDirectory]
 } -result {could not create new link "abc.link": that path already exists}
 test fCmd-28.14 {file link: deletes link not dir} -setup {
@@ -2436,6 +2439,7 @@ test fCmd-28.15.1 {file link: copies link not dir} -setup {
     # directory, not a link (links trace to endpoint).
     list [file type abc2.link] [file tail [file link abc.link]]
 } -cleanup {
+    file delete -force abc.link
     cd [workingDirectory]
 } -result {directory abc.dir}
 test fCmd-28.15.2 {file link: copies link not dir} -setup {
@@ -2446,6 +2450,7 @@ test fCmd-28.15.2 {file link: copies link not dir} -setup {
     file copy abc.link abc2.link
     list [file type abc2.link] [file tail [file link abc2.link]]
 } -cleanup {
+    file delete -force abc.link
     cd [workingDirectory]
 } -result {link abc.dir}
 cd [temporaryDirectory]
@@ -2465,20 +2470,25 @@ test fCmd-28.16 {file link: glob inside link} -setup {
     file link abc.link abc.dir
     lsort [glob -dir abc.link -tails *]
 } -cleanup {
+    file delete -force abc.link
     cd [workingDirectory]
 } -result {abc.file abc2.file}
 test fCmd-28.17 {file link: glob -type l} -setup {
     cd [temporaryDirectory]
+    file link abc.link abc.dir
 } -constraints {linkDirectory} -body {
     glob -dir [pwd] -type l -tails abc*
 } -cleanup {
+    file delete -force abc.link
     cd [workingDirectory]
 } -result {abc.link}
 test fCmd-28.18 {file link: glob -type d} -constraints linkDirectory -setup {
     cd [temporaryDirectory]
+    file link abc.link abc.dir
 } -body {
     lsort [glob -dir [pwd] -type d -tails abc*]
 } -cleanup {
+    file delete -force abc.link
     cd [workingDirectory]
 } -result [lsort [list abc.link abc.dir abc2.dir]]
 test fCmd-28.19 {file link: relative paths} -setup {
@@ -2529,32 +2539,33 @@ file delete -force d1/d2
 file delete -force d1
 cd [workingDirectory]
 
+test fCmd-30.1 {file writable on 'My Documents'} -setup {
+    # Get the localized version of the folder name by looking in the registry.
+    set mydocsname [registry get {HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders} Personal]
+} -constraints {win reg} -body {
+    file writable $mydocsname
+} -result 1
+test fCmd-30.2 {file readable on 'NTUSER.DAT'} -constraints {win} -body {
+    expr {[info exists env(USERPROFILE)]
+          && [file exists $env(USERPROFILE)/NTUSER.DAT]
+          && [file readable $env(USERPROFILE)/NTUSER.DAT]}
+} -result {1}
+test fCmd-30.3 {file readable on 'pagefile.sys'} -constraints {win} -body {
+    set r {}
+    if {[info exists env(SystemDrive)]} {
+        set path $env(SystemDrive)/pagefile.sys
+        lappend r exists [file exists $path]
+        lappend r readable [file readable $path]
+        lappend r stat [catch {file stat $path a} e] $e
+    }
+    return $r
+} -result {exists 1 readable 0 stat 0 {}}
+
 removeFile abc2.file
 removeFile abc.file
 removeDirectory abc2.dir
 removeDirectory abc.dir
-
-test fCmd-30.1 {file writable on 'My Documents'} -constraints {win 2000orNewer} -body {
-    set mydocsname "~/My Documents"
-    # Would be good to localise this name, since this test will only function
-    # on english-speaking windows otherwise
-    if {[file exists $mydocsname]} {
-	return [file writable $mydocsname]
-    }
-    return 1
-} -result {1}
-test fCmd-30.2 {file readable on 'NTUSER.DAT'} -constraints {win 2000orNewer knownBug} -body {
-    # Apparently the OS has this file open with exclusive permissions Windows
-    # doesn't provide any way to determine that fact without actually trying
-    # to open the file (open NTUSER.dat r), which fails. Hence this isn't
-    # really a knownBug in Tcl, but an OS limitation. But, perhaps in the
-    # future that limitation will be lifted.
-    if {[file exists "~/NTUSER.DAT"]} {
-	return [file readable "~/NTUSER.DAT"]
-    }
-    return 0
-} -result {0}
-
+
 # cleanup
 cleanup
 if {[testConstraint unix]} {
@@ -2562,3 +2573,8 @@ if {[testConstraint unix]} {
 }
 ::tcltest::cleanupTests
 return
+
+# Local Variables:
+# mode: tcl
+# fill-column: 78
+# End:

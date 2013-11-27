@@ -9,8 +9,6 @@
  *
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
- *
- * RCS: @(#) $Id: tclPathObj.c,v 1.66.2.12 2010/05/21 12:18:17 nijtmans Exp $
  */
 
 #include "tclInt.h"
@@ -1156,7 +1154,6 @@ Tcl_FSConvertToPathType(
 	    UpdateStringOfFsPath(pathPtr);
 	}
 	FreeFsPathInternalRep(pathPtr);
-	pathPtr->typePtr = NULL;
     }
 
     return Tcl_ConvertToType(interp, pathPtr, &tclFsPathType);
@@ -1175,7 +1172,6 @@ Tcl_FSConvertToPathType(
      *             UpdateStringOfFsPath(pathPtr);
      *         }
      *         FreeFsPathInternalRep(pathPtr);
-     *         pathPtr->typePtr = NULL;
      *         return Tcl_ConvertToType(interp, pathPtr, &tclFsPathType);
      *     }
      * }
@@ -1965,7 +1961,6 @@ Tcl_FSGetNormalizedPath(
 		UpdateStringOfFsPath(pathPtr);
 	    }
 	    FreeFsPathInternalRep(pathPtr);
-	    pathPtr->typePtr = NULL;
 	    if (Tcl_ConvertToType(interp, pathPtr, &tclFsPathType) != TCL_OK) {
 		return NULL;
 	    }
@@ -2272,7 +2267,6 @@ TclFSEnsureEpochOk(
 	    UpdateStringOfFsPath(pathPtr);
 	}
 	FreeFsPathInternalRep(pathPtr);
-	pathPtr->typePtr = NULL;
 	if (SetFsPathFromAny(NULL, pathPtr) != TCL_OK) {
 	    return TCL_ERROR;
 	}
@@ -2662,6 +2656,7 @@ FreeFsPathInternalRep(
     }
 
     ckfree((char *) fsPathPtr);
+    pathPtr->typePtr = NULL;
 }
 
 static void

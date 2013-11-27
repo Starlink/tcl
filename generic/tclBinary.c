@@ -9,8 +9,6 @@
  *
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
- *
- * RCS: @(#) $Id: tclBinary.c,v 1.41.2.1 2010/04/30 20:59:20 dgp Exp $
  */
 
 #include "tclInt.h"
@@ -438,6 +436,7 @@ FreeByteArrayInternalRep(
     Tcl_Obj *objPtr)		/* Object with internal rep to free. */
 {
     ckfree((char *) GET_BYTEARRAY(objPtr));
+    objPtr->typePtr = NULL;
 }
 
 /*

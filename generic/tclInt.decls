@@ -12,8 +12,6 @@
 #
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
-#
-# RCS: @(#) $Id: tclInt.decls,v 1.121.2.4 2010/02/07 22:16:54 nijtmans Exp $
 
 library tcl
 
@@ -82,7 +80,7 @@ declare 12 generic {
 #	    Tcl_DString *headPtr, char *tail, Tcl_GlobTypeData *types)
 #}
 declare 14 generic {
-    void TclDumpMemoryInfo(FILE *outFile)
+    int TclDumpMemoryInfo(ClientData clientData, int flags)
 }
 # Removed in 8.1:
 #  declare 15 generic {
@@ -115,10 +113,10 @@ declare 22 generic {
 declare 23 generic {
     Proc *TclFindProc(Interp *iPtr, CONST char *procName)
 }
-# Replaced with macro (see tclInt.h) in Tcl 8.5
-#declare 24 generic {
-#    int TclFormatInt(char *buffer, long n)
-#}
+# Replaced with macro (see tclInt.h) in Tcl 8.5.0, restored in 8.5.10
+declare 24 generic {
+    int TclFormatInt(char *buffer, long n)
+}
 declare 25 generic {
     void TclFreePackageInfo(Interp *iPtr)
 }
@@ -578,7 +576,7 @@ declare 145 generic {
     struct AuxDataType *TclGetAuxDataType(char *typeName)
 }
 declare 146 generic {
-    TclHandle TclHandleCreate(VOID *ptr)
+    TclHandle TclHandleCreate(void *ptr)
 }
 declare 147 generic {
     void TclHandleFree(TclHandle handle)
@@ -938,6 +936,11 @@ declare 236 generic {
 # Tcl_Obj leak detection support.
 declare 243 generic {
     void TclDbDumpActiveObjects(FILE *outFile)
+}
+
+declare 249 {
+    char* TclDoubleDigits(double dv, int ndigits, int flags,
+			  int* decpt, int* signum, char** endPtr)
 }
 
 

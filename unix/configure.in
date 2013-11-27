@@ -2,8 +2,6 @@
 dnl	This file is an input file used by the GNU "autoconf" program to
 dnl	generate the file "configure", which is run during Tcl installation
 dnl	to configure the system for the local environment.
-#
-# RCS: @(#) $Id: configure.in,v 1.180.2.18 2010/09/06 12:57:34 stwo Exp $
 
 AC_INIT([tcl],[8.5])
 AC_PREREQ(2.59)
@@ -27,7 +25,7 @@ m4_ifdef([SC_USE_CONFIG_HEADERS], [
 TCL_VERSION=8.5
 TCL_MAJOR_VERSION=8
 TCL_MINOR_VERSION=5
-TCL_PATCH_LEVEL=".9"
+TCL_PATCH_LEVEL=".10"
 VERSION=${TCL_VERSION}
 
 #------------------------------------------------------------------------
@@ -707,11 +705,13 @@ AC_CACHE_CHECK([if the C stack grows upwards in memory], tcl_cv_stack_grows_up, 
     AC_TRY_RUN([
 	int StackGrowsUp(int *parent) {
 	    int here;
-	    return (&here < parent);
+	    if (parent)
+		return (&here < parent);
+	    else
+		return StackGrowsUp(&here);
 	}
 	int main (int argc, char *argv[]) {
-	    int foo;
-	    return StackGrowsUp(&foo);
+	    return StackGrowsUp(0);
 	}
     ], tcl_cv_stack_grows_up=yes, tcl_cv_stack_grows_up=no,
     tcl_cv_stack_grows_up=unknown)])

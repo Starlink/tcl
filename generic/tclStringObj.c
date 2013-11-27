@@ -32,8 +32,7 @@
  *
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
- *
- * RCS: @(#) $Id: tclStringObj.c,v 1.70.2.21 2010/04/02 14:30:41 vasiljevic Exp $ */
+ */
 
 #include "tclInt.h"
 #include "tommath.h"
@@ -2759,6 +2758,7 @@ TclStringObjReverse(
 	    source[i++] = tmp;
 	}
 	Tcl_InvalidateStringRep(objPtr);
+	stringPtr->allocated = 0;
 	return objPtr;
     }
 
@@ -3056,6 +3056,7 @@ FreeStringInternalRep(
     Tcl_Obj *objPtr)		/* Object with internal rep to free. */
 {
     ckfree((char *) GET_STRING(objPtr));
+    objPtr->typePtr = NULL;
 }
 
 /*

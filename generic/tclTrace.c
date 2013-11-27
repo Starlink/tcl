@@ -10,8 +10,6 @@
  *
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
- *
- * RCS: @(#) $Id: tclTrace.c,v 1.47.2.3 2010/08/19 10:04:15 dkf Exp $
  */
 
 #include "tclInt.h"
@@ -2876,6 +2874,16 @@ Tcl_UntraceVar2(
      * The code below makes it possible to delete traces while traces are
      * active: it makes sure that the deleted trace won't be processed by
      * TclCallVarTraces.
+     *
+     * Caveat (Bug 3062331): When an unset trace handler on a variable
+     * tries to delete a different unset trace handler on the same variable,
+     * the results may be surprising.  When variable unset traces fire, the
+     * traced variable is already gone.  So the TclLookupVar() call above
+     * will not find that variable, and not finding it will never reach here
+     * to perform the deletion.  This means callers of Tcl_UntraceVar*()
+     * attempting to delete unset traces from within the handler of another
+     * unset trace have to account for the possibility that their call to
+     * Tcl_UntraceVar*() is a no-op.
      */
 
     for (activePtr = iPtr->activeVarTracePtr;  activePtr != NULL;

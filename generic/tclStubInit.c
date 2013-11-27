@@ -7,8 +7,6 @@
  *
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
- *
- * RCS: @(#) $Id: tclStubInit.c,v 1.150.2.3 2010/02/07 22:16:54 nijtmans Exp $
  */
 
 #include "tclInt.h"
@@ -33,6 +31,8 @@
 #undef Tcl_ValidateAllMemory
 #undef Tcl_FindHashEntry
 #undef Tcl_CreateHashEntry
+#define TclpLocaltime_unix TclpLocaltime
+#define TclpGmtime_unix TclpGmtime
 
 /*
  * Keep a record of the original Notifier procedures, created in the
@@ -98,7 +98,7 @@ TclIntStubs tclIntStubs = {
     NULL, /* 21 */
     TclFindElement, /* 22 */
     TclFindProc, /* 23 */
-    NULL, /* 24 */
+    TclFormatInt, /* 24 */
     TclFreePackageInfo, /* 25 */
     NULL, /* 26 */
     NULL, /* 27 */
@@ -318,6 +318,12 @@ TclIntStubs tclIntStubs = {
     NULL, /* 241 */
     NULL, /* 242 */
     TclDbDumpActiveObjects, /* 243 */
+    NULL, /* 244 */
+    NULL, /* 245 */
+    NULL, /* 246 */
+    NULL, /* 247 */
+    NULL, /* 248 */
+    TclDoubleDigits, /* 249 */
 };
 
 TclIntPlatStubs tclIntPlatStubs = {
@@ -473,6 +479,8 @@ TclTomMathStubs tclTomMathStubs = {
     TclBN_s_mp_mul_digs, /* 58 */
     TclBN_s_mp_sqr, /* 59 */
     TclBN_s_mp_sub, /* 60 */
+    TclBN_mp_init_set_int, /* 61 */
+    TclBN_mp_set_int, /* 62 */
 };
 
 static TclStubHooks tclStubHooks = {

@@ -6,8 +6,6 @@
  * Copyright (c) 1995-1997 Sun Microsystems, Inc.
  * Copyright (c) 1999 by Scriptics Corporation.
  * All rights reserved.
- *
- * RCS: @(#) $Id: tclUnixInit.c,v 1.82.2.1 2009/10/05 02:41:13 das Exp $
  */
 
 #include "tclInt.h"
@@ -1094,9 +1092,19 @@ TclpGetCStackParams(
 	if (stackGrowsDown) {
 	    tsdPtr->stackBound = (int *) ((char *)tsdPtr->outerVarPtr -
 		    stackSize);
+	    if (tsdPtr->stackBound > tsdPtr->outerVarPtr) {
+	    	/* Overflow, that should never happen, just set it to NULL.
+	    	 * See [Bug #3166410] */
+	    	tsdPtr->stackBound = NULL;
+	    }
 	} else {
 	    tsdPtr->stackBound = (int *) ((char *)tsdPtr->outerVarPtr +
 		    stackSize);
+	    if (tsdPtr->stackBound < tsdPtr->outerVarPtr) {
+	    	/* Overflow, that should never happen, just set it to NULL.
+	    	 * See [Bug #3166410] */
+	    	tsdPtr->stackBound = NULL;
+	    }
 	}
     }
 

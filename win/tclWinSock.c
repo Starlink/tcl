@@ -8,7 +8,7 @@
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclWinSock.c,v 1.62 2008/02/22 11:50:54 patthoyts Exp $
+ * RCS: @(#) $Id: tclWinSock.c,v 1.62.2.2 2009/04/27 21:45:20 ferrieux Exp $
  */
 
 #include "tclWinInt.h"
@@ -231,7 +231,7 @@ InitSockets(void)
 
     if (!initialized) {
 	initialized = 1;
-	Tcl_CreateExitHandler(SocketExitHandler, (ClientData) NULL);
+	TclCreateLateExitHandler(SocketExitHandler, (ClientData) NULL);
 
 	/*
 	 * Create the async notification window with a new class. We must
@@ -1574,11 +1574,23 @@ TcpInputProc(
 	    break;
 	}
 
+	error = WSAGetLastError();
+
+	/*
+	 * If an RST comes, then ignore the error and report an EOF just like
+	 * on unix.
+	 */
+
+	if (error == WSAECONNRESET) {
+	    infoPtr->flags |= SOCKET_EOF;
+	    bytesRead = 0;
+	    break;
+	}
+
 	/*
 	 * Check for error condition or underflow in non-blocking case.
 	 */
 
-	error = WSAGetLastError();
 	if ((infoPtr->flags & SOCKET_ASYNC) || (error != WSAEWOULDBLOCK)) {
 	    TclWinConvertWSAError(error);
 	    *errorCodePtr = Tcl_GetErrno();

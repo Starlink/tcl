@@ -12,7 +12,7 @@
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclProc.c,v 1.139.2.4 2008/10/19 19:54:22 dgp Exp $
+ * RCS: @(#) $Id: tclProc.c,v 1.139.2.6 2009/08/25 21:01:05 andreas_kupries Exp $
  */
 
 #include "tclInt.h"
@@ -430,8 +430,18 @@ TclCreateProc(
 	 */
 
 	if (Tcl_IsShared(bodyPtr)) {
+	    Tcl_Obj* sharedBodyPtr = bodyPtr;
+
 	    bytes = TclGetStringFromObj(bodyPtr, &length);
 	    bodyPtr = Tcl_NewStringObj(bytes, length);
+
+	    /*
+	     * TIP #280.
+	     * Ensure that the continuation line data for the original body is
+	     * not lost and applies to the new body as well.
+	     */
+
+	    TclContinuationsCopy (bodyPtr, sharedBodyPtr);
 	}
 
 	/*
@@ -1891,7 +1901,6 @@ ProcCompileProc(
     Interp *iPtr = (Interp *) interp;
     int i;
     Tcl_CallFrame *framePtr;
-    Proc *saveProcPtr;
     ByteCode *codePtr = bodyPtr->internalRep.otherValuePtr;
     CompiledLocal *localPtr;
 
@@ -1960,8 +1969,6 @@ ProcCompileProc(
  	 *   namespace context, so that the byte codes are compiled in the
  	 *   appropriate class context.
  	 */
-
- 	saveProcPtr = iPtr->compiledProcPtr;
 
 	if (procPtrPtr != NULL && procPtr->refCount > 1) {
 	    Tcl_Command token;
@@ -2045,7 +2052,6 @@ ProcCompileProc(
 	(void) tclByteCodeType.setFromAnyProc(interp, bodyPtr);
 	iPtr->invokeCmdFramePtr = NULL;
 	TclPopStackFrame(interp);
- 	iPtr->compiledProcPtr = saveProcPtr;
     } else if (codePtr->nsEpoch != nsPtr->resolverEpoch) {
 	/*
 	 * The resolver epoch has changed, but we only need to invalidate the
@@ -2534,7 +2540,7 @@ SetLambdaFromAny(
 		 * location (line of 2nd list element).
 		 */
 
-		TclListLines(name, contextPtr->line[1], 2, buf);
+		TclListLines(objPtr, contextPtr->line[1], 2, buf, NULL);
 
 		cfPtr->level = -1;
 		cfPtr->type = contextPtr->type;

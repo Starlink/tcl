@@ -15,13 +15,14 @@
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
- * RCS: @(#) $Id: tclCmdMZ.c,v 1.163.2.2 2009/02/04 18:57:47 dgp Exp $
+ * RCS: @(#) $Id: tclCmdMZ.c,v 1.163.2.5 2009/08/25 21:01:05 andreas_kupries Exp $
  */
 
 #include "tclInt.h"
 #include "tclRegexp.h"
 
 static int		UniCharIsAscii(int character);
+static int		UniCharIsHexDigit(int character);
 
 /*
  *----------------------------------------------------------------------
@@ -1383,14 +1384,14 @@ StringIsCmd(
     int objc,			/* Number of arguments. */
     Tcl_Obj *const objv[])	/* Argument objects. */
 {
-    const char *string1, *string2, *end, *stop;
+    const char *string1, *end, *stop;
     Tcl_UniChar ch;
     int (*chcomp)(int) = NULL;	/* The UniChar comparison function. */
     int i, failat = 0, result = 1, strict = 0, index, length1, length2;
     Tcl_Obj *objPtr, *failVarObj = NULL;
     Tcl_WideInt w;
 
-    static const char *isOptions[] = {
+    static const char *isClasses[] = {
 	"alnum",	"alpha",	"ascii",	"control",
 	"boolean",	"digit",	"double",	"false",
 	"graph",	"integer",	"list",		"lower",
@@ -1398,12 +1399,18 @@ StringIsCmd(
 	"upper",	"wideinteger",	"wordchar",	"xdigit",
 	NULL
     };
-    enum isOptions {
+    enum isClasses {
 	STR_IS_ALNUM, STR_IS_ALPHA,	STR_IS_ASCII,  STR_IS_CONTROL,
 	STR_IS_BOOL,  STR_IS_DIGIT,	STR_IS_DOUBLE, STR_IS_FALSE,
 	STR_IS_GRAPH, STR_IS_INT,	STR_IS_LIST,   STR_IS_LOWER,
-	STR_IS_PRINT, STR_IS_PUNCT, STR_IS_SPACE,  STR_IS_TRUE,
+	STR_IS_PRINT, STR_IS_PUNCT,	STR_IS_SPACE,  STR_IS_TRUE,
 	STR_IS_UPPER, STR_IS_WIDE,	STR_IS_WORD,   STR_IS_XDIGIT
+    };
+    static const char *isOptions[] = {
+	"-strict", "-failindex", NULL
+    };
+    enum isOptions {
+	OPT_STRICT, OPT_FAILIDX
     };
 
     if (objc < 3 || objc > 6) {
@@ -1411,29 +1418,31 @@ StringIsCmd(
 		"class ?-strict? ?-failindex var? str");
 	return TCL_ERROR;
     }
-    if (Tcl_GetIndexFromObj(interp, objv[1], isOptions, "class", 0,
+    if (Tcl_GetIndexFromObj(interp, objv[1], isClasses, "class", 0,
 	    &index) != TCL_OK) {
 	return TCL_ERROR;
     }
 
     if (objc != 3) {
 	for (i = 2; i < objc-1; i++) {
-	    string2 = TclGetStringFromObj(objv[i], &length2);
-	    if ((length2 > 1) &&
-		    strncmp(string2, "-strict", (size_t) length2) == 0) {
+	    int idx2;
+
+	    if (Tcl_GetIndexFromObj(interp, objv[i], isOptions, "option", 0,
+		    &idx2) != TCL_OK) {
+		return TCL_ERROR;
+	    }
+	    switch ((enum isOptions) idx2) {
+	    case OPT_STRICT:
 		strict = 1;
-	    } else if ((length2 > 1) &&
-		    strncmp(string2, "-failindex", (size_t)length2) == 0){
+		break;
+	    case OPT_FAILIDX:
 		if (i+1 >= objc-1) {
 		    Tcl_WrongNumArgs(interp, 2, objv,
 			    "?-strict? ?-failindex var? str");
 		    return TCL_ERROR;
 		}
 		failVarObj = objv[++i];
-	    } else {
-		Tcl_AppendResult(interp, "bad option \"", string2,
-			"\": must be -strict or -failindex", NULL);
-		return TCL_ERROR;
+		break;
 	    }
 	}
     }
@@ -1446,20 +1455,12 @@ StringIsCmd(
      */
 
     objPtr = objv[objc-1];
-    string1 = TclGetStringFromObj(objPtr, &length1);
-    if (length1 == 0 && index != STR_IS_LIST) {
-	if (strict) {
-	    result = 0;
-	}
-	goto str_is_done;
-    }
-    end = string1 + length1;
 
     /*
      * When entering here, result == 1 and failat == 0.
      */
 
-    switch ((enum isOptions) index) {
+    switch ((enum isClasses) index) {
     case STR_IS_ALNUM:
 	chcomp = Tcl_UniCharIsAlnum;
 	break;
@@ -1473,7 +1474,12 @@ StringIsCmd(
     case STR_IS_TRUE:
     case STR_IS_FALSE:
 	if (TCL_OK != Tcl_ConvertToType(NULL, objPtr, &tclBooleanType)) {
-	    result = 0;
+	    if (strict) {
+		result = 0;
+	    } else {
+		string1 = TclGetStringFromObj(objPtr, &length1);
+		result = length1 == 0;
+	    }
 	} else if (((index == STR_IS_TRUE) &&
 		objPtr->internalRep.longValue == 0)
 	    || ((index == STR_IS_FALSE) &&
@@ -1497,6 +1503,14 @@ StringIsCmd(
 		(objPtr->typePtr == &tclBignumType)) {
 	    break;
 	}
+	string1 = TclGetStringFromObj(objPtr, &length1);
+	if (length1 == 0) {
+	    if (strict) {
+		result = 0;
+	    }
+	    goto str_is_done;
+	}
+	end = string1 + length1;
 	if (TclParseNumber(NULL, objPtr, NULL, NULL, -1,
 		(const char **) &stop, 0) != TCL_OK) {
 	    result = 0;
@@ -1525,8 +1539,14 @@ StringIsCmd(
 	}
 
     failedIntParse:
+	string1 = TclGetStringFromObj(objPtr, &length1);
+	if (length1 == 0) {
+	    if (strict) {
+		result = 0;
+	    }
+	    goto str_is_done;
+	}
 	result = 0;
-
 	if (failVarObj == NULL) {
 	    /*
 	     * Don't bother computing the failure point if we're not going to
@@ -1535,6 +1555,7 @@ StringIsCmd(
 
 	    break;
 	}
+	end = string1 + length1;
 	if (TclParseNumber(NULL, objPtr, NULL, NULL, -1,
 		(const char **) &stop, TCL_PARSE_INTEGER_ONLY) == TCL_OK) {
 	    if (stop == end) {
@@ -1583,14 +1604,15 @@ StringIsCmd(
 	     * SetListFromAny().
 	     */
 
-	    const char *elemStart, *nextElem, *limit;
+	    const char *elemStart, *nextElem;
 	    int lenRemain, elemSize, hasBrace;
 	    register const char *p;
 
-	    limit = string1 + length1;
+	    string1 = TclGetStringFromObj(objPtr, &length1);
+	    end = string1 + length1;
 	    failat = -1;
 	    for (p=string1, lenRemain=length1; lenRemain > 0;
-		    p=nextElem, lenRemain=limit-nextElem) {
+		    p=nextElem, lenRemain=end-nextElem) {
 		if (TCL_ERROR == TclFindElement(NULL, p, lenRemain,
 			&elemStart, &nextElem, &elemSize, &hasBrace)) {
 		    Tcl_Obj *tmpStr;
@@ -1636,17 +1658,19 @@ StringIsCmd(
 	chcomp = Tcl_UniCharIsWordChar;
 	break;
     case STR_IS_XDIGIT:
-	for (; string1 < end; string1++, failat++) {
-	    /* INTL: We assume unicode is bad for this class. */
-	    if ((*((unsigned char *)string1) >= 0xC0) ||
-		    !isxdigit(*(unsigned char *)string1)) {
-		result = 0;
-		break;
-	    }
-	}
+	chcomp = UniCharIsHexDigit;
 	break;
     }
+
     if (chcomp != NULL) {
+	string1 = TclGetStringFromObj(objPtr, &length1);
+	if (length1 == 0) {
+	    if (strict) {
+		result = 0;
+	    }
+	    goto str_is_done;
+	}
+	end = string1 + length1;
 	for (; string1 < end; string1 += length2, failat++) {
 	    length2 = TclUtfToUniChar(string1, &ch);
 	    if (!chcomp(ch)) {
@@ -1676,6 +1700,13 @@ UniCharIsAscii(
     int character)
 {
     return (character >= 0) && (character < 0x80);
+}
+
+static int
+UniCharIsHexDigit(
+    int character)
+{
+    return (character >= 0) && (character < 0x80) && isxdigit(character);
 }
 
 /*
@@ -2141,7 +2172,7 @@ StringReptCmd(
 
     if (count > (INT_MAX / length1)) {
 	Tcl_SetObjResult(interp, Tcl_ObjPrintf(
-		"max size for a Tcl value (%d bytes) exceeded", INT_MAX));
+		"result exceeds max size for a Tcl value (%d bytes)", INT_MAX));
 	return TCL_ERROR;
     }
     length2 = length1 * count;
@@ -3822,7 +3853,7 @@ Tcl_SwitchObjCmd(
 
 	    ctxPtr->line = (int *) ckalloc(objc * sizeof(int));
 	    ctxPtr->nline = objc;
-	    TclListLines(TclGetString(blist), bline, objc, ctxPtr->line);
+	    TclListLines(blist, bline, objc, ctxPtr->line, objv);
 	} else {
 	    /*
 	     * This is either a dynamic code word, when all elements are
@@ -3860,7 +3891,7 @@ Tcl_SwitchObjCmd(
      * TIP #280: Make invoking context available to switch branch.
      */
 
-    result = TclEvalObjEx(interp, objv[j], 0, ctxPtr, j);
+    result = TclEvalObjEx(interp, objv[j], 0, ctxPtr, splitObjs ? j : bidx+j);
     if (splitObjs) {
 	ckfree((char *) ctxPtr->line);
 	if (pc && (ctxPtr->type == TCL_LOCATION_SOURCE)) {
@@ -4063,21 +4094,33 @@ Tcl_WhileObjCmd(
 
 void
 TclListLines(
-    CONST char *listStr,	/* Pointer to string with list structure.
-				 * Assumed to be valid. Assumed to contain n
-				 * elements. */
+    Tcl_Obj* listObj,          /* Pointer to obj holding a string with list
+				* structure.  Assumed to be valid. Assumed to
+				* contain n elements.
+				*/
     int line,			/* Line the list as a whole starts on. */
     int n,			/* #elements in lines */
-    int *lines)			/* Array of line numbers, to fill. */
+    int *lines,			/* Array of line numbers, to fill. */
+    Tcl_Obj* const* elems)      /* The list elems as Tcl_Obj*, in need of
+				 * derived continuation data */
 {
+    CONST char*  listStr  = Tcl_GetString (listObj);
+    CONST char*  listHead = listStr;
     int i, length = strlen(listStr);
     CONST char *element = NULL, *next = NULL;
+    ContLineLoc* clLocPtr = TclContinuationsGet(listObj);
+    int* clNext   = (clLocPtr ? &clLocPtr->loc[0] : NULL);
 
     for (i = 0; i < n; i++) {
 	TclFindElement(NULL, listStr, length, &element, &next, NULL, NULL);
 
 	TclAdvanceLines(&line, listStr, element);
 				/* Leading whitespace */
+	TclAdvanceContinuations (&line, &clNext, element - listHead);
+	if (elems && clNext) {
+	    TclContinuationsEnterDerived (elems[i], element - listHead,
+					  clNext);
+	}
 	lines[i] = line;
 	length -= (next - listStr);
 	TclAdvanceLines(&line, element, next);

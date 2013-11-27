@@ -39,7 +39,3 @@ mp_count_bits (mp_int * a)
   return r;
 }
 #endif
-
-/* $Source: /cvsroot/tcl/libtommath/bn_mp_count_bits.c,v $ */
-/* $Revision: 1.1.1.3 $ */
-/* $Date: 2006/12/01 00:08:11 $ */

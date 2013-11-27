@@ -9,8 +9,6 @@
  *
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
- *
- * RCS: @(#) $Id: tclMain.c,v 1.44 2007/12/13 15:23:19 dgp Exp $
  */
 
 #include "tclInt.h"
@@ -344,9 +342,10 @@ Tcl_Main(
     Tcl_Interp *interp;
     Tcl_DString appName;
 
-    Tcl_FindExecutable(argv[0]);
-
     interp = Tcl_CreateInterp();
+    TclpSetInitialEncodings();
+    TclpFindExecutable(argv[0]);
+
     Tcl_InitMemory(interp);
 
     /*
@@ -454,6 +453,7 @@ Tcl_Main(
 		    Tcl_WriteObj(errChannel, valuePtr);
 		}
 		Tcl_WriteChars(errChannel, "\n", 1);
+		Tcl_DecrRefCount(options);
 	    }
 	    exitCode = 1;
 	}

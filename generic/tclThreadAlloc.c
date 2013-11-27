@@ -10,8 +10,6 @@
  *
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
- *
- * RCS: @(#) $Id: tclThreadAlloc.c,v 1.27 2008/03/20 09:49:16 dkf Exp $
  */
 
 #include "tclInt.h"
@@ -288,11 +286,25 @@ char *
 TclpAlloc(
     unsigned int reqSize)
 {
-    Cache *cachePtr = TclpGetAllocCache();
+    Cache *cachePtr;
     Block *blockPtr;
     register int bucket;
     size_t size;
 
+#ifndef __LP64__
+    if (sizeof(int) >= sizeof(size_t)) {
+	/* An unsigned int overflow can also be a size_t overflow */
+	const size_t zero = 0;
+	const size_t max = ~zero;
+
+	if (((size_t) reqSize) > max - sizeof(Block) - RCHECK) {
+	    /* Requested allocation exceeds memory */
+	    return NULL;
+	}
+    }
+#endif
+
+    cachePtr = TclpGetAllocCache();
     if (cachePtr == NULL) {
 	cachePtr = GetCache();
     }
@@ -414,7 +426,7 @@ TclpRealloc(
     char *ptr,
     unsigned int reqSize)
 {
-    Cache *cachePtr = TclpGetAllocCache();
+    Cache *cachePtr;
     Block *blockPtr;
     void *newPtr;
     size_t size, min;
@@ -424,6 +436,20 @@ TclpRealloc(
 	return TclpAlloc(reqSize);
     }
 
+#ifndef __LP64__
+    if (sizeof(int) >= sizeof(size_t)) {
+	/* An unsigned int overflow can also be a size_t overflow */
+	const size_t zero = 0;
+	const size_t max = ~zero;
+
+	if (((size_t) reqSize) > max - sizeof(Block) - RCHECK) {
+	    /* Requested allocation exceeds memory */
+	    return NULL;
+	}
+    }
+#endif
+
+    cachePtr = TclpGetAllocCache();
     if (cachePtr == NULL) {
 	cachePtr = GetCache();
     }
@@ -530,7 +556,7 @@ TclThreadAllocObj(void)
 	    }
 	    while (--numMove >= 0) {
 		objPtr = &newObjsPtr[numMove];
-		objPtr->internalRep.otherValuePtr = cachePtr->firstObjPtr;
+		objPtr->internalRep.twoPtrValue.ptr1 = cachePtr->firstObjPtr;
 		cachePtr->firstObjPtr = objPtr;
 	    }
 	}
@@ -541,7 +567,7 @@ TclThreadAllocObj(void)
      */
 
     objPtr = cachePtr->firstObjPtr;
-    cachePtr->firstObjPtr = objPtr->internalRep.otherValuePtr;
+    cachePtr->firstObjPtr = objPtr->internalRep.twoPtrValue.ptr1;
     --cachePtr->numObjects;
     return objPtr;
 }
@@ -576,7 +602,7 @@ TclThreadFreeObj(
      * Get this thread's list and push on the free Tcl_Obj.
      */
 
-    objPtr->internalRep.otherValuePtr = cachePtr->firstObjPtr;
+    objPtr->internalRep.twoPtrValue.ptr1 = cachePtr->firstObjPtr;
     cachePtr->firstObjPtr = objPtr;
     ++cachePtr->numObjects;
 
@@ -677,16 +703,16 @@ MoveObjs(
      */
 
     while (--numMove) {
-	objPtr = objPtr->internalRep.otherValuePtr;
+	objPtr = objPtr->internalRep.twoPtrValue.ptr1;
     }
-    fromPtr->firstObjPtr = objPtr->internalRep.otherValuePtr;
+    fromPtr->firstObjPtr = objPtr->internalRep.twoPtrValue.ptr1;
 
     /*
      * Move all objects as a block - they are already linked to each other, we
      * just have to update the first and last.
      */
 
-    objPtr->internalRep.otherValuePtr = toPtr->firstObjPtr;
+    objPtr->internalRep.twoPtrValue.ptr1 = toPtr->firstObjPtr;
     toPtr->firstObjPtr = fromFirstObjPtr;
 }
 

@@ -8,8 +8,6 @@
  *
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
- *
- * RCS: @(#) $Id: tclCompile.h,v 1.90.2.5 2008/08/14 02:22:15 das Exp $
  */
 
 #ifndef _TCLCOMPILATION
@@ -132,18 +130,29 @@ typedef struct ECL {
     int nline;                  /* Number of words in the command */
     int *line;			/* Line information for all words in the
 				 * command. */
+    int** next;                 /* Transient information used by the compiler
+				 * for tracking of hidden continuation
+				 * lines. */
 } ECL;
 
 typedef struct ExtCmdLoc {
     int type;			/* Context type. */
+    int start;                  /* Starting line for compiled script. Needed
+				 * for the extended recompile check in
+				 * TclCompEvalObj. */
+
     Tcl_Obj *path;		/* Path of the sourced file the command is
 				 * in. */
     ECL *loc;			/* Command word locations (lines). */
     int nloc;			/* Number of allocated entries in 'loc'. */
     int nuloc;			/* Number of used entries in 'loc'. */
-    ExtIndex* eiloc;
-    int neiloc;
-    int nueiloc;
+    Tcl_HashTable litInfo;      /* Indexed by bytecode 'PC', to have the
+				 * information accessible per command and
+				 * argument, not per whole bytecode. Value is
+				 * index of command in 'loc', giving us the
+				 * literals to associate with line information
+				 * as command argument, see
+				 * TclArgumentBCEnter() */
 } ExtCmdLoc;
 
 /*
@@ -302,6 +311,13 @@ typedef struct CompileEnv {
 				 * should be issued; they should never be
 				 * issued repeatedly, as that is significantly
 				 * inefficient. */
+    ContLineLoc* clLoc;  /* If not NULL, the table holding the
+			  * locations of the invisible continuation
+			  * lines in the input script, to adjust the
+			  * line counter. */
+    int*         clNext; /* If not NULL, it refers to the next slot in
+			  * clLoc to check for an invisible
+			  * continuation line. */
 } CompileEnv;
 
 /*
@@ -892,8 +908,6 @@ MODULE_SCOPE int	TclExecuteByteCode(Tcl_Interp *interp,
 MODULE_SCOPE void	TclFinalizeAuxDataTypeTable(void);
 MODULE_SCOPE int	TclFindCompiledLocal(CONST char *name, int nameChars,
 			    int create, Proc *procPtr);
-MODULE_SCOPE LiteralEntry * TclLookupLiteralEntry(Tcl_Interp *interp,
-			    Tcl_Obj *objPtr);
 MODULE_SCOPE int	TclFixupForwardJump(CompileEnv *envPtr,
 			    JumpFixup *jumpFixupPtr, int jumpDist,
 			    int distThreshold);
@@ -902,7 +916,6 @@ MODULE_SCOPE void	TclFreeJumpFixupArray(JumpFixupArray *fixupArrayPtr);
 MODULE_SCOPE void	TclInitAuxDataTypeTable(void);
 MODULE_SCOPE void	TclInitByteCodeObj(Tcl_Obj *objPtr,
 			    CompileEnv *envPtr);
-MODULE_SCOPE void	TclInitCompilation(void);
 MODULE_SCOPE void	TclInitCompileEnv(Tcl_Interp *interp,
 			    CompileEnv *envPtr, const char *string,
 			    int numBytes, CONST CmdFrame* invoker, int word);
@@ -922,7 +935,6 @@ MODULE_SCOPE void	TclPrintObject(FILE *outFile,
 			    Tcl_Obj *objPtr, int maxChars);
 MODULE_SCOPE void	TclPrintSource(FILE *outFile,
 			    CONST char *string, int maxChars);
-MODULE_SCOPE void	TclRegisterAuxDataType(AuxDataType *typePtr);
 MODULE_SCOPE int	TclRegisterLiteral(CompileEnv *envPtr,
 			    char *bytes, int length, int flags);
 MODULE_SCOPE void	TclReleaseLiteral(Tcl_Interp *interp, Tcl_Obj *objPtr);

@@ -18,17 +18,11 @@
  *
  * See the file "license.terms" for information on usage and redistribution
  * of this file, and for a DISCLAIMER OF ALL WARRANTIES.
- *
- * RCS: @(#) $Id: tclUnixPort.h,v 1.65 2008/03/11 22:26:27 das Exp $
  */
 
 #ifndef _TCLUNIXPORT
 #define _TCLUNIXPORT
-
-#ifndef MODULE_SCOPE
-#define MODULE_SCOPE extern
-#endif
-
+
 /*
  *---------------------------------------------------------------------------
  * The following sets of #includes and #ifdefs are required to get Tcl to
@@ -56,6 +50,12 @@
 #   include <dirent.h>
 #endif
 #endif
+
+/*
+ *---------------------------------------------------------------------------
+ * Parameterize for 64-bit filesystem support.
+ *---------------------------------------------------------------------------
+ */
 
 #ifdef HAVE_STRUCT_DIRENT64
 typedef struct dirent64	Tcl_DirEntry;
@@ -75,7 +75,34 @@ typedef off_t		Tcl_SeekOffset;
 #   define TclOSopen		open
 #endif
 
-#ifdef HAVE_STRUCT_STAT64
+#ifdef __CYGWIN__
+
+    /* Make some symbols available without including <windows.h> */
+#   define DWORD unsigned int
+#   define CP_UTF8 65001
+#   define GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS 0x00000004
+#   define HANDLE void *
+#   define HINSTANCE void *
+#   define SOCKET unsigned int
+#   define WSAEWOULDBLOCK 10035
+    __declspec(dllimport) extern __stdcall int GetModuleHandleExW(unsigned int, const char *, void *);
+    __declspec(dllimport) extern __stdcall int GetModuleFileNameW(void *, const char *, int);
+    __declspec(dllimport) extern __stdcall int WideCharToMultiByte(int, int, const char *, int,
+	    const char *, int, const char *, const char *);
+
+    __declspec(dllimport) extern int cygwin_conv_path(int, const void *, void *, int);
+    __declspec(dllimport) extern int cygwin_conv_path_list(int, const void *, void *, int);
+#   define USE_PUTENV 1
+#   define USE_PUTENV_FOR_UNSET 1
+/* On Cygwin, the environment is imported from the Cygwin DLL. */
+#ifndef __x86_64__
+#   define environ __cygwin_environ
+    extern char **__cygwin_environ;
+#endif
+#   define timezone _timezone
+    extern int TclOSstat(const char *name, void *statBuf);
+    extern int TclOSlstat(const char *name, void *statBuf);
+#elif defined(HAVE_STRUCT_STAT64) && !defined(__APPLE__)
 #   define TclOSstat		stat64
 #   define TclOSlstat		lstat64
 #else
@@ -104,6 +131,11 @@ typedef off_t		Tcl_SeekOffset;
 #if HAVE_INTTYPES_H
 #   include <inttypes.h>
 #endif
+#ifdef NO_LIMITS_H
+#   include "../compat/limits.h"
+#else
+#   include <limits.h>
+#endif
 #if HAVE_STDINT_H
 #   include <stdint.h>
 #endif
@@ -113,7 +145,7 @@ typedef off_t		Tcl_SeekOffset;
 #   include "../compat/unistd.h"
 #endif
 
-MODULE_SCOPE int TclUnixSetBlockingMode(int fd, int mode);
+extern int TclUnixSetBlockingMode(int fd, int mode);
 
 #include <utime.h>
 
@@ -244,15 +276,11 @@ MODULE_SCOPE int TclUnixSetBlockingMode(int fd, int mode);
 
 #ifdef NO_GETTOD
 #   include <sys/times.h>
-#else
-#   ifdef HAVE_BSDGETTIMEOFDAY
-#	define gettimeofday BSDgettimeofday
-#   endif
 #endif
 
 #ifdef GETTOD_NOT_DECLARED
-EXTERN int		gettimeofday _ANSI_ARGS_((struct timeval *tp,
-			    struct timezone *tzp));
+extern int		gettimeofday (struct timeval *tp,
+			    struct timezone *tzp);
 #endif
 
 /*
@@ -576,7 +604,6 @@ typedef int socklen_t;
  * address platform-specific issues.
  */
 
-#define TclpGetPid(pid)		((unsigned long) (pid))
 #define TclpReleaseFile(file)	/* Nothing. */
 
 /*
@@ -595,9 +622,7 @@ typedef int socklen_t;
 #define TclpExit		exit
 
 #ifdef TCL_THREADS
-EXTERN struct tm *     	TclpLocaltime(CONST time_t *);
-EXTERN struct tm *     	TclpGmtime(CONST time_t *);
-EXTERN char *          	TclpInetNtoa(struct in_addr);
+#  include <pthread.h>
 /* #define localtime(x)	TclpLocaltime(x)
  * #define gmtime(x)	TclpGmtime(x)    */
 #   undef inet_ntoa
@@ -609,14 +634,13 @@ EXTERN char *          	TclpInetNtoa(struct in_addr);
  * Assume it is in pthread_np.h if it isn't in pthread.h. [Bug 1064882]
  * We might need to revisit this in the future. :^(
  */
-#	    include <pthread.h>
 #	    include <pthread_np.h>
 #	endif
 #   else
 #	ifdef HAVE_PTHREAD_GETATTR_NP
 #	    define TclpPthreadGetAttrs	pthread_getattr_np
 #	    ifdef GETATTRNP_NOT_DECLARED
-EXTERN int pthread_getattr_np _ANSI_ARGS_((pthread_t, pthread_attr_t *));
+extern int pthread_getattr_np (pthread_t, pthread_attr_t *);
 #	    endif
 #	endif /* HAVE_PTHREAD_GETATTR_NP */
 #   endif /* HAVE_PTHREAD_ATTR_GET_NP */
@@ -627,17 +651,16 @@ EXTERN int pthread_getattr_np _ANSI_ARGS_((pthread_t, pthread_attr_t *));
  * known-to-be-MT-unsafe library calls.
  * Instead of returning pointers to the
  * static storage, those return pointers
- * to the TSD data. 
+ * to the TSD data.
  */
 
-#include <pwd.h>
 #include <grp.h>
 
-MODULE_SCOPE struct passwd*  TclpGetPwNam(const char *name);
-MODULE_SCOPE struct group*   TclpGetGrNam(const char *name);
-MODULE_SCOPE struct passwd*  TclpGetPwUid(uid_t uid);
-MODULE_SCOPE struct group*   TclpGetGrGid(gid_t gid);
-MODULE_SCOPE struct hostent* TclpGetHostByName(const char *name);
-MODULE_SCOPE struct hostent* TclpGetHostByAddr(const char *addr, int length, int type);
+extern struct passwd*  TclpGetPwNam(const char *name);
+extern struct group*   TclpGetGrNam(const char *name);
+extern struct passwd*  TclpGetPwUid(uid_t uid);
+extern struct group*   TclpGetGrGid(gid_t gid);
+extern struct hostent* TclpGetHostByName(const char *name);
+extern struct hostent* TclpGetHostByAddr(const char *addr, int length, int type);
 
 #endif /* _TCLUNIXPORT */

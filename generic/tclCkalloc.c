@@ -13,8 +13,6 @@
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  *
  * This code contributed by Karl Lehenbauer and Mark Diekhans
- *
- * RCS: @(#) $Id: tclCkalloc.c,v 1.32 2007/04/23 20:33:56 das Exp $
  */
 
 #include "tclInt.h"
@@ -83,12 +81,12 @@ static struct mem_header *allocHead = NULL;  /* List of allocated structures */
  */
 
 #define BODY_OFFSET \
-	((unsigned long) (&((struct mem_header *) 0)->body))
+	((size_t) (&((struct mem_header *) 0)->body))
 
 static int total_mallocs = 0;
 static int total_frees = 0;
-static int current_bytes_malloced = 0;
-static int maximum_bytes_malloced = 0;
+static size_t current_bytes_malloced = 0;
+static size_t maximum_bytes_malloced = 0;
 static int current_malloc_packets = 0;
 static int maximum_malloc_packets = 0;
 static int break_on_malloc = 0;
@@ -152,6 +150,10 @@ TclInitDbCkalloc(void)
     if (!ckallocInit) {
 	ckallocInit = 1;
 	ckallocMutexPtr = Tcl_GetAllocMutex();
+#ifndef TCL_THREADS
+	/* Silence compiler warning */
+	(void)ckallocMutexPtr;
+#endif
     }
 }
 
@@ -165,22 +167,32 @@ TclInitDbCkalloc(void)
  *----------------------------------------------------------------------
  */
 
-void
-TclDumpMemoryInfo(
-    FILE *outFile)
+int
+TclDumpMemoryInfo(ClientData clientData, int flags)
 {
-    fprintf(outFile,"total mallocs             %10d\n",
-	    total_mallocs);
-    fprintf(outFile,"total frees               %10d\n",
-	    total_frees);
-    fprintf(outFile,"current packets allocated %10d\n",
-	    current_malloc_packets);
-    fprintf(outFile,"current bytes allocated   %10d\n",
-	    current_bytes_malloced);
-    fprintf(outFile,"maximum packets allocated %10d\n",
-	    maximum_malloc_packets);
-    fprintf(outFile,"maximum bytes allocated   %10d\n",
-	    maximum_bytes_malloced);
+    char buf[1024];
+
+    if (clientData == NULL) { return 0; }
+    sprintf(buf,
+	    "total mallocs             %10d\n"
+	    "total frees               %10d\n"
+	    "current packets allocated %10d\n"
+	    "current bytes allocated   %10lu\n"
+	    "maximum packets allocated %10d\n"
+	    "maximum bytes allocated   %10lu\n",
+	    total_mallocs,
+	    total_frees,
+	    current_malloc_packets,
+	    (unsigned long)current_bytes_malloced,
+	    maximum_malloc_packets,
+	    (unsigned long)maximum_bytes_malloced);
+    if (flags == 0) {
+	fprintf((FILE *)clientData, buf);
+    } else {
+	/* Assume objPtr to append to */
+	Tcl_AppendToObj((Tcl_Obj *) clientData, buf, -1);
+    }
+    return 1;
 }
 
 /*
@@ -228,7 +240,7 @@ ValidateMemory(
 	}
     }
     if (guard_failed) {
-	TclDumpMemoryInfo (stderr);
+	TclDumpMemoryInfo((ClientData) stderr, 0);
 	fprintf(stderr, "low guard failed at %lx, %s %d\n",
 		(long unsigned int) memHeaderP->body, file, line);
 	fflush(stderr);			/* In case name pointer is bad. */
@@ -250,7 +262,7 @@ ValidateMemory(
     }
 
     if (guard_failed) {
-	TclDumpMemoryInfo(stderr);
+	TclDumpMemoryInfo((ClientData) stderr, 0);
 	fprintf(stderr, "high guard failed at %lx, %s %d\n",
 		(long unsigned int) memHeaderP->body, file, line);
 	fflush(stderr);			/* In case name pointer is bad. */
@@ -376,17 +388,20 @@ Tcl_DbCkalloc(
     CONST char *file,
     int line)
 {
-    struct mem_header *result;
+    struct mem_header *result = NULL;
 
     if (validate_memory) {
 	Tcl_ValidateAllMemory(file, line);
     }
 
-    result = (struct mem_header *) TclpAlloc((unsigned)size +
-	    sizeof(struct mem_header) + HIGH_GUARD_SIZE);
+    /* Don't let size argument to TclpAlloc overflow */
+    if (size <= UINT_MAX - HIGH_GUARD_SIZE -sizeof(struct mem_header)) {
+	result = (struct mem_header *) TclpAlloc((unsigned)size +
+		sizeof(struct mem_header) + HIGH_GUARD_SIZE);
+    }
     if (result == NULL) {
 	fflush(stdout);
-	TclDumpMemoryInfo(stderr);
+	TclDumpMemoryInfo((ClientData) stderr, 0);
 	Tcl_Panic("unable to alloc %u bytes, %s line %d", size, file, line);
     }
 
@@ -467,17 +482,20 @@ Tcl_AttemptDbCkalloc(
     CONST char *file,
     int line)
 {
-    struct mem_header *result;
+    struct mem_header *result = NULL;
 
     if (validate_memory) {
 	Tcl_ValidateAllMemory(file, line);
     }
 
-    result = (struct mem_header *) TclpAlloc((unsigned)size +
-	    sizeof(struct mem_header) + HIGH_GUARD_SIZE);
+    /* Don't let size argument to TclpAlloc overflow */
+    if (size <= UINT_MAX - HIGH_GUARD_SIZE - sizeof(struct mem_header)) {
+	result = (struct mem_header *) TclpAlloc((unsigned)size +
+		sizeof(struct mem_header) + HIGH_GUARD_SIZE);
+    }
     if (result == NULL) {
 	fflush(stdout);
-	TclDumpMemoryInfo(stderr);
+	TclDumpMemoryInfo((ClientData) stderr, 0);
 	return NULL;
     }
 
@@ -569,7 +587,7 @@ Tcl_AttemptDbCkalloc(
  *----------------------------------------------------------------------
  */
 
-int
+void
 Tcl_DbCkfree(
     char *ptr,
     CONST char *file,
@@ -578,7 +596,7 @@ Tcl_DbCkfree(
     struct mem_header *memp;
 
     if (ptr == NULL) {
-	return 0;
+	return;
     }
 
     /*
@@ -589,7 +607,7 @@ Tcl_DbCkfree(
      * words on these machines).
      */
 
-    memp = (struct mem_header *) (((unsigned long) ptr) - BODY_OFFSET);
+    memp = (struct mem_header *) (((size_t) ptr) - BODY_OFFSET);
 
     if (alloc_tracing) {
 	fprintf(stderr, "ckfree %lx %ld %s %d\n",
@@ -632,8 +650,6 @@ Tcl_DbCkfree(
     }
     TclpFree((char *) memp);
     Tcl_MutexUnlock(ckallocMutexPtr);
-
-    return 0;
 }
 
 /*
@@ -668,7 +684,7 @@ Tcl_DbCkrealloc(
      * See comment from Tcl_DbCkfree before you change the following line.
      */
 
-    memp = (struct mem_header *) (((unsigned long) ptr) - BODY_OFFSET);
+    memp = (struct mem_header *) (((size_t) ptr) - BODY_OFFSET);
 
     copySize = size;
     if (copySize > (unsigned int) memp->length) {
@@ -699,7 +715,7 @@ Tcl_AttemptDbCkrealloc(
      * See comment from Tcl_DbCkfree before you change the following line.
      */
 
-    memp = (struct mem_header *) (((unsigned long) ptr) - BODY_OFFSET);
+    memp = (struct mem_header *) (((size_t) ptr) - BODY_OFFSET);
 
     copySize = size;
     if (copySize > (unsigned int) memp->length) {
@@ -805,8 +821,10 @@ MemoryCmd(
     CONST char *argv[])
 {
     CONST char *fileName;
+    FILE *fileP;
     Tcl_DString buffer;
     int result;
+    size_t len;
 
     if (argc < 2) {
 	Tcl_AppendResult(interp, "wrong # args: should be \"", argv[0],
@@ -843,7 +861,7 @@ MemoryCmd(
     }
     if (strcmp(argv[1],"info") == 0) {
 	Tcl_SetObjResult(interp, Tcl_ObjPrintf(
-		"%-25s %10d\n%-25s %10d\n%-25s %10d\n%-25s %10d\n%-25s %10d\n%-25s %10d\n",
+		"%-25s %10d\n%-25s %10d\n%-25s %10d\n%-25s %10lu\n%-25s %10d\n%-25s %10lu\n",
 		"total mallocs", total_mallocs, "total frees", total_frees,
 		"current packets allocated", current_malloc_packets,
 		"current bytes allocated", current_bytes_malloced,
@@ -856,6 +874,26 @@ MemoryCmd(
 	    goto bad_suboption;
 	}
 	init_malloced_bodies = (strcmp(argv[2],"on") == 0);
+	return TCL_OK;
+    }
+    if (strcmp(argv[1],"objs") == 0) {
+	if (argc != 3) {
+	    Tcl_AppendResult(interp, "wrong # args: should be \"", argv[0],
+		    " objs file\"", NULL);
+	    return TCL_ERROR;
+	}
+	fileName = Tcl_TranslateFileName(interp, argv[2], &buffer);
+	if (fileName == NULL) {
+	    return TCL_ERROR;
+	}
+	fileP = fopen(fileName, "w");
+	if (fileP == NULL) {
+	    Tcl_AppendResult(interp, "cannot open output file", NULL);
+	    return TCL_ERROR;
+	}
+	TclDbDumpActiveObjects(fileP);
+	fclose(fileP);
+	Tcl_DStringFree(&buffer);
 	return TCL_OK;
     }
     if (strcmp(argv[1],"onexit") == 0) {
@@ -882,9 +920,10 @@ MemoryCmd(
 	if ((curTagPtr != NULL) && (curTagPtr->refCount == 0)) {
 	    TclpFree((char *) curTagPtr);
 	}
-	curTagPtr = (MemTag *) TclpAlloc(TAG_SIZE(strlen(argv[2])));
+	len = strlen(argv[2]);
+	curTagPtr = (MemTag *) TclpAlloc(TAG_SIZE(len));
 	curTagPtr->refCount = 0;
-	strcpy(curTagPtr->string, argv[2]);
+	memcpy(curTagPtr->string, argv[2], len + 1);
 	return TCL_OK;
     }
     if (strcmp(argv[1],"trace") == 0) {
@@ -1182,14 +1221,13 @@ Tcl_Free(
     TclpFree(ptr);
 }
 
-int
+void
 Tcl_DbCkfree(
     char *ptr,
     CONST char *file,
     int line)
 {
     TclpFree(ptr);
-    return 0;
 }
 
 /*
@@ -1223,10 +1261,10 @@ Tcl_ValidateAllMemory(
 {
 }
 
-void
-TclDumpMemoryInfo(
-    FILE *outFile)
+int
+TclDumpMemoryInfo(ClientData clientData, int flags)
 {
+    return 1;
 }
 
 #endif	/* TCL_MEM_DEBUG */

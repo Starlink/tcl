@@ -6,8 +6,6 @@
  * Copyright (c) 1995-1997 Sun Microsystems, Inc.
  * Copyright (c) 1999 by Scriptics Corporation.
  * All rights reserved.
- *
- * RCS: @(#) $Id: tclUnixInit.c,v 1.82 2007/12/13 15:28:42 dgp Exp $
  */
 
 #include "tclInt.h"
@@ -33,6 +31,51 @@
 #	include <dlfcn.h>
 #   endif
 #endif
+
+#ifdef __CYGWIN__
+DLLIMPORT extern __stdcall unsigned char GetVersionExA(void *);
+DLLIMPORT extern __stdcall void GetSystemInfo(void *);
+
+#define NUMPLATFORMS 4
+static const char *const platforms[NUMPLATFORMS] = {
+    "Win32s", "Windows 95", "Windows NT", "Windows CE"
+};
+
+#define NUMPROCESSORS 11
+static const char *const  processors[NUMPROCESSORS] = {
+    "intel", "mips", "alpha", "ppc", "shx", "arm", "ia64", "alpha64", "msil",
+    "amd64", "ia32_on_win64"
+};
+
+typedef struct _SYSTEM_INFO {
+  union {
+    DWORD  dwOemId;
+    struct {
+      int wProcessorArchitecture;
+      int wReserved;
+    };
+  };
+  DWORD     dwPageSize;
+  void *lpMinimumApplicationAddress;
+  void *lpMaximumApplicationAddress;
+  void *dwActiveProcessorMask;
+  DWORD     dwNumberOfProcessors;
+  DWORD     dwProcessorType;
+  DWORD     dwAllocationGranularity;
+  int      wProcessorLevel;
+  int      wProcessorRevision;
+} SYSTEM_INFO;
+
+typedef struct _OSVERSIONINFOA {
+  DWORD dwOSVersionInfoSize;
+  DWORD dwMajorVersion;
+  DWORD dwMinorVersion;
+  DWORD dwBuildNumber;
+  DWORD dwPlatformId;
+  char szCSDVersion[128];
+} OSVERSIONINFOA;
+#endif
+
 #ifdef HAVE_COREFOUNDATION
 #include <CoreFoundation/CoreFoundation.h>
 #endif
@@ -335,10 +378,11 @@ static int		MacOSXGetLibraryPath(Tcl_Interp *interp,
 			    int maxPathLen, char *tclLibPath);
 #endif /* HAVE_COREFOUNDATION */
 #if defined(__APPLE__) && (defined(TCL_LOAD_FROM_MEMORY) || ( \
-	defined(TCL_THREADS) && defined(MAC_OS_X_VERSION_MIN_REQUIRED) && \
-	MAC_OS_X_VERSION_MIN_REQUIRED < 1030) || ( \
-	defined(__LP64__) && defined(MAC_OS_X_VERSION_MIN_REQUIRED) && \
-	MAC_OS_X_VERSION_MIN_REQUIRED < 1050))
+	defined(MAC_OS_X_VERSION_MIN_REQUIRED) && ( \
+	(defined(TCL_THREADS) && MAC_OS_X_VERSION_MIN_REQUIRED < 1030) || \
+	(defined(__LP64__) && MAC_OS_X_VERSION_MIN_REQUIRED < 1050) || \
+	(defined(HAVE_COREFOUNDATION) && MAC_OS_X_VERSION_MIN_REQUIRED < 1050)\
+	)))
 /*
  * Need to check Darwin release at runtime in tclUnixFCmd.c and tclLoadDyld.c:
  * initialize release global at startup from uname().
@@ -765,7 +809,11 @@ void
 TclpSetVariables(
     Tcl_Interp *interp)
 {
-#ifndef NO_UNAME
+#ifdef __CYGWIN__
+    SYSTEM_INFO sysInfo;
+    OSVERSIONINFOA osInfo;
+    char buffer[TCL_INTEGER_SPACE * 2];
+#elif !defined(NO_UNAME)
     struct utsname name;
 #endif
     int unameOK;
@@ -874,7 +922,25 @@ TclpSetVariables(
 #endif
 
     unameOK = 0;
-#ifndef NO_UNAME
+#ifdef __CYGWIN__
+	unameOK = 1;
+    osInfo.dwOSVersionInfoSize = sizeof(OSVERSIONINFOA);
+    GetVersionExA(&osInfo);
+    GetSystemInfo(&sysInfo);
+
+    if (osInfo.dwPlatformId < NUMPLATFORMS) {
+	Tcl_SetVar2(interp, "tcl_platform", "os",
+		platforms[osInfo.dwPlatformId], TCL_GLOBAL_ONLY);
+    }
+    sprintf(buffer, "%d.%d", osInfo.dwMajorVersion, osInfo.dwMinorVersion);
+    Tcl_SetVar2(interp, "tcl_platform", "osVersion", buffer, TCL_GLOBAL_ONLY);
+    if (sysInfo.wProcessorArchitecture < NUMPROCESSORS) {
+	Tcl_SetVar2(interp, "tcl_platform", "machine",
+		processors[sysInfo.wProcessorArchitecture],
+		TCL_GLOBAL_ONLY);
+    }
+
+#elif !defined NO_UNAME
     if (uname(&name) >= 0) {
 	CONST char *native;
 
@@ -1045,7 +1111,7 @@ TclpGetCStackParams(
 	 * Not initialised!
 	 */
 
-	stackGrowsDown = StackGrowsDown(&result);
+	stackGrowsDown = StackGrowsDown(NULL);
     }
 #endif
     
@@ -1093,9 +1159,19 @@ TclpGetCStackParams(
 	if (stackGrowsDown) {
 	    tsdPtr->stackBound = (int *) ((char *)tsdPtr->outerVarPtr -
 		    stackSize);
+	    if (tsdPtr->stackBound > tsdPtr->outerVarPtr) {
+	    	/* Overflow, that should never happen, just set it to NULL.
+	    	 * See [Bug #3166410] */
+	    	tsdPtr->stackBound = NULL;
+	    }
 	} else {
 	    tsdPtr->stackBound = (int *) ((char *)tsdPtr->outerVarPtr +
 		    stackSize);
+	    if (tsdPtr->stackBound < tsdPtr->outerVarPtr) {
+	    	/* Overflow, that should never happen, just set it to NULL.
+	    	 * See [Bug #3166410] */
+	    	tsdPtr->stackBound = NULL;
+	    }
 	}
     }
 
@@ -1110,6 +1186,9 @@ StackGrowsDown(
     int *parent)
 {
     int here;
+    if (!parent) {
+	return StackGrowsDown(&here);
+    }
     return (&here < parent);
 }
 #endif

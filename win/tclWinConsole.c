@@ -8,15 +8,12 @@
  *
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
- *
- * RCS: @(#) $Id: tclWinConsole.c,v 1.19 2006/03/27 18:08:51 andreas_kupries Exp $
  */
 
 #include "tclWinInt.h"
 
 #include <fcntl.h>
 #include <io.h>
-#include <sys/stat.h>
 
 /*
  * The following variable is used to tell whether this module has been
@@ -1146,7 +1143,7 @@ ConsoleReaderThread(
 {
     ConsoleInfo *infoPtr = (ConsoleInfo *)arg;
     HANDLE *handle = infoPtr->handle;
-    DWORD count, waitResult;
+    DWORD waitResult;
     HANDLE wEvents[2];
 
     /* The first event takes precedence. */
@@ -1169,8 +1166,6 @@ ConsoleReaderThread(
 	    break;
 	}
 
-	count = 0;
-
 	/*
 	 * Look for data on the console, but first ignore any events that are
 	 * not KEY_EVENTs.
@@ -1187,7 +1182,7 @@ ConsoleReaderThread(
 	    DWORD err;
 	    err = GetLastError();
 
-	    if (err == EOF) {
+	    if (err == (DWORD)EOF) {
 		infoPtr->readFlags = CONSOLE_EOF;
 	    }
 	}
@@ -1366,7 +1361,7 @@ TclWinOpenConsoleChannel(
      * for instance).
      */
 
-    wsprintfA(channelName, "file%lx", (int) infoPtr);
+    sprintf(channelName, "file%" TCL_I_MODIFIER "x", (size_t)infoPtr);
 
     infoPtr->channel = Tcl_CreateChannel(&consoleChannelType, channelName,
 	    (ClientData) infoPtr, permissions);

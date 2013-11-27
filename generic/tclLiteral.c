@@ -12,8 +12,6 @@
  *
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
- *
- * RCS: @(#) $Id: tclLiteral.c,v 1.33 2007/12/13 15:23:19 dgp Exp $
  */
 
 #include "tclInt.h"
@@ -34,6 +32,10 @@ static int		AddLocalLiteralEntry(CompileEnv *envPtr,
 			    Tcl_Obj *objPtr, int localHash);
 static void		ExpandLocalLiteralArray(CompileEnv *envPtr);
 static unsigned int	HashString(const char *bytes, int length);
+#ifdef TCL_COMPILE_DEBUG
+static LiteralEntry *	LookupLiteralEntry(Tcl_Interp *interp,
+			    Tcl_Obj *objPtr);
+#endif
 static void		RebuildLiteralTable(LiteralTable *tablePtr);
 
 /*
@@ -72,76 +74,6 @@ TclInitLiteralTable(
     tablePtr->numEntries = 0;
     tablePtr->rebuildSize = TCL_SMALL_HASH_TABLE * REBUILD_MULTIPLIER;
     tablePtr->mask = 3;
-}
-
-/*
- *----------------------------------------------------------------------
- *
- * TclCleanupLiteralTable --
- *
- *	This function frees the internal representation of every literal in a
- *	literal table. It is called prior to deleting an interp, so that
- *	variable refs will be cleaned up properly.
- *
- * Results:
- *	None.
- *
- * Side effects:
- *	Each literal in the table has its internal representation freed.
- *
- *----------------------------------------------------------------------
- */
-
-void
-TclCleanupLiteralTable(
-    Tcl_Interp *interp,		/* Interpreter containing literals to purge */
-    LiteralTable *tablePtr)	/* Points to the literal table being
-				 * cleaned. */
-{
-    int i;
-    LiteralEntry* entryPtr;	/* Pointer to the current entry in the hash
-				 * table of literals. */
-    LiteralEntry* nextPtr;	/* Pointer to the next entry in the bucket. */
-    Tcl_Obj* objPtr;		/* Pointer to a literal object whose internal
-				 * rep is being freed. */
-    const Tcl_ObjType* typePtr;	/* Pointer to the object's type. */
-    int didOne;			/* Flag for whether we've removed a literal in
-				 * the current bucket. */
-
-#ifdef TCL_COMPILE_DEBUG
-    TclVerifyGlobalLiteralTable((Interp *) interp);
-#endif /* TCL_COMPILE_DEBUG */
-
-    for (i=0 ; i<tablePtr->numBuckets ; i++) {
-	/*
-	 * It is tempting simply to walk each hash bucket once and delete the
-	 * internal representations of each literal in turn. It's also wrong.
-	 * The problem is that freeing a literal's internal representation can
-	 * delete other literals to which it refers, making nextPtr invalid.
-	 * So each time we free an internal rep, we start its bucket over
-	 * again.
-	 */
-
-	do {
-	    didOne = 0;
-	    entryPtr = tablePtr->buckets[i];
-	    while (entryPtr != NULL) {
-		objPtr = entryPtr->objPtr;
-		nextPtr = entryPtr->nextPtr;
-		typePtr = objPtr->typePtr;
-		if ((typePtr != NULL) && (typePtr->freeIntRepProc != NULL)) {
-		    if (objPtr->bytes == NULL) {
-			Tcl_Panic( "literal without a string rep" );
-		    }
-		    objPtr->typePtr = NULL;
-		    typePtr->freeIntRepProc(objPtr);
-		    didOne = 1;
-		} else {
-		    entryPtr = nextPtr;
-		}
-	    }
-	} while (didOne);
-    }
 }
 
 /*
@@ -309,7 +241,7 @@ TclCreateLiteral(
     }
 
 #ifdef TCL_COMPILE_DEBUG
-    if (TclLookupLiteralEntry((Tcl_Interp *) iPtr, objPtr) != NULL) {
+    if (LookupLiteralEntry((Tcl_Interp *) iPtr, objPtr) != NULL) {
 	Tcl_Panic("TclRegisterLiteral: literal \"%.*s\" found globally but shouldn't be",
 		(length>60? 60 : length), bytes);
     }
@@ -479,10 +411,11 @@ TclRegisterLiteral(
     return objIndex;
 }
 
+#ifdef TCL_COMPILE_DEBUG
 /*
  *----------------------------------------------------------------------
  *
- * TclLookupLiteralEntry --
+ * LookupLiteralEntry --
  *
  *	Finds the LiteralEntry that corresponds to a literal Tcl object
  *	holding a literal.
@@ -496,8 +429,8 @@ TclRegisterLiteral(
  *----------------------------------------------------------------------
  */
 
-LiteralEntry *
-TclLookupLiteralEntry(
+static LiteralEntry *
+LookupLiteralEntry(
     Tcl_Interp *interp,		/* Interpreter for which objPtr was created to
 				 * hold a literal. */
     register Tcl_Obj *objPtr)	/* Points to a Tcl object holding a literal
@@ -521,6 +454,7 @@ TclLookupLiteralEntry(
     return NULL;
 }
 
+#endif
 /*
  *----------------------------------------------------------------------
  *
@@ -1100,7 +1034,7 @@ TclVerifyLocalLiteralTable(
 		Tcl_Panic("TclVerifyLocalLiteralTable: local literal \"%.*s\" had bad refCount %d",
 			(length>60? 60 : length), bytes, localPtr->refCount);
 	    }
-	    if (TclLookupLiteralEntry((Tcl_Interp *) envPtr->iPtr,
+	    if (LookupLiteralEntry((Tcl_Interp *) envPtr->iPtr,
 		    localPtr->objPtr) == NULL) {
 		bytes = Tcl_GetStringFromObj(localPtr->objPtr, &length);
 		Tcl_Panic("TclVerifyLocalLiteralTable: local literal \"%.*s\" is not global",

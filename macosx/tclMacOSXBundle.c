@@ -9,8 +9,6 @@
  *
  * See the file "license.terms" for information on usage and redistribution of
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
- *
- * RCS: @(#) $Id: tclMacOSXBundle.c,v 1.11.4.3 2009/04/14 00:55:34 das Exp $
  */
 
 #include "tclPort.h"
@@ -55,7 +53,8 @@ extern char *dlerror(void) WEAK_IMPORT_ATTRIBUTE;
 #include <mach-o/dyld.h>
 #endif
 
-#if TCL_DYLD_USE_DLFCN && MAC_OS_X_VERSION_MIN_REQUIRED < 1040
+#if (TCL_DYLD_USE_DLFCN && MAC_OS_X_VERSION_MIN_REQUIRED < 1040) || \
+	(MAC_OS_X_VERSION_MIN_REQUIRED < 1050)
 MODULE_SCOPE long tclMacOSXDarwinRelease;
 #endif
 
@@ -157,17 +156,16 @@ Tcl_MacOSXOpenVersionedBundleResources(
 		    bundleVersion, kCFStringEncodingUTF8);
 
 	    if (bundleVersionRef) {
+		CFComparisonResult versionComparison = kCFCompareLessThan;
 		CFStringRef bundleTailRef = CFURLCopyLastPathComponent(
 			bundleURL);
 
 		if (bundleTailRef) {
-		    if (CFStringCompare(bundleTailRef, bundleVersionRef, 0) ==
-			    kCFCompareEqualTo) {
-			versionedBundleRef = (CFBundleRef) CFRetain(bundleRef);
-		    }
+		    versionComparison = CFStringCompare(bundleTailRef,
+			    bundleVersionRef, 0);
 		    CFRelease(bundleTailRef);
 		}
-		if (!versionedBundleRef) {
+		if (versionComparison != kCFCompareEqualTo) {
 		    CFURLRef versURL = CFURLCreateCopyAppendingPathComponent(
 			    NULL, bundleURL, CFSTR("Versions"), TRUE);
 
@@ -175,9 +173,13 @@ Tcl_MacOSXOpenVersionedBundleResources(
 			CFURLRef versionedBundleURL =
 				CFURLCreateCopyAppendingPathComponent(
 				NULL, versURL, bundleVersionRef, TRUE);
+
 			if (versionedBundleURL) {
 			    versionedBundleRef = CFBundleCreate(NULL,
 				    versionedBundleURL);
+			    if (versionedBundleRef) {
+				bundleRef = versionedBundleRef;
+			    }
 			    CFRelease(versionedBundleURL);
 			}
 			CFRelease(versURL);
@@ -186,9 +188,6 @@ Tcl_MacOSXOpenVersionedBundleResources(
 		CFRelease(bundleVersionRef);
 	    }
 	    CFRelease(bundleURL);
-	}
-	if (versionedBundleRef) {
-	    bundleRef = versionedBundleRef;
 	}
     }
 
@@ -258,7 +257,13 @@ Tcl_MacOSXOpenVersionedBundleResources(
 	    CFRelease(libURL);
 	}
 	if (versionedBundleRef) {
-	    CFRelease(versionedBundleRef);
+#if MAC_OS_X_VERSION_MIN_REQUIRED < 1050
+	    /* Workaround CFBundle bug in Tiger and earlier. [Bug 2569449] */
+	    if (tclMacOSXDarwinRelease >= 9)
+#endif
+	    {
+		CFRelease(versionedBundleRef);
+	    }
 	}
     }
 

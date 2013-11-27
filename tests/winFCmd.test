@@ -9,9 +9,6 @@
 #
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
-#
-# RCS: @(#) $Id: winFCmd.test,v 1.42 2007/02/20 15:36:47 patthoyts Exp $
-#
 
 if {[lsearch [namespace children] ::tcltest] == -1} {
     package require tcltest
@@ -20,8 +17,6 @@ if {[lsearch [namespace children] ::tcltest] == -1} {
 
 # Initialise the test constraints
 
-testConstraint win2000orXP 0
-testConstraint winOlderThan2000 0
 testConstraint testvolumetype [llength [info commands testvolumetype]]
 testConstraint testfile       [llength [info commands testfile]]
 testConstraint testchmod      [llength [info commands testchmod]]
@@ -52,15 +47,6 @@ proc cleanup {args} {
 	if {$x != ""} {
 	    catch {file delete -force -- {*}$x}
 	}
-    }
-}
-
-if {[testConstraint winOnly]} {
-    if {[testConstraint nt] && [string index $tcl_platform(osVersion) 0]==5} {
-	# Warning: Win 6 will break this!
-	testConstraint win2000orXP 1
-    } else {
-	testConstraint winOlderThan2000 1
     }
 }
 
@@ -191,18 +177,10 @@ test winFCmd-1.12 {TclpRenameFile: errno: EACCES} {win testfile} {
     close $fd
     set msg
 } {1 EACCES}
-test winFCmd-1.13 {TclpRenameFile: errno: EACCES} {win win2000orXP testfile} {
+test winFCmd-1.13 {TclpRenameFile: errno: EINVAL|EACCES|ENOENT} -constraints {win testfile} -body {
     cleanup
     list [catch {testfile mv nul tf1} msg] $msg
-} {1 EINVAL}
-test winFCmd-1.13.1 {TclpRenameFile: errno: EACCES} {win nt winOlderThan2000 testfile} {
-    cleanup
-    list [catch {testfile mv nul tf1} msg] $msg
-} {1 EACCES}
-test winFCmd-1.13.2 {TclpRenameFile: errno: ENOENT} {win 95 testfile} {
-    cleanup
-    list [catch {testfile mv nul tf1} msg] $msg
-} {1 ENOENT}
+} -match regexp -result {1 (EINVAL|EACCES|ENOENT)}
 test winFCmd-1.14 {TclpRenameFile: errno: EACCES} {win 95 testfile} {
     cleanup
     createfile tf1
@@ -227,18 +205,10 @@ test winFCmd-1.18 {TclpRenameFile: srcAttr == -1} {win testfile} {
     cleanup
     list [catch {testfile mv tf1 tf2} msg] $msg
 } {1 ENOENT} 
-test winFCmd-1.19 {TclpRenameFile: errno == EACCES} {win win2000orXP testfile} {
+test winFCmd-1.19 {TclpRenameFile: errno == EINVAL|EACCES|ENOENT} -constraints {win testfile} -body {
     cleanup
     list [catch {testfile mv nul tf1} msg] $msg
-} {1 EINVAL}
-test winFCmd-1.19.1 {TclpRenameFile: errno == EACCES} {win nt winOlderThan2000 testfile} {
-    cleanup
-    list [catch {testfile mv nul tf1} msg] $msg
-} {1 EACCES}
-test winFCmd-1.19.2 {TclpRenameFile: errno == ENOENT} {win 95 testfile} {
-    cleanup
-    list [catch {testfile mv nul tf1} msg] $msg
-} {1 ENOENT}
+} -match regexp -result {1 (EINVAL|EACCES|ENOENT)}
 test winFCmd-1.20 {TclpRenameFile: src is dir} {win nt testfile} {
     # under 95, this would actually succeed and move the current dir out from 
     # under the current process!
@@ -380,18 +350,10 @@ test winFCmd-2.7 {TclpCopyFile: errno: EACCES} {win 95 testfile} {
     close $fd
     set msg
 } {1 EACCES}
-test winFCmd-2.8 {TclpCopyFile: errno: EACCES} {win win2000orXP testfile} {
+test winFCmd-2.8 {TclpCopyFile: errno: EINVAL|EACCES|ENOENT} -constraints {win testfile} -body {
     cleanup
     list [catch {testfile cp nul tf1} msg] $msg
-} {1 EINVAL}
-test winFCmd-2.8.1 {TclpCopyFile: errno: EACCES} {win nt winOlderThan2000 testfile} {
-    cleanup
-    list [catch {testfile cp nul tf1} msg] $msg
-} {1 EACCES}
-test winFCmd-2.9 {TclpCopyFile: errno: ENOENT} {win 95 testfile} {
-    cleanup
-    list [catch {testfile cp nul tf1} msg] $msg
-} {1 ENOENT}
+} -match regexp -result {1 (EINVAL|EACCES|ENOENT)}
 test winFCmd-2.10 {TclpCopyFile: CopyFile succeeds} {win testfile} {
     cleanup
     createfile tf1 tf1
@@ -546,8 +508,15 @@ test winFCmd-6.1 {TclpRemoveDirectory: errno: EACCES} {win testfile testchmod} {
     cleanup
     file mkdir td1
     testchmod 000 td1
-    testfile rmdir td1
-    file exists td1
+    catch {
+        testfile rmdir td1
+        file exists td1
+    } r
+    catch {
+        testchmod 777 td1
+        cleanup
+    }
+    set r
 } {0}
 test winFCmd-6.2 {TclpRemoveDirectory: errno: EEXIST} {win testfile} {
     cleanup
@@ -586,8 +555,15 @@ test winFCmd-6.9 {TclpRemoveDirectory: errno == EACCES} {win testfile testchmod}
     cleanup
     file mkdir td1
     testchmod 000 td1
-    testfile rmdir td1
-    file exists td1
+    catch {
+        testfile rmdir td1
+        file exists td1
+    } r
+    catch {
+        testchmod 777 td1
+        cleanup
+    }
+    set r
 } {0}
 test winFCmd-6.10 {TclpRemoveDirectory: attr == -1} {win 95 testfile} {
     cleanup
@@ -612,8 +588,15 @@ test winFCmd-6.13 {TclpRemoveDirectory: write-protected} {win testfile testchmod
     cleanup
     file mkdir td1
     testchmod 000 td1
-    testfile rmdir td1
-    file exists td1
+    catch {
+        testfile rmdir td1
+        file exists td1
+    } r
+    catch {
+        testchmod 777 td1
+        cleanup
+    }
+    set r
 } {0}
 test winFCmd-6.14 {TclpRemoveDirectory: check if empty dir} {win 95 testfile} {
     cleanup
@@ -700,8 +683,15 @@ test winFCmd-7.11 {TraverseWinTree: call TraversalCopy: DOTREE_PRED} {win testfi
     file mkdir td1
     createfile td1/tf1 tf1
     testchmod 000 td1
-    testfile cpdir td1 td2
-    list [file exists td2] [file writable td2]
+    catch {
+        testfile cpdir td1 td2
+        list [file exists td2] [file writable td2]
+    } r
+    catch {
+        testchmod 777 td1
+        cleanup
+    }
+    set r
 } {1 1}
 test winFCmd-7.12 {TraverseWinTree: call TraversalDelete: DOTREE_PRED} {win testfile} {
     cleanup
@@ -716,17 +706,12 @@ test winFCmd-7.13 {TraverseWinTree: append \ to target if necessary} {win testfi
     createfile td1/tf1 tf1
     testfile cpdir td1 td2
     contents td2/tf1
-} {tf1}    
-test winFCmd-7.14 {TraverseWinTree: append \ to target if necessary} {win 95 testfile} {
+} {tf1}
+test winFCmd-7.14 {TraverseWinTree: append \ to target if necessary} -constraints {win testfile} -body {
     cleanup
     file mkdir td1
     list [catch {testfile cpdir td1 /} msg] $msg
-} {1 {/ EEXIST}}
-test winFCmd-7.15 {TraverseWinTree: append \ to target if necessary} {win nt testfile} {
-    cleanup
-    file mkdir td1
-    list [catch {testfile cpdir td1 /} msg] $msg
-} {1 {/ EACCES}}
+} -match regexp -result {1 \{/ (EEXIST|EACCES)\}}
 test winFCmd-7.16 {TraverseWinTree: recurse on files: no files} {win testfile} {
     cleanup
     file mkdir td1
@@ -756,8 +741,15 @@ test winFCmd-7.19 {TraverseWinTree: call TraversalCopy: DOTREE_POSTD} {win testf
     file mkdir td1
     createfile td1/tf1 tf1
     testchmod 000 td1
-    testfile cpdir td1 td2
-    list [file exists td2] [file writable td2]
+    catch {
+        testfile cpdir td1 td2
+        list [file exists td2] [file writable td2]
+    } r
+    catch {
+        testchmod 777 td1
+        cleanup
+    }
+    set r
 } {1 1}
 test winFCmd-7.20 {TraverseWinTree: call TraversalDelete: DOTREE_POSTD} \
 	{win testfile} {
@@ -781,8 +773,15 @@ test winFCmd-8.2 {TraversalCopy: DOTREE_PRED} {win testfile testchmod} {
     cleanup
     file mkdir td1/td2
     testchmod 000 td1
-    testfile cpdir td1 td2
-    list [file writable td1] [file writable td1/td2]
+    catch {
+        testfile cpdir td1 td2
+        list [file writable td1] [file writable td1/td2]
+    } r
+    catch {
+        testchmod 777 td1
+        cleanup
+    }
+    set r
 } {0 1}
 test winFCmd-8.3 {TraversalCopy: DOTREE_POSTD} {win testfile} {
     cleanup
@@ -808,8 +807,15 @@ test winFCmd-9.3 {TraversalDelete: DOTREE_PRED} {win testfile testchmod} {
     cleanup
     file mkdir td1/td2
     testchmod 000 td1
-    testfile rmdir -force td1
-    file exists td1
+    catch {
+        testfile rmdir -force td1
+        file exists td1
+    } r
+    catch {
+        testchmod 777 td1
+        cleanup
+    }
+    set r
 } {0}
 test winFCmd-9.4 {TraversalDelete: DOTREE_POSTD} {win testfile} {
     cleanup

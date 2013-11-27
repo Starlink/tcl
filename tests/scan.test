@@ -10,8 +10,6 @@
 #
 # See the file "license.terms" for information on usage and redistribution
 # of this file, and for a DISCLAIMER OF ALL WARRANTIES.
-#
-# RCS: @(#) $Id: scan.test,v 1.21 2006/04/25 17:15:25 dgp Exp $
 
 if {[lsearch [namespace children] ::tcltest] == -1} {
     package require tcltest 2
@@ -483,7 +481,7 @@ test scan-7.3 {string and character scanning} {
     list [scan "123456 test " "%*c%*s %s %s %s" a b c] $a $b $c
 } {1 test {} {}}
 test scan-7.4 {string and character scanning} {
-    set a {}; set b {}; set c {}; set d
+    set a {}; set b {}; set c {}; set d {}
     list [scan "ababcd01234  f 123450" {%4[abcd] %4[abcd] %[^abcdef] %[^0]} a b c d] $a $b $c $d
 } {4 abab cd {01234  } {f 12345}}
 test scan-7.5 {string and character scanning} {
@@ -751,11 +749,11 @@ testConstraint ieeeFloatingPoint [testIEEE]
 
 # scan infinities - not working
 
-test scan-14.1 {infinity} ieeeFloatingPoint {
+test scan-14.1 {infinity} {
     scan Inf %g d
     set d
 } Inf
-test scan-14.2 {infinity} ieeeFloatingPoint {
+test scan-14.2 {infinity} {
     scan -Inf %g d
     set d
 } -Inf

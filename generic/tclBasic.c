@@ -410,6 +410,18 @@ Tcl_CreateInterp(void)
 	Tcl_Panic("Tcl_CallFrame must not be smaller than CallFrame");
     }
 
+#if defined(_WIN32) && !defined(_WIN64)
+    if (sizeof(time_t) != 4) {
+	/*NOTREACHED*/
+	Tcl_Panic("<time.h> is not compatible with MSVC");
+    }
+    if ((TclOffset(Tcl_StatBuf,st_atime) != 32)
+	    || (TclOffset(Tcl_StatBuf,st_ctime) != 40)) {
+	/*NOTREACHED*/
+	Tcl_Panic("<sys/stat.h> is not compatible with MSVC");
+    }
+#endif
+
     /*
      * Initialize support for namespaces and create the global namespace
      * (whose name is ""; an alias is "::"). This also initializes the Tcl
@@ -1954,12 +1966,9 @@ Tcl_CreateCommand(
  *	future calls to Tcl_GetCommandName.
  *
  * Side effects:
- *	If no command named "cmdName" already exists for interp, one is
- *	created. Otherwise, if a command does exist, then if the object-based
- *	Tcl_ObjCmdProc is TclInvokeStringCommand, we assume Tcl_CreateCommand
- *	was called previously for the same command and just set its
- *	Tcl_ObjCmdProc to the argument "proc"; otherwise, we delete the old
- *	command.
+ *	If a command named "cmdName" already exists for interp, it is
+ *	first deleted.  Then the new command is created from the arguments.
+ *	[***] (See below for exception).
  *
  *	In the future, during bytecode evaluation when "cmdName" is seen as
  *	the name of a command by Tcl_EvalObj or Tcl_Eval, the object-based
@@ -2026,17 +2035,22 @@ Tcl_CreateObjCommand(
     if (!isNew) {
 	cmdPtr = Tcl_GetHashValue(hPtr);
 
+	/* Command already exists. */
+
 	/*
-	 * Command already exists. If its object-based Tcl_ObjCmdProc is
-	 * TclInvokeStringCommand, we just set its Tcl_ObjCmdProc to the
-	 * argument "proc". Otherwise, we delete the old command.
+	 * [***] This is wrong.  See Tcl Bug a16752c252.  
+	 * However, this buggy behavior is kept under particular
+	 * circumstances to accommodate deployed binaries of the
+	 * "tclcompiler" program. http://sourceforge.net/projects/tclpro/
+	 * that crash if the bug is fixed.
 	 */
 
-	if (cmdPtr->objProc == TclInvokeStringCommand) {
+	if (cmdPtr->objProc == TclInvokeStringCommand
+		&& cmdPtr->clientData == clientData
+		&& cmdPtr->deleteData == clientData
+		&& cmdPtr->deleteProc == deleteProc) {
 	    cmdPtr->objProc = proc;
 	    cmdPtr->objClientData = clientData;
-	    cmdPtr->deleteProc = deleteProc;
-	    cmdPtr->deleteData = clientData;
 	    return (Tcl_Command) cmdPtr;
 	}
 
@@ -2176,8 +2190,8 @@ TclInvokeStringCommand(
  *	A standard Tcl string result value.
  *
  * Side effects:
- *	Besides those side effects of the called Tcl_CmdProc,
- *	TclInvokeStringCommand allocates and frees storage.
+ *	Besides those side effects of the called Tcl_ObjCmdProc,
+ *	TclInvokeObjectCommand allocates and frees storage.
  *
  *----------------------------------------------------------------------
  */
@@ -3648,10 +3662,11 @@ TclEvalObjvInternal(
 	 * implementation.
 	 */
 
-	if (cmdEpoch != newEpoch) {
+	if (traceCode == TCL_OK && cmdEpoch != newEpoch) {
 	    checkTraces = 0;
 	    if (commandPtr) {
 		Tcl_DecrRefCount(commandPtr);
+		commandPtr = NULL;
 	    }
 	    goto reparseBecauseOfTraces;
 	}
@@ -4990,6 +5005,7 @@ Tcl_Eval(
  *----------------------------------------------------------------------
  */
 
+#undef Tcl_EvalObj
 int
 Tcl_EvalObj(
     Tcl_Interp *interp,
@@ -4998,6 +5014,7 @@ Tcl_EvalObj(
     return Tcl_EvalObjEx(interp, objPtr, 0);
 }
 
+#undef Tcl_GlobalEvalObj
 int
 Tcl_GlobalEvalObj(
     Tcl_Interp *interp,

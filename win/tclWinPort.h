@@ -15,7 +15,7 @@
 #define _TCLWINPORT
 
 #ifndef _WIN64
-/* See [Bug 2935503]: file mtime sets wrong time */
+/* See [Bug 3354324]: file mtime sets wrong time */
 #   define _USE_32BIT_TIME_T
 #endif
 
@@ -457,7 +457,6 @@ typedef DWORD_PTR * PDWORD_PTR;
 
 #define getservbyname	TclWinGetServByName
 #define getsockopt	TclWinGetSockOpt
-#define ntohs		TclWinNToHS
 #define setsockopt	TclWinSetSockOpt
 /* This type is not defined in the Windows headers */
 #define socklen_t       int

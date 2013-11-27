@@ -693,13 +693,17 @@ typedef struct VarInHash {
 #define TclSetVarNamespaceVar(varPtr) \
     if (!TclIsVarNamespaceVar(varPtr)) {\
 	(varPtr)->flags |= VAR_NAMESPACE_VAR;\
-	((VarInHash *)(varPtr))->refCount++;\
+	if (TclIsVarInHash(varPtr)) {\
+	    ((VarInHash *)(varPtr))->refCount++;\
+	}\
     }
 
 #define TclClearVarNamespaceVar(varPtr) \
     if (TclIsVarNamespaceVar(varPtr)) {\
 	(varPtr)->flags &= ~VAR_NAMESPACE_VAR;\
-	((VarInHash *)(varPtr))->refCount--;\
+	if (TclIsVarInHash(varPtr)) {\
+	    ((VarInHash *)(varPtr))->refCount--;\
+	}\
     }
 
 /*
@@ -2728,12 +2732,6 @@ MODULE_SCOPE void	TclpInitLibraryPath(char **valuePtr,
 MODULE_SCOPE void	TclpInitLock(void);
 MODULE_SCOPE void	TclpInitPlatform(void);
 MODULE_SCOPE void	TclpInitUnlock(void);
-MODULE_SCOPE int	TclpLoadFile(Tcl_Interp *interp, Tcl_Obj *pathPtr,
-			    const char *sym1, const char *sym2,
-			    Tcl_PackageInitProc **proc1Ptr,
-			    Tcl_PackageInitProc **proc2Ptr,
-			    ClientData *clientDataPtr,
-			    Tcl_FSUnloadFileProc **unloadProcPtr);
 MODULE_SCOPE Tcl_Obj *	TclpObjListVolumes(void);
 MODULE_SCOPE void	TclpMasterLock(void);
 MODULE_SCOPE void	TclpMasterUnlock(void);

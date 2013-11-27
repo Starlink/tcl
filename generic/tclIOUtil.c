@@ -520,6 +520,7 @@ FsThrExitProc(
 	ckfree((char *)fsRecPtr);
 	fsRecPtr = tmpFsRecPtr;
     }
+    tsdPtr->filesystemList = NULL;
     tsdPtr->initialized = 0;
 }
 
@@ -3148,6 +3149,9 @@ Tcl_FSLoadFile(
  *----------------------------------------------------------------------
  */
 
+typedef int (Tcl_FSLoadFileProc2) (Tcl_Interp *interp, Tcl_Obj *pathPtr,
+	Tcl_LoadHandle *handlePtr, Tcl_FSUnloadFileProc **unloadProcPtr, int flags);
+
 int
 TclLoadFile(
     Tcl_Interp *interp,		/* Used for error reporting. */
@@ -3188,7 +3192,8 @@ TclLoadFile(
 
     proc = fsPtr->loadFileProc;
     if (proc != NULL) {
-	int retVal = (*proc)(interp, pathPtr, handlePtr, unloadProcPtr);
+	int retVal = ((Tcl_FSLoadFileProc2 *)proc)
+		(interp, pathPtr, handlePtr, unloadProcPtr, 0);
 	if (retVal == TCL_OK) {
 	    if (*handlePtr == NULL) {
 		return TCL_ERROR;
@@ -3435,49 +3440,6 @@ TclLoadFile(
 	    }
 	}
     }
-    return TCL_OK;
-}
-/*
- * This function used to be in the platform specific directories, but it has
- * now been made to work cross-platform
- */
-
-int
-TclpLoadFile(
-    Tcl_Interp *interp,		/* Used for error reporting. */
-    Tcl_Obj *pathPtr,		/* Name of the file containing the desired
-				 * code (UTF-8). */
-    const char *sym1, CONST char *sym2,
-				/* Names of two functions to look up in the
-				 * file's symbol table. */
-    Tcl_PackageInitProc **proc1Ptr, Tcl_PackageInitProc **proc2Ptr,
-				/* Where to return the addresses corresponding
-				 * to sym1 and sym2. */
-    ClientData *clientDataPtr,	/* Filled with token for dynamically loaded
-				 * file which will be passed back to
-				 * (*unloadProcPtr)() to unload the file. */
-    Tcl_FSUnloadFileProc **unloadProcPtr)
-				/* Filled with address of Tcl_FSUnloadFileProc
-				 * function which should be used for this
-				 * file. */
-{
-    Tcl_LoadHandle handle = NULL;
-    int res;
-
-    res = TclpDlopen(interp, pathPtr, &handle, unloadProcPtr);
-
-    if (res != TCL_OK) {
-	return res;
-    }
-
-    if (handle == NULL) {
-	return TCL_ERROR;
-    }
-
-    *clientDataPtr = (ClientData) handle;
-
-    *proc1Ptr = TclpFindSymbol(interp, handle, sym1);
-    *proc2Ptr = TclpFindSymbol(interp, handle, sym2);
     return TCL_OK;
 }
 

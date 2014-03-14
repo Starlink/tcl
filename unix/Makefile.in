@@ -724,6 +724,7 @@ install-binaries: binaries
 	@chmod 555 "$(DLL_INSTALL_DIR)"/$(LIB_FILE)
 	@echo "Installing ${TCL_EXE} as $(BIN_INSTALL_DIR)/tclsh$(VERSION)@EXEEXT@"
 	@$(INSTALL_PROGRAM) ${TCL_EXE} "$(BIN_INSTALL_DIR)"/tclsh$(VERSION)@EXEEXT@
+	@cd $(BIN_INSTALL_DIR); rm -f tclsh@EXEEXT@; $(LN_S) tclsh$(VERSION)@EXEEXT@ tclsh@EXEEXT@
 	@echo "Installing tclConfig.sh to $(CONFIG_INSTALL_DIR)/"
 	@$(INSTALL_DATA) tclConfig.sh "$(CONFIG_INSTALL_DIR)"/tclConfig.sh
 	@if test "$(STUB_LIB_FILE)" != "" ; then \

@@ -29,6 +29,7 @@ unix/tcltest
 unix/test1
 unix/test2
 unix/test3
+unix/tcl.pc
 configure-output.log
 configure-output.log.err
 make.log

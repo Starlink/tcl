@@ -1,7 +1,7 @@
 dnl    Process this file with autoconf to produce a configure script
 AC_REVISION($Revision$)
 
-AC_INIT(tcl, 8.5.15, starlink@jiscmail.ac.uk)
+AC_INIT(tcl, 8.5.16, starlink@jiscmail.ac.uk)
 
 dnl    Require autoconf-2.50 at least
 AC_PREREQ(2.50)

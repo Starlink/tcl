@@ -3,7 +3,7 @@
 <!-- component.xml.  Generated from component.xml.in by configure. -->
 
 <component id="tcl" support="U">
-  <version>8.5.15</version>
+  <version>8.5.16</version>
   <path>thirdparty/tclsys/tcl</path>
   <description>The Tcl system</description>
   <!-- <abstract><p></p></abstract> -->

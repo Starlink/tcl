@@ -1478,6 +1478,39 @@ test io-12.6 {ReadChars: too many chars read} {
     }
     close $c
 } {}
+test io-12.7 {ReadChars: too many chars read [bc5b790099]} {
+    proc driver {cmd args} {
+        variable buffer
+        variable index
+        set chan [lindex $args 0]
+        switch -- $cmd {
+            initialize {
+                set index($chan) 0
+                set buffer($chan) [encoding convertto utf-8 \
+                        [string repeat \uBEEF 10]....\uBEEF]
+                return {initialize finalize watch read}
+            }
+            finalize {
+                unset index($chan) buffer($chan)
+                return
+            }
+            watch {}
+            read {
+                set n [lindex $args 1]
+                set new [expr {$index($chan) + $n}]
+                set result [string range $buffer($chan) $index($chan) $new-1]
+                set index($chan) $new
+                return $result
+            }
+        }
+    }
+    set c [chan create read [namespace which driver]]
+    chan configure $c -encoding utf-8
+    while {![eof $c]} {
+        read $c 7
+    }
+    close $c
+} {}
 
 test io-13.1 {TranslateInputEOL: cr mode} {} {
     set f [open $path(test1) w]
@@ -4266,6 +4299,110 @@ test io-33.10 {Tcl_Gets, exercising double buffering} {
     close $f
     set y
 } 300
+test io-33.11 {TclGetsObjBinary, [10dc6daa37]} -setup {
+    proc driver {cmd args} {
+        variable buffer
+        variable index
+        set chan [lindex $args 0]
+        switch -- $cmd {
+            initialize {
+                set index($chan) 0
+                set buffer($chan) .......
+                return {initialize finalize watch read}
+            }
+            finalize {
+                unset index($chan) buffer($chan)
+                return
+            }
+            watch {}
+            read {
+                set n [lindex $args 1]
+		if {$n > 3} {set n 3}
+                set new [expr {$index($chan) + $n}]
+                set result [string range $buffer($chan) $index($chan) $new-1]
+                set index($chan) $new
+                return $result
+            }
+        }
+    }
+} -body {
+    set c [chan create read [namespace which driver]]
+    chan configure $c -translation binary -blocking 0
+    list [gets $c] [gets $c] [gets $c] [gets $c]
+} -cleanup {
+    close $c
+    rename driver {}
+} -result {{} {} {} .......}
+test io-33.12 {Tcl_GetsObj, [10dc6daa37]} -setup {
+    proc driver {cmd args} {
+        variable buffer
+        variable index
+        set chan [lindex $args 0]
+        switch -- $cmd {
+            initialize {
+                set index($chan) 0
+                set buffer($chan) .......
+                return {initialize finalize watch read}
+            }
+            finalize {
+                unset index($chan) buffer($chan)
+                return
+            }
+            watch {}
+            read {
+                set n [lindex $args 1]
+		if {$n > 3} {set n 3}
+                set new [expr {$index($chan) + $n}]
+                set result [string range $buffer($chan) $index($chan) $new-1]
+                set index($chan) $new
+                return $result
+            }
+        }
+    }
+} -body {
+    set c [chan create read [namespace which driver]]
+    chan configure $c -blocking 0
+    list [gets $c] [gets $c] [gets $c] [gets $c]
+} -cleanup {
+    close $c
+    rename driver {}
+} -result {{} {} {} .......}
+test io-33.13 {Tcl_GetsObj, [10dc6daa37]} -setup {
+    proc driver {cmd args} {
+        variable buffer
+        variable index
+        set chan [lindex $args 0]
+        switch -- $cmd {
+            initialize {
+                set index($chan) 0
+                set buffer($chan) [string repeat \
+                        [string repeat . 64]\n[string repeat . 25] 2]
+                return {initialize finalize watch read}
+            }
+            finalize {
+                unset index($chan) buffer($chan)
+                return
+            }
+            watch {}
+            read {
+                set n [lindex $args 1]
+                if {$n > 65} {set n 65}
+                set new [expr {$index($chan) + $n}]
+                set result [string range $buffer($chan) $index($chan) $new-1]
+                set index($chan) $new
+                return $result
+            }
+        }
+    }
+} -body {
+    set c [chan create read [namespace which driver]]
+    chan configure $c -blocking 0
+    list [gets $c] [gets $c] [gets $c] [gets $c] [gets $c]
+} -cleanup {
+    close $c
+    rename driver {}
+} -result [list [string repeat . 64] {} [string repeat . 89] \
+	[string repeat . 25] {}]
 
 # Test Tcl_Seek and Tcl_Tell.
 
@@ -7576,6 +7713,113 @@ test io-53.11 {Bug 2895565} -setup {
     removeFile out
     removeFile in
 } -result {40 bytes copied}
+
+# test io-53.12 not backported.  Tests feature only in 8.6+
+
+test io-53.13 {TclCopyChannel: read error reporting} -setup {
+    proc driver {cmd args} {
+        variable buffer
+        variable index
+        set chan [lindex $args 0]
+        switch -- $cmd {
+            initialize {
+                return {initialize finalize watch read}
+            }
+            finalize {
+                return
+            }
+            watch {}
+            read {
+                error FAIL
+            }
+        }
+    }
+    set outFile [makeFile {} out]
+} -body {
+    set in [chan create read [namespace which driver]]
+    chan configure $in -translation binary
+    set out [open $outFile wb]
+    chan copy $in $out
+} -cleanup {
+    catch {close $in}
+    catch {close $out}
+    removeFile out
+    rename driver {}
+} -result {error reading "*": *} -returnCodes error -match glob
+test io-53.14 {TclCopyChannel: write error reporting} -setup {
+    proc driver {cmd args} {
+        variable buffer
+        variable index
+        set chan [lindex $args 0]
+        switch -- $cmd {
+            initialize {
+                return {initialize finalize watch write}
+            }
+            finalize {
+                return
+            }
+            watch {}
+            write {
+                error FAIL
+            }
+        }
+    }
+    set inFile [makeFile {aaa} in]
+} -body {
+    set in [open $inFile rb]
+    set out [chan create write [namespace which driver]]
+    chan configure $out -translation binary
+    chan copy $in $out
+} -cleanup {
+    catch {close $in}
+    catch {close $out}
+    removeFile in
+    rename driver {}
+} -result {error writing "*": *} -returnCodes error -match glob
+test io-53.15 {[ed29c4da21] DoRead: fblocked seen as error} -setup {
+    proc driver {cmd args} {
+        variable buffer
+        variable index
+        variable blocked
+        set chan [lindex $args 0]
+        switch -- $cmd {
+            initialize {
+                set index($chan) 0
+                set buffer($chan) [encoding convertto utf-8 \
+                        [string repeat a 100]]
+                set blocked($chan) 1
+                return {initialize finalize watch read}
+            }
+            finalize {
+                unset index($chan) buffer($chan) blocked($chan)
+                return
+            }
+            watch {}
+            read {
+                if {$blocked($chan)} {
+                    set blocked($chan) [expr {!$blocked($chan)}]
+                    return -code error EAGAIN
+                }
+                set n [lindex $args 1]
+                set new [expr {$index($chan) + $n}]
+                set result [string range $buffer($chan) $index($chan) $new-1]
+                set index($chan) $new
+                return $result
+            }
+        }
+    }
+    set c [chan create read [namespace which driver]]
+    chan configure $c -encoding utf-8
+    set out [makeFile {} out]
+    set outChan [open $out w]
+    chan configure $outChan -encoding utf-8
+} -body {
+    chan copy $c $outChan
+} -cleanup {
+    close $outChan
+    close $c
+    removeFile out
+} -result 100
 
 test io-54.1 {Recursive channel events} {socket fileevent} {
     # This test checks to see if file events are delivered during recursive

@@ -58,10 +58,10 @@ extern "C" {
 #define TCL_MAJOR_VERSION   8
 #define TCL_MINOR_VERSION   5
 #define TCL_RELEASE_LEVEL   TCL_FINAL_RELEASE
-#define TCL_RELEASE_SERIAL  16
+#define TCL_RELEASE_SERIAL  17
 
 #define TCL_VERSION	    "8.5"
-#define TCL_PATCH_LEVEL	    "8.5.16"
+#define TCL_PATCH_LEVEL	    "8.5.17"
 
 /*
  * The following definitions set up the proper options for Windows compilers.
@@ -69,7 +69,7 @@ extern "C" {
  */
 
 #ifndef __WIN32__
-#   if defined(_WIN32) || defined(WIN32) || defined(__MINGW32__) || defined(__BORLANDC__) || (defined(__WATCOMC__) && defined(__WINDOWS_386__))
+#   if defined(_WIN32) || defined(WIN32) || defined(__MSVCRT__) || defined(__BORLANDC__) || (defined(__WATCOMC__) && defined(__WINDOWS_386__))
 #	define __WIN32__
 #	ifndef WIN32
 #	    define WIN32

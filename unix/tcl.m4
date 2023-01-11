@@ -1246,8 +1246,7 @@ AC_DEFUN([SC_CONFIG_CFLAGS], [
 	    LD_SEARCH_FLAGS=""
 	    TCL_NEEDS_EXP_FILE=1
 	    TCL_EXPORT_FILE_SUFFIX='${VERSION}\$\{DBGX\}.dll.a'
-	    TCL_SHLIB_LD_EXTRAS='-Wl,--out-implib,$[@].a'
-	    TK_SHLIB_LD_EXTRAS='-Wl,--out-implib,$[@].a'
+	    SHLIB_LD_LIBS="${SHLIB_LD_LIBS} -Wl,--out-implib,\$[@].a"
 	    AC_CACHE_CHECK(for Cygwin version of gcc,
 		ac_cv_cygwin,
 		AC_TRY_COMPILE([
@@ -1500,7 +1499,14 @@ AC_DEFUN([SC_CONFIG_CFLAGS], [
 		LDFLAGS=""
 		;;
 	    *)
-		SHLIB_CFLAGS="-fPIC"
+		case "$arch" in
+		alpha|sparc64)
+		    SHLIB_CFLAGS="-fPIC"
+		    ;;
+		*)
+		    SHLIB_CFLAGS="-fpic"
+		    ;;
+		esac
 		SHLIB_LD='${CC} -shared ${SHLIB_CFLAGS}'
 		SHLIB_SUFFIX=".so"
 		DL_OBJS="tclLoadDl.o"
@@ -1555,8 +1561,7 @@ AC_DEFUN([SC_CONFIG_CFLAGS], [
 	    # This configuration from FreeBSD Ports.
 	    SHLIB_CFLAGS="-fPIC"
 	    SHLIB_LD="${CC} -shared"
-	    TCL_SHLIB_LD_EXTRAS="-Wl,-soname,\$[@]"
-	    TK_SHLIB_LD_EXTRAS="-Wl,-soname,\$[@]"
+	    SHLIB_LD_LIBS="${SHLIB_LD_LIBS} -Wl,-soname,\$[@]"
 	    SHLIB_SUFFIX=".so"
 	    DL_OBJS="tclLoadDl.o"
 	    DL_LIBS=""

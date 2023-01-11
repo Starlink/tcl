@@ -3135,7 +3135,7 @@ TclCompileEnsemble(
 	 * any extra elements that might have been appended by failing
 	 * pathways above.
 	 */
-	(void) Tcl_ListObjReplace(NULL, replaced, depth-1, INT_MAX, 0, NULL);
+	(void) Tcl_ListObjReplace(NULL, replaced, depth-1, LIST_MAX, 0, NULL);
 
 	/*
 	 * TODO: Reconsider whether we ought to call CompileToInvokedCommand()
@@ -3306,7 +3306,7 @@ CompileToInvokedCommand(
     Tcl_Token *tokPtr;
     Tcl_Obj *objPtr, **words;
     char *bytes;
-    int length, i, numWords, cmdLit;
+    int length, i, numWords, cmdLit, extraLiteralFlags = LITERAL_CMD_NAME;
     DefineLineInformation;
 
     /*
@@ -3349,7 +3349,10 @@ CompileToInvokedCommand(
     objPtr = Tcl_NewObj();
     Tcl_GetCommandFullName(interp, (Tcl_Command) cmdPtr, objPtr);
     bytes = Tcl_GetStringFromObj(objPtr, &length);
-    cmdLit = TclRegisterNewCmdLiteral(envPtr, bytes, length);
+    if ((cmdPtr != NULL) && (cmdPtr->flags & CMD_VIA_RESOLVER)) {
+	extraLiteralFlags |= LITERAL_UNSHARED;
+    }
+    cmdLit = TclRegisterLiteral(envPtr, (char *)bytes, length, extraLiteralFlags);
     TclSetCmdNameObj(interp, TclFetchLiteral(envPtr, cmdLit), cmdPtr);
     TclEmitPush(cmdLit, envPtr);
     TclDecrRefCount(objPtr);

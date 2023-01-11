@@ -976,7 +976,7 @@ Tcl_GetEncodingNames(
  * Side effects:
  *	The reference count of the new system encoding is incremented. The
  *	reference count of the old system encoding is decremented and it may
- *	be freed.
+ *	be freed. All VFS cached information is invalidated.
  *
  *------------------------------------------------------------------------
  */
@@ -1007,6 +1007,7 @@ Tcl_SetSystemEncoding(
     FreeEncoding(systemEncoding);
     systemEncoding = encoding;
     Tcl_MutexUnlock(&encodingMutex);
+    Tcl_FSMountsChanged(NULL);
 
     return TCL_OK;
 }
@@ -2343,7 +2344,7 @@ UtfToUtfProc(
 	    src += 2;
 	} else if (!Tcl_UtfCharComplete(src, srcEnd - src)) {
 	    /*
-	     * Always check before using Tcl_UtfToUniChar. Not doing can so
+	     * Always check before using TclUtfToUniChar. Not doing can so
 	     * cause it run beyond the endof the buffer! If we happen such an
 	     * incomplete char its byts are made to represent themselves.
 	     */
@@ -2352,7 +2353,7 @@ UtfToUtfProc(
 	    src += 1;
 	    dst += Tcl_UniCharToUtf(ch, dst);
 	} else {
-	    src += Tcl_UtfToUniChar(src, &ch);
+	    src += TclUtfToUniChar(src, &ch);
 	    dst += Tcl_UniCharToUtf(ch, dst);
 	}
     }

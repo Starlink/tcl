@@ -595,4 +595,3 @@ clean:
 	-@$(RM) $(TMPDIR)\*.exe
 	-@$(RMDIR) $(OUTDIR)
 	-@$(RMDIR) $(TMPDIR)
-

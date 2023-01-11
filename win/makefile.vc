@@ -480,6 +480,10 @@ lflags	= -nologo -machine:$(MACHINE) $(LINKERFLAGS) $(ldebug)
 lflags	= $(lflags) -profile
 !endif
 
+!if $(MSVCRT) && !($(DEBUG) && !$(UNCHECKED)) && $(VCVERSION) >= 1900
+lflags	= $(lflags) -nodefaultlib:libucrt.lib
+!endif
+
 !if $(ALIGN98_HACK) && !$(STATIC_BUILD)
 ### Align sections for PE size savings.
 lflags	= $(lflags) -opt:nowin98
@@ -504,6 +508,9 @@ baselibs   = kernel32.lib user32.lib ws2_32.lib
 baselibs   = $(baselibs) bufferoverflowU.lib
 !endif
 !endif
+!if $(MSVCRT) && !($(DEBUG) && !$(UNCHECKED)) && $(VCVERSION) >= 1900
+baselibs   = $(baselibs) ucrt.lib
+!endif
 
 #---------------------------------------------------------------------
 # TclTest flags
@@ -522,7 +529,7 @@ release:    setup $(TCLSH) $(TCLSTUBLIB) dlls
 core:	    setup $(TCLLIB) $(TCLSTUBLIB)
 shell:	    setup $(TCLSH)
 dlls:	    setup $(TCLPIPEDLL) $(TCLREGLIB) $(TCLDDELIB)
-all:	    setup $(TCLSH) $(TCLSTUBLIB) dlls $(CAT32) 
+all:	    setup $(TCLSH) $(TCLSTUBLIB) dlls $(CAT32)
 tcltest:    setup $(TCLTEST) dlls $(CAT32)
 install:    install-binaries install-libraries install-docs
 
@@ -1005,10 +1012,6 @@ install-libraries: tclConfig install-msgs install-tzdata
 		$(MKDIR) "$(SCRIPT_INSTALL_DIR)"
 	@if not exist "$(SCRIPT_INSTALL_DIR)\..\tcl8$(NULL)" \
 		$(MKDIR) "$(SCRIPT_INSTALL_DIR)\..\tcl8"
-	@if not exist "$(SCRIPT_INSTALL_DIR)\..\tcl8\8.2$(NULL)" \
-		$(MKDIR) "$(SCRIPT_INSTALL_DIR)\..\tcl8\8.2"
-	@if not exist "$(SCRIPT_INSTALL_DIR)\..\tcl8\8.3$(NULL)" \
-		$(MKDIR) "$(SCRIPT_INSTALL_DIR)\..\tcl8\8.3"
 	@if not exist "$(SCRIPT_INSTALL_DIR)\..\tcl8\8.4$(NULL)" \
 		$(MKDIR) "$(SCRIPT_INSTALL_DIR)\..\tcl8\8.4"
 	@if not exist "$(SCRIPT_INSTALL_DIR)\..\tcl8\8.4\platform$(NULL)" \
@@ -1135,4 +1138,3 @@ realclean: hose
 hose:
 	@echo Hosing $(OUT_DIR)\* ...
 	@if exist $(OUT_DIR)\nul $(RMDIR) $(OUT_DIR)
-

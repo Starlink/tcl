@@ -119,17 +119,22 @@ static void dropstate(struct nfa *, struct state *);
 static void freestate(struct nfa *, struct state *);
 static void destroystate(struct nfa *, struct state *);
 static void newarc(struct nfa *, int, pcolor, struct state *, struct state *);
+static void createarc(struct nfa *, int, pcolor, struct state *, struct state *);
 static struct arc *allocarc(struct nfa *, struct state *);
 static void freearc(struct nfa *, struct arc *);
+static void changearctarget(struct arc *, struct state *);
 static int hasnonemptyout(struct state *);
-static int nonemptyouts(struct state *);
-static int nonemptyins(struct state *);
 static struct arc *findarc(struct state *, int, pcolor);
 static void cparc(struct nfa *, struct arc *, struct state *, struct state *);
+static void sortins(struct nfa *, struct state *);
+static int sortins_cmp(const void *, const void *);
+static void sortouts(struct nfa *, struct state *);
+static int sortouts_cmp(const void *, const void *);
 static void moveins(struct nfa *, struct state *, struct state *);
-static void copyins(struct nfa *, struct state *, struct state *, int);
+static void copyins(struct nfa *, struct state *, struct state *);
+static void mergeins(struct nfa *, struct state *, struct arc **, int);
 static void moveouts(struct nfa *, struct state *, struct state *);
-static void copyouts(struct nfa *, struct state *, struct state *, int);
+static void copyouts(struct nfa *, struct state *, struct state *);
 static void cloneouts(struct nfa *, struct state *, struct state *, struct state *, int);
 static void delsub(struct nfa *, struct state *, struct state *);
 static void deltraverse(struct nfa *, struct state *, struct state *);
@@ -139,28 +144,35 @@ static void cleartraverse(struct nfa *, struct state *);
 static void specialcolors(struct nfa *);
 static long optimize(struct nfa *, FILE *);
 static void pullback(struct nfa *, FILE *);
-static int pull(struct nfa *, struct arc *);
+static int pull(struct nfa *, struct arc *, struct state **);
 static void pushfwd(struct nfa *, FILE *);
-static int push(struct nfa *, struct arc *);
+static int push(struct nfa *, struct arc *, struct state **);
 #define	INCOMPATIBLE	1	/* destroys arc */
 #define	SATISFIED	2	/* constraint satisfied */
 #define	COMPATIBLE	3	/* compatible but not satisfied yet */
 static int combine(struct arc *, struct arc *);
 static void fixempties(struct nfa *, FILE *);
-static struct state *emptyreachable(struct state *, struct state *);
-static void replaceempty(struct nfa *, struct state *, struct state *);
+static struct state *emptyreachable(struct nfa *, struct state *,
+			struct state *, struct arc **);
+static int	isconstraintarc(struct arc *);
+static int	hasconstraintout(struct state *);
+static void fixconstraintloops(struct nfa *, FILE *);
+static int	findconstraintloop(struct nfa *, struct state *);
+static void breakconstraintloop(struct nfa *, struct state *);
+static void clonesuccessorstates(struct nfa *, struct state *, struct state *,
+		 struct state *, struct arc *, char *, char *, int);
 static void cleanup(struct nfa *);
 static void markreachable(struct nfa *, struct state *, struct state *, struct state *);
 static void markcanreach(struct nfa *, struct state *, struct state *, struct state *);
 static long analyze(struct nfa *);
 static void compact(struct nfa *, struct cnfa *);
-static void carcsort(struct carc *, struct carc *);
+static void carcsort(struct carc *, size_t);
+static int carc_cmp(const void *, const void *);
 static void freecnfa(struct cnfa *);
 static void dumpnfa(struct nfa *, FILE *);
 #ifdef REG_DEBUG
 static void dumpstate(struct state *, FILE *);
 static void dumparcs(struct state *, FILE *);
-static int dumprarcs(struct arc *, struct state *, FILE *, int);
 static void dumparc(struct arc *, struct state *, FILE *);
 #endif
 static void dumpcnfa(struct cnfa *, FILE *);
@@ -593,13 +605,15 @@ makesearch(
 		break;
 	    }
 	}
+ 
+	/*
+	 * We want to mark states as being in the list already by having non
+	 * NULL tmp fields, but we can't just store the old slist value in tmp
+	 * because that doesn't work for the first such state.  Instead, the
+	 * first list entry gets its own address in tmp.
+	 */
 	if (b != NULL && s->tmp == NULL) {
-	    /*
-	     * Must be split if not already in the list (fixes bugs 505048,
-	     * 230589, 840258, 504785).
-	     */
-
-	    s->tmp = slist;
+	    s->tmp = (slist != NULL) ? slist : s;
 	    slist = s;
 	}
     }
@@ -610,8 +624,9 @@ makesearch(
 
     for (s=slist ; s!=NULL ; s=s2) {
 	s2 = newstate(nfa);
-
-	copyouts(nfa, s, s2, 1);
+	NOERR();
+	copyouts(nfa, s, s2);
+	NOERR();
 	for (a=s->ins ; a!=NULL ; a=b) {
 	    b = a->inchain;
 
@@ -620,7 +635,7 @@ makesearch(
 		freearc(nfa, a);
 	    }
 	}
-	s2 = s->tmp;
+	s2 = (s->tmp != s) ? s->tmp : NULL;
 	s->tmp = NULL;		/* clean up while we're at it */
     }
 }
@@ -982,6 +997,7 @@ parseqatom(
 	NOERR();
 	assert(v->nextvalue > 0);
 	atom = subre(v, 'b', BACKR, lp, rp);
+	NOERR();
 	subno = v->nextvalue;
 	atom->subno = subno;
 	EMPTYARC(lp, rp);	/* temporarily, so there's something */
@@ -1129,6 +1145,7 @@ parseqatom(
      */
 
     t = subre(v, '.', COMBINE(qprefer, atom->flags), lp, rp);
+    NOERR();
     t->left = atom;
     atomp = &t->left;
 
@@ -1142,6 +1159,7 @@ parseqatom(
 
     assert(top->op == '=' && top->left == NULL && top->right == NULL);
     top->left = subre(v, '=', top->flags, top->begin, lp);
+    NOERR();
     top->op = '.';
     top->right = t;
 
@@ -2041,7 +2059,7 @@ dump(
 
     dumpcolors(&g->cmap, f);
     if (!NULLCNFA(g->search)) {
-	printf("\nsearch:\n");
+	fprintf(f, "\nsearch:\n");
 	dumpcnfa(&g->search, f);
     }
     for (i = 1; i < g->nlacons; i++) {

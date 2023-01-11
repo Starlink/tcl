@@ -1910,6 +1910,52 @@ $as_echo "$ac_res" >&6; }
 
 } # ac_fn_c_check_type
 
+# ac_fn_c_check_decl LINENO SYMBOL VAR INCLUDES
+# ---------------------------------------------
+# Tests whether SYMBOL is declared in INCLUDES, setting cache variable VAR
+# accordingly.
+ac_fn_c_check_decl ()
+{
+  as_lineno=${as_lineno-"$1"} as_lineno_stack=as_lineno_stack=$as_lineno_stack
+  as_decl_name=`echo $2|sed 's/ *(.*//'`
+  as_decl_use=`echo $2|sed -e 's/(/((/' -e 's/)/) 0&/' -e 's/,/) 0& (/g'`
+  { $as_echo "$as_me:${as_lineno-$LINENO}: checking whether $as_decl_name is declared" >&5
+$as_echo_n "checking whether $as_decl_name is declared... " >&6; }
+if eval \${$3+:} false; then :
+  $as_echo_n "(cached) " >&6
+else
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+$4
+int
+main ()
+{
+#ifndef $as_decl_name
+#ifdef __cplusplus
+  (void) $as_decl_use;
+#else
+  (void) $as_decl_name;
+#endif
+#endif
+
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_compile "$LINENO"; then :
+  eval "$3=yes"
+else
+  eval "$3=no"
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.$ac_ext
+fi
+eval ac_res=\$$3
+	       { $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_res" >&5
+$as_echo "$ac_res" >&6; }
+  eval $as_lineno_stack; ${as_lineno_stack:+:} unset as_lineno
+
+} # ac_fn_c_check_decl
+
 # ac_fn_c_check_member LINENO AGGR MEMBER VAR INCLUDES
 # ----------------------------------------------------
 # Tries to find if the field MEMBER exists in type AGGR, after including
@@ -2331,7 +2377,7 @@ ac_compiler_gnu=$ac_cv_c_compiler_gnu
 TCL_VERSION=8.6
 TCL_MAJOR_VERSION=8
 TCL_MINOR_VERSION=6
-TCL_PATCH_LEVEL=".9"
+TCL_PATCH_LEVEL=".10"
 VERSION=${TCL_VERSION}
 
 EXTRA_INSTALL_BINARIES=${EXTRA_INSTALL_BINARIES:-"@:"}
@@ -4878,6 +4924,9 @@ $as_echo "$as_me: WARNING: can't find uname command" >&2;}
 		if test "`uname -s`" = "AIX" ; then
 		    tcl_cv_sys_version=AIX-`uname -v`.`uname -r`
 		fi
+		if test "`uname -s`" = "NetBSD" -a -f /etc/debian_version ; then
+		    tcl_cv_sys_version=NetBSD-Debian
+		fi
 	    fi
 	fi
 
@@ -5947,12 +5996,6 @@ fi
 	    SHLIB_SUFFIX=".dylib"
 	    DL_OBJS="tclLoadDyld.o"
 	    DL_LIBS=""
-	    # Don't use -prebind when building for Mac OS X 10.4 or later only:
-	    if test "`echo "${MACOSX_DEPLOYMENT_TARGET}" | awk -F '10\\.' '{print int($2)}'`" -lt 4 -a \
-		"`echo "${CPPFLAGS}" | awk -F '-mmacosx-version-min=10\\.' '{print int($2)}'`" -lt 4; then :
-
-		LDFLAGS="$LDFLAGS -prebind"
-fi
 	    LDFLAGS="$LDFLAGS -headerpad_max_install_names"
 	    { $as_echo "$as_me:${as_lineno-$LINENO}: checking if ld accepts -search_paths_first flag" >&5
 $as_echo_n "checking if ld accepts -search_paths_first flag... " >&6; }
@@ -8066,6 +8109,29 @@ $as_echo "#define HAVE_MTSAFE_GETHOSTBYADDR 1" >>confdefs.h
 
 
     else
+
+    # Avoids picking hidden internal symbol from libc
+    ac_fn_c_check_decl "$LINENO" "gethostbyname_r" "ac_cv_have_decl_gethostbyname_r" "#include <netdb.h>
+"
+if test "x$ac_cv_have_decl_gethostbyname_r" = xyes; then :
+  ac_have_decl=1
+else
+  ac_have_decl=0
+fi
+
+cat >>confdefs.h <<_ACEOF
+#define HAVE_DECL_GETHOSTBYNAME_R $ac_have_decl
+_ACEOF
+if test $ac_have_decl = 1; then :
+
+    tcl_cv_api_gethostbyname_r=yes
+else
+  tcl_cv_api_gethostbyname_r=no
+fi
+
+
+
+    if test "$tcl_cv_api_gethostbyname_r" = yes; then
 	ac_fn_c_check_func "$LINENO" "gethostbyname_r" "ac_cv_func_gethostbyname_r"
 if test "x$ac_cv_func_gethostbyname_r" = xyes; then :
 
@@ -8203,6 +8269,31 @@ $as_echo "#define HAVE_GETHOSTBYNAME_R 1" >>confdefs.h
 
 fi
 
+    fi
+
+
+    # Avoids picking hidden internal symbol from libc
+    ac_fn_c_check_decl "$LINENO" "gethostbyaddr_r" "ac_cv_have_decl_gethostbyaddr_r" "#include <netdb.h>
+"
+if test "x$ac_cv_have_decl_gethostbyaddr_r" = xyes; then :
+  ac_have_decl=1
+else
+  ac_have_decl=0
+fi
+
+cat >>confdefs.h <<_ACEOF
+#define HAVE_DECL_GETHOSTBYADDR_R $ac_have_decl
+_ACEOF
+if test $ac_have_decl = 1; then :
+
+    tcl_cv_api_gethostbyaddr_r=yes
+else
+  tcl_cv_api_gethostbyaddr_r=no
+fi
+
+
+
+    if test "$tcl_cv_api_gethostbyaddr_r" = yes; then
 	ac_fn_c_check_func "$LINENO" "gethostbyaddr_r" "ac_cv_func_gethostbyaddr_r"
 if test "x$ac_cv_func_gethostbyaddr_r" = xyes; then :
 
@@ -8304,6 +8395,8 @@ $as_echo "#define HAVE_GETHOSTBYADDR_R 1" >>confdefs.h
     fi
 
 fi
+
+    fi
 
     fi
 fi
@@ -9849,6 +9942,9 @@ $as_echo "$as_me: WARNING: can't find uname command" >&2;}
 		if test "`uname -s`" = "AIX" ; then
 		    tcl_cv_sys_version=AIX-`uname -v`.`uname -r`
 		fi
+		if test "`uname -s`" = "NetBSD" -a -f /etc/debian_version ; then
+		    tcl_cv_sys_version=NetBSD-Debian
+		fi
 	    fi
 	fi
 
@@ -9903,7 +9999,7 @@ $as_echo "$tcl_ok" >&6; }
 #------------------------------------------------------------------------
 #	Check whether the timezone data is supplied by the OS or has
 #	to be installed by Tcl. The default is autodetection, but can
-#	be overriden on the configure command line either way.
+#	be overridden on the configure command line either way.
 #------------------------------------------------------------------------
 
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for timezone data" >&5
@@ -10115,7 +10211,7 @@ eval "TCL_LIB_FILE=libtcl${LIB_SUFFIX}"
 
 eval "TCL_LIB_FILE=${TCL_LIB_FILE}"
 
-TCL_LIBRARY='$(prefix)/lib/tcl$(VERSION)'
+test -z "$TCL_LIBRARY" && TCL_LIBRARY='$(prefix)/lib/tcl$(VERSION)'
 PRIVATE_INCLUDE_DIR='$(includedir)'
 HTML_DIR='$(DISTDIR)/html'
 
@@ -10240,13 +10336,13 @@ VERSION=${TCL_VERSION}
 
 if test "$FRAMEWORK_BUILD" = "1" ; then
     test -z "$TCL_PACKAGE_PATH" && \
-	TCL_PACKAGE_PATH="~/Library/Tcl /Library/Tcl /System/Library/Tcl ~/Library/Frameworks /Library/Frameworks /System/Library/Frameworks"
+	TCL_PACKAGE_PATH="~/Library/Tcl /Library/Tcl ~/Library/Frameworks /Library/Frameworks"
     test -z "$TCL_MODULE_PATH"  && \
-	TCL_MODULE_PATH="~/Library/Tcl /Library/Tcl /System/Library/Tcl"
+	TCL_MODULE_PATH="~/Library/Tcl /Library/Tcl"
 elif test "$prefix/lib" != "$libdir"; then
-    TCL_PACKAGE_PATH="${libdir} ${prefix}/lib ${TCL_PACKAGE_PATH}"
+    test -z "$TCL_PACKAGE_PATH" && TCL_PACKAGE_PATH="${libdir} ${prefix}/lib ${TCL_PACKAGE_PATH}"
 else
-    TCL_PACKAGE_PATH="${prefix}/lib ${TCL_PACKAGE_PATH}"
+    test -z "$TCL_PACKAGE_PATH" && TCL_PACKAGE_PATH="${prefix}/lib ${TCL_PACKAGE_PATH}"
 fi
 
 #--------------------------------------------------------------------

@@ -287,8 +287,7 @@ static int		GetIntegerOperand(AssemblyEnv*, Tcl_Token**, int*);
 static int		GetNextOperand(AssemblyEnv*, Tcl_Token**, Tcl_Obj**);
 static void		LookForFreshCatches(BasicBlock*, BasicBlock**);
 static void		MoveCodeForJumps(AssemblyEnv*, int);
-static void		MoveExceptionRangesToBasicBlock(AssemblyEnv*, int,
-			    int);
+static void		MoveExceptionRangesToBasicBlock(AssemblyEnv*, int);
 static AssemblyEnv*	NewAssemblyEnv(CompileEnv*, int);
 static int		ProcessCatches(AssemblyEnv*);
 static int		ProcessCatchesInBasicBlock(AssemblyEnv*, BasicBlock*,
@@ -513,6 +512,7 @@ static const unsigned char NonThrowingByteCodes[] = {
     INST_PUSH1, INST_PUSH4, INST_POP, INST_DUP,			/* 1-4 */
     INST_JUMP1, INST_JUMP4,					/* 34-35 */
     INST_END_CATCH, INST_PUSH_RESULT, INST_PUSH_RETURN_CODE,	/* 70-72 */
+    INST_STR_EQ, INST_STR_NEQ, INST_STR_CMP, INST_STR_LEN,	/* 73-76 */
     INST_LIST,							/* 79 */
     INST_OVER,							/* 95 */
     INST_PUSH_RETURN_OPTIONS,					/* 108 */
@@ -783,6 +783,7 @@ TclNRAssembleObjCmd(
     Tcl_Obj* backtrace;		/* Object where extra error information is
 				 * constructed. */
 
+    (void)dummy;
     if (objc != 2) {
 	Tcl_WrongNumArgs(interp, 1, objv, "bytecodeList");
 	return TCL_ERROR;
@@ -958,7 +959,7 @@ TclCompileAssembleCmd(
     int numCommands = envPtr->numCommands;
     int offset = envPtr->codeNext - envPtr->codeStart;
     int depth = envPtr->currStackDepth;
-
+    (void)cmdPtr;
     /*
      * Make sure that the command has a single arg that is a simple word.
      */
@@ -1807,7 +1808,6 @@ CompileEmbeddedScript(
 
     int savedStackDepth = envPtr->currStackDepth;
     int savedMaxStackDepth = envPtr->maxStackDepth;
-    int savedCodeIndex = envPtr->codeNext - envPtr->codeStart;
     int savedExceptArrayNext = envPtr->exceptArrayNext;
 
     envPtr->currStackDepth = 0;
@@ -1840,8 +1840,7 @@ CompileEmbeddedScript(
      * need to be fixed up once the stack depth is known.
      */
 
-    MoveExceptionRangesToBasicBlock(assemEnvPtr, savedCodeIndex,
-	    savedExceptArrayNext);
+    MoveExceptionRangesToBasicBlock(assemEnvPtr, savedExceptArrayNext);
 
     /*
      * Flush the current basic block.
@@ -1900,7 +1899,6 @@ SyncStackDepth(
 static void
 MoveExceptionRangesToBasicBlock(
     AssemblyEnv* assemEnvPtr,	/* Assembly environment */
-    int savedCodeIndex,		/* Start of the embedded code */
     int savedExceptArrayNext)	/* Saved index of the end of the exception
 				 * range array */
 {
@@ -2255,7 +2253,7 @@ GetListIndexOperand(
     if (GetNextOperand(assemEnvPtr, tokenPtrPtr, &value) != TCL_OK) {
 	return TCL_ERROR;
     }
-     
+
     /* Convert to an integer, advance to the next token and return. */
     /*
      * NOTE: Indexing a list with an index before it yields the
@@ -4309,6 +4307,8 @@ DupAssembleCodeInternalRep(
     Tcl_Obj *srcPtr,
     Tcl_Obj *copyPtr)
 {
+    (void)srcPtr;
+    (void)copyPtr;
     return;
 }
 

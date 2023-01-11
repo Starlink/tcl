@@ -503,7 +503,7 @@ TclCheckEmptyString (
 	Tcl_DictObjSize(NULL, objPtr, &length);
 	return length == 0;
     }
-    
+
     if (objPtr->bytes == NULL) {
 	return TCL_EMPTYSTRING_UNKNOWN;
     }
@@ -2002,9 +2002,9 @@ Tcl_AppendFormatToObj(
 	    }
 	    length = Tcl_UniCharToUtf(code, buf);
 #if TCL_UTF_MAX > 3
-	    if (!length) {
-		/* Special case for handling upper surrogates. */
-		length = Tcl_UniCharToUtf(-1, buf);
+	    if ((code >= 0xD800) && (length < 3)) {
+		/* Special case for handling high surrogates. */
+		length += Tcl_UniCharToUtf(-1, buf + length);
 	    }
 #endif
 	    segment = Tcl_NewStringObj(buf, length);
@@ -2019,6 +2019,7 @@ Tcl_AppendFormatToObj(
 		errCode = "BADUNSIGNED";
 		goto errorMsg;
 	    }
+	    /* FALLTHRU */
 	case 'd':
 	case 'o':
 	case 'x':
@@ -2044,7 +2045,7 @@ Tcl_AppendFormatToObj(
 		    if (Tcl_GetBignumFromObj(interp,segment,&big) != TCL_OK) {
 			goto error;
 		    }
-		    mp_mod_2d(&big, (int) CHAR_BIT*sizeof(Tcl_WideInt), &big);
+		    mp_mod_2d(&big, CHAR_BIT*sizeof(Tcl_WideInt), &big);
 		    objPtr = Tcl_NewBignumObj(&big);
 		    Tcl_IncrRefCount(objPtr);
 		    Tcl_GetWideIntFromObj(NULL, objPtr, &w);
@@ -2059,7 +2060,7 @@ Tcl_AppendFormatToObj(
 		    if (Tcl_GetBignumFromObj(interp,segment,&big) != TCL_OK) {
 			goto error;
 		    }
-		    mp_mod_2d(&big, (int) CHAR_BIT * sizeof(long), &big);
+		    mp_mod_2d(&big, CHAR_BIT * sizeof(long), &big);
 		    objPtr = Tcl_NewBignumObj(&big);
 		    Tcl_IncrRefCount(objPtr);
 		    TclGetLongFromObj(NULL, objPtr, &l);
@@ -2218,11 +2219,11 @@ Tcl_AppendFormatToObj(
 		    }
 #endif
 		} else if (useBig && big.used) {
-		    int leftover = (big.used * DIGIT_BIT) % numBits;
-		    mp_digit mask = (~(mp_digit)0) << (DIGIT_BIT-leftover);
+		    int leftover = (big.used * MP_DIGIT_BIT) % numBits;
+		    mp_digit mask = (~(mp_digit)0) << (MP_DIGIT_BIT-leftover);
 
 		    numDigits = 1 +
-			    (((Tcl_WideInt) big.used * DIGIT_BIT) / numBits);
+			    (((Tcl_WideInt) big.used * MP_DIGIT_BIT) / numBits);
 		    while ((mask & big.dp[big.used-1]) == 0) {
 			numDigits--;
 			mask >>= numBits;
@@ -2258,9 +2259,9 @@ Tcl_AppendFormatToObj(
 
 		    if (useBig && big.used) {
 			if (index < big.used && (size_t) shift <
-				CHAR_BIT*sizeof(Tcl_WideUInt) - DIGIT_BIT) {
+				CHAR_BIT*sizeof(Tcl_WideUInt) - MP_DIGIT_BIT) {
 			    bits |= ((Tcl_WideUInt) big.dp[index++]) << shift;
-			    shift += DIGIT_BIT;
+			    shift += MP_DIGIT_BIT;
 			}
 			shift -= numBits;
 		    }
@@ -2616,6 +2617,7 @@ AppendPrintfToObjVA(
 		break;
 	    case 'h':
 		size = -1;
+		/* FALLTHRU */
 	    default:
 		p++;
 	    }
@@ -3176,7 +3178,7 @@ ExtendStringRepWithUnicode(
   copyBytes:
     dst = objPtr->bytes + origLength;
     for (i = 0; i < numChars; i++) {
-	dst += Tcl_UniCharToUtf((int) unicode[i], dst);
+	dst += Tcl_UniCharToUtf(unicode[i], dst);
     }
     *dst = '\0';
     objPtr->length = dst - objPtr->bytes;

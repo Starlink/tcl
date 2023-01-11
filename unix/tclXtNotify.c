@@ -10,6 +10,9 @@
  * this file, and for a DISCLAIMER OF ALL WARRANTIES.
  */
 
+#ifndef USE_TCL_STUBS
+#   define USE_TCL_STUBS
+#endif
 #include <X11/Intrinsic.h>
 #include "tclInt.h"
 
@@ -81,8 +84,8 @@ static void		TimerProc(XtPointer clientData, XtIntervalId *id);
 static void		CreateFileHandler(int fd, int mask,
 			    Tcl_FileProc *proc, ClientData clientData);
 static void		DeleteFileHandler(int fd);
-static void		SetTimer(Tcl_Time * timePtr);
-static int		WaitForEvent(Tcl_Time * timePtr);
+static void		SetTimer(const Tcl_Time * timePtr);
+static int		WaitForEvent(const Tcl_Time * timePtr);
 
 /*
  * Functions defined in this file for use by users of the Xt Notifier:
@@ -190,14 +193,11 @@ InitNotifier(void)
 	return;
     }
 
+    memset(&np, 0, sizeof(np));
     np.createFileHandlerProc = CreateFileHandler;
     np.deleteFileHandlerProc = DeleteFileHandler;
     np.setTimerProc = SetTimer;
     np.waitForEventProc = WaitForEvent;
-    np.initNotifierProc = Tcl_InitNotifier;
-    np.finalizeNotifierProc = Tcl_FinalizeNotifier;
-    np.alertNotifierProc = Tcl_AlertNotifier;
-    np.serviceModeHookProc = Tcl_ServiceModeHook;
     Tcl_SetNotifier(&np);
 
     /*
@@ -206,7 +206,6 @@ InitNotifier(void)
      */
 
     initialized = 1;
-    memset(&np, 0, sizeof(np));
     Tcl_CreateExitHandler(NotifierExitHandler, NULL);
 }
 
@@ -263,7 +262,7 @@ NotifierExitHandler(
 
 static void
 SetTimer(
-    Tcl_Time *timePtr)		/* Timeout value, may be NULL. */
+    const Tcl_Time *timePtr)		/* Timeout value, may be NULL. */
 {
     long timeout;
 
@@ -356,7 +355,7 @@ CreateFileHandler(
 	}
     }
     if (filePtr == NULL) {
-	filePtr = (FileHandler*) ckalloc(sizeof(FileHandler));
+	filePtr = ckalloc(sizeof(FileHandler));
 	filePtr->fd = fd;
 	filePtr->read = 0;
 	filePtr->write = 0;
@@ -467,7 +466,7 @@ DeleteFileHandler(
     if (filePtr->mask & TCL_EXCEPTION) {
 	XtRemoveInput(filePtr->except);
     }
-    ckfree((char *) filePtr);
+    ckfree(filePtr);
 }
 
 /*
@@ -522,7 +521,7 @@ FileProc(
      */
 
     filePtr->readyMask |= mask;
-    fileEvPtr = (FileHandlerEvent *) ckalloc(sizeof(FileHandlerEvent));
+    fileEvPtr = ckalloc(sizeof(FileHandlerEvent));
     fileEvPtr->header.proc = FileHandlerEventProc;
     fileEvPtr->fd = filePtr->fd;
     Tcl_QueueEvent((Tcl_Event *) fileEvPtr, TCL_QUEUE_TAIL);
@@ -598,7 +597,7 @@ FileHandlerEventProc(
 	mask = filePtr->readyMask & filePtr->mask;
 	filePtr->readyMask = 0;
 	if (mask != 0) {
-	    (*filePtr->proc)(filePtr->clientData, mask);
+	    filePtr->proc(filePtr->clientData, mask);
 	}
 	break;
     }
@@ -627,7 +626,7 @@ FileHandlerEventProc(
 
 static int
 WaitForEvent(
-    Tcl_Time *timePtr)		/* Maximum block time, or NULL. */
+    const Tcl_Time *timePtr)		/* Maximum block time, or NULL. */
 {
     int timeout;
 

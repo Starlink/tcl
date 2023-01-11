@@ -4,12 +4,12 @@
 
 Name:          tcl
 Summary:       Tcl scripting language development environment
-Version:       8.5.16
+Version:       8.6.13
 Release:       2
 License:       BSD
 Group:         Development/Languages
 Source:        http://prdownloads.sourceforge.net/tcl/tcl%{version}-src.tar.gz
-URL:           http://www.tcl.tk/
+URL:           https://www.tcl-lang.org/
 Buildroot:     /var/tmp/%{name}%{version}
 
 %description
@@ -30,7 +30,7 @@ CFLAGS="%optflags" ./configure \
 	--prefix=%{directory} \
 	--exec-prefix=%{directory} \
 	--libdir=%{directory}/%{_lib}
-make 
+make
 
 %install
 cd unix
